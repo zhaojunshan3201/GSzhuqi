@@ -18,6 +18,7 @@ import {
   listWellTemperatureTests,
   replaceWellTemperatureTest,
 } from "./src/lib/wellTemperatureStore.ts";
+import { initMeasureWellSelectionTables } from "./src/lib/measureWellSelectionStore.ts";
 
 dotenv.config();
 
@@ -952,6 +953,7 @@ async function initLocalDb() {
   `);
 
   await initWellTemperatureTables(localDb);
+  await initMeasureWellSelectionTables(localDb);
 
   // Bootstrap default admin if no users exist
   const userCount = await localDb.get("SELECT COUNT(*) as count FROM users");
