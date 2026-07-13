@@ -1,0 +1,7 @@
+U+E0A3 -> GB18030: abe6
+U+E100 -> GB18030: ace5
+U+E11C -> GB18030: ada3
+U+E11E -> GB18030: ada5
+
+Chars not in lookup: 1
+  U+FEFF: 1 occurrences

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat -ano)",
+      "Bash(findstr :3000)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:3000/api/blocks)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(taskkill /PID 20016 /F)",
+      "Bash(LOCAL_ONLY=true npm run dev)",
+      "Bash(findstr :LISTENING)",
+      "Skill(planning-with-files:planning-with-files)",
+      "Skill(planning-with-files:planning-with-files:*)"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+Line 942:       ["admin", "123456", "系统管理', "admin"]
+
+Line 1725:   if (note.includes("捞油") || hasAnyRemarkKeyword(history, ["捞油", "_?])) {
+
+Line 1734:   if (note.includes("棢') || hasAnyRemarkKeyword(history, ["棢", "棢"])) {
+
+Line 1744:   if (note.includes("捞油") || hasAnyRemarkKeyword(history, ["捞油", "_?])) {
+
+Line 1745:     return "鎹炴补鍏?;
+
+Line 1837:   const text = String(value || "").trim().replace(/["“/g, "");
+
+Line 1876:   if (text.includes("鐒?)) return "焖井";
+
+Line 1878:   if (text.includes("正注") || text.includes("注汽") || text === "_?) return "姝ｆ敞";
+
+Line 1879:   if (text.includes("鐢熶骇") || text.includes("杞娊") || text.includes("鎶?)) return "生产";
+
+Line 1940:   seq_no: ["序号", "_?],
+
+Line 1941:   jh: ["浜曞彿", "浜曞悕", "浜?, "井号/井名", "井号（井名）"],
+
+Line 2068:   if (!utf8Text.includes("_?)) {
+
+Line 2187:       if (next.pre_measure_daily_oil == null && detailSection === "currentRound" && (normalizedHeader.includes("鎺墠浜ф补") || normalizedHeader.includes("鎺柦鍓嶄骇娌?) || normalizedHeader.includes("措施前日产油"))
+
+Line 2227:     const rawSeqNo = String(row["序号"] ?? row["_?] ?? "").trim();
+
+Line 2274:     throw new Error("Excel 涓湭鎵惧埌鍙鍏ョ殑宸ヤ綔琛?);
+
+Line 2514:         "上轮同期累产`: previousCumulativeOil ?? "",
+
+Line 2994:       res.status(500).json({ success: false, message: "同步状" " + err.message });
+
+Line 3243:       const statusCode = /Excel 中未找到可导入的工作表|未识别到可导入的数据|未接收到待预棢"Excel 鏂囦欢/.test(message) ? 400 : 500;
+

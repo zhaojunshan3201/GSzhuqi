@@ -1,0 +1,43 @@
+Line 1740: return "无备?;
+Line 1745: return "捞油?;
+Line 1748: return "转注?;
+Line 1751: return "注窜?;
+Line 1782: if (reason.includes("待检泵占产减?)) {
+Line 1783: return "待检?;
+Line 1786: return "转抽开（措施递减?;
+Line 1789: return "检泵开（措施递减?;
+Line 1837: const text = String(value || "").trim().replace(/["“”]/g, "");
+Line 1876: if (text.includes("?)) return "焖井";
+Line 1878: if (text.includes("正注") || text.includes("注汽") || text === "?) return "正注";
+Line 1879: if (text.includes("生产") || text.includes("转抽") || text.includes("?)) return "生产";
+Line 1896: .replace(/["“?‘’`]/g, "")
+Line 1936: const CURRENT_BASELINE_OIL_ALIASES = ["本轮措前产油", "本轮措施前产?, "本轮措前日产?, "本轮措施前日产油", "措施前日产油", "措施前产?, "措前产油"];
+Line 1940: seq_no: ["序号", "?],
+Line 1941: jh: ["井号", "井名", "?, "井号/井名", "井号（井名）"],
+Line 1942: block: ["区块", "断块", "区块/断块", "所属区?],
+Line 1943: station: ["计量?, "所属计量站", "站名", "站点", "所属站"],
+Line 1945: current_round_transfer_time: ["本轮转抽时间", "转抽时间", "转抽日期", "本轮转抽日期", "措施日期", "措施时间", "当前转抽时间", "当前轮转抽时?],
+Line 1946: current_round_measure_type: ["本轮措施类型", "措施类型", "本轮措施", "当前措施类型", "本次措施类型", "当前轮措施类?],
+Line 1949: pre_measure_daily_oil: ["本轮措前产油", "本轮措施前产?, "本轮措前日产?, "本轮措施前日产油", "措施前日产油", "措施前产?, "措前产油"],
+Line 1950: production_days: ["本轮生产天数", "生产天数", "本轮生产天数（自然日?, "生产天数（自然日?, "本轮生产天数(自然?", "生产天数(自然?", "生产日数", "自然日生产天?],
+Line 1953: current_diluent: ["目前掺油", "当前掺油", "日掺?, "掺油", "掺油?, "当前掺油?],
+Line 1954: current_water_cut: ["目前含水", "当前含水", "含水", "含水?, "目前含水?, "当前含水?],
+Line 2018: return value.trim().toLowerCase().replace(/\uFEFF/g, "").replace(/\s+/g, "").replace(/[?]/g, "").replace(/[?]/g, "").rep
+Line 2068: if (!utf8Text.includes("?)) {
+Line 2187: if (next.pre_measure_daily_oil == null && detailSection === "currentRound" && (normalizedHeader.includes("措前产油") || norm
+Line 2196: if (next.current_liquid == null && detailSection === "currentRound" && (normalizedHeader.includes("目前?) || normalizedHea
+Line 2199: if (next.current_oil == null && detailSection === "currentRound" && (normalizedHeader.includes("目前?) || normalizedHeader
+Line 2205: if (next.current_water_cut == null && detailSection === "currentRound" && (normalizedHeader.includes("目前含水") || normaliz
+Line 2208: if (next.cumulative_oil_gain == null && (normalizedHeader.includes("累增?) || normalizedHeader.includes("累计增油") || normali
+Line 2227: const rawSeqNo = String(row["序号"] ?? row["?] ?? "").trim();
+Line 2274: throw new Error("Excel 中未找到可导入的工作?);
+Line 2514: "上轮同期累产?: previousCumulativeOil ?? "",
+Line 2515: "上轮同期累增?: previousGain ?? "",
+Line 2517: "上轮同期天数（自然日?: productionDays || ""
+Line 2522: "本轮累产?: currentCumulativeOil ?? "",
+Line 2523: "本轮累增?: currentGain ?? "",
+Line 2528: "默认评价口径": "累产?,
+Line 2529: "累产油评?: evaluationByCumulativeOil || "",
+Line 2530: "累增油评?: evaluationByCumulativeOilGain || "",
+Line 2946: res.json({ success: true, user: { name: "系统管理?, role: "admin", username: "admin" } });
+Line 2952: res.status(500).json({ success: false, message: "数据库错? });

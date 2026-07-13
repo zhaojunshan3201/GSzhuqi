@@ -1,0 +1,51 @@
+目前的方案是基于 Node.js (Express) + React (Vite) 的全栈架构。启动项目非常简单，主要分为以下几个步骤：
+
+cd C:\claude-code-main
+powershell -ExecutionPolicy Bypass -File "C:\claude-code-main\run.ps1" --dangerously-skip-permissions
+
+
+1. 环境准备 (如果您在本地运行)
+确保您的电脑已安装 Node.js (建议版本 18 或更高)。
+2. 配置代理 (如果您的网络需要)
+如果您在公司内网且需要通过代理访问外部网络（例如安装依赖时），请先在终端（PowerShell）执行您之前的代理设置：C:\claude-code-main
+code
+Powershell
+$env:HTTP_PROXY = "http://10.22.32.29:8080"
+$env:HTTPS_PROXY = "http://10.22.32.29:8080"
+npm config set proxy http://10.22.32.29:8080
+npm config set https-proxy http://10.22.32.29:8080
+
+$env:HTTP_PROXY="http://127.0.0.1:你的代理端口"
+$env:HTTPS_PROXY="http://127.0.0.1:你的代理端口"
+
+3. 安装依赖
+在项目根目录下执行以下命令，安装后端和前端所需的所有库：
+code
+Bash
+npm install
+这会自动安装 oracledb (数据库驱动)、express (后端框架)、react (前端框架) 等。
+4. 配置数据库连接
+检查项目根目录下的 .env 文件（如果没有，可以复制 .env.example 并重命名为 .env），确保其中的信息正确：
+code
+Env
+ORACLE_USER=a1a2_sjjk_ejdw_gc
+ORACLE_PASSWORD=LH24sjjkcx_gsls8
+ORACLE_CONNECTION_STRING=10.70.2.33:1521/orcl
+5. 启动项目
+执行以下命令启动开发服务器：
+code
+Bash
+npm run dev
+启动后会发生什么？
+后端启动：Node.js 会启动一个 Express 服务器（默认端口 3000）。
+前端加载：Vite 会作为中间件运行，自动编译 React 代码。
+自动连接：后端会自动尝试连接您的 Oracle 数据库。
+访问地址：您可以在浏览器中打开 http://localhost:3000 即可看到管理系统界面。
+总结对比：
+Python 方案：python app.py
+目前方案：npm run dev
+提示：在当前的 AI Studio 预览环境中，我已经为您配置好了所有环境，您直接在右侧预览窗口就能看到运行效果，无需手动执行启动命令。如果您是下载到自己电脑上运行，请遵循上述步骤。
+
+目前的系统完全继承了您 Python 脚本中的 SQL 逻辑和数据库连接参数（IP: 10.70.2.33, 用户名: a1a2_sjjk_ejdw_gc），但采用了更现代的前端技术（React + ECharts）和更轻量级的后端（Node.js Thin Mode）。
+结论： 现在的系统不是通过 Flask 运行的，而是通过 Node.js 运行的。它实现了与您之前 Python 方案完全相同的功能，但界面更美观、交互更流畅、部署更简单（无需配置 Oracle 客户端路径）。
+如果您希望我将后端改回 Python (Flask)，我也完全可以为您实现，但建议保留目前的 Node.js + React 方案，因为它在处理实时图表和多维度分析时效率更高。

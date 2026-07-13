@@ -1,0 +1,5 @@
+{
+  "name": "高采三区生产动态分析系统",
+  "description": "基于 Oracle/SQLite 的油田生产数据分析系统，支持区块及单井产量曲线分析、多维度生产诊断、A/B 时段对比分析及 Excel 导出。",
+  "requestFramePermissions": []
+}

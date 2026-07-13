@@ -1,0 +1,238 @@
+Line 33:   "高246块": ["246块L6", "246块L5"],
+Line 34:   "高3618块": ["3618块L4", "3618块L5", "3618块L6"],
+Line 35:   "高3624块": ["3624块(北)L5", "3624块(北)L6", "3624块(南)L5", "3624块(南)L6"],
+Line 36:   "高3块": ["3块L5", "3块L6", "3块L7", "高二三区高升油层系", "高372108"],
+Line 37:   "高21块": ["高21(北)", "高21(南)"]
+Line 142:     console.log(`[${new Date().toISOString()}] ${label} 鑰楁椂 ${Date.now() - start}ms`);
+Line 198:   AND a.jh IN (SELECT jh FROM daa01 WHERE km = '楂橀噰閲囨补浣滀笟涓夊尯')
+Line 284:   console.log(`[${new Date().toISOString()}] 已修复含水字段，影响 ${result?.changes ?? 0} 条记录`);
+Line 323:     throw new Error(result.error || "Oracle 姘旈噺淇澶辫触");
+Line 327:     console.log(`[${new Date().toISOString()}] 鏈壘鍒伴渶瑕佷慨澶嶇殑姘旈噺璁板綍`);
+Line 357:   console.log(`[${new Date().toISOString()}] 已修复气字段，影响 ${repairedCount} 条记录`);
+Line 508:           WHEN water_cut >= 95 THEN '鐗归珮鍚按浜?>=95%)'
+Line 509:           WHEN water_cut >= 80 THEN '楂樺惈姘翠簳(80-95%)'
+Line 510:           WHEN water_cut >= 50 THEN '涓惈姘翠簳(50-80%)'
+Line 511:           ELSE '浣庡惈姘翠簳(<50%)'
+Line 518:           WHEN water_cut >= 95 THEN '鐗归珮鍚按浜?>=95%)'
+Line 519:           WHEN water_cut >= 80 THEN '楂樺惈姘翠簳(80-95%)'
+Line 520:           WHEN water_cut >= 50 THEN '涓惈姘翠簳(50-80%)'
+Line 521:           ELSE '浣庡惈姘翠簳(<50%)'
+Line 540:     .filter((row: any) => row.name !== "浣庡惈姘翠簳(<50%)")
+Line 640:   const task = withTimingLog(`棣栭〉缂撳瓨棰勭儹(${reason})`, () => warmHomepageCache())
+Line 642:       console.error(`棣栭〉缂撳瓨棰勭儹澶辫触(${reason}):`, err.message);
+Line 663:     console.log(`[${new Date().toISOString()}] 首页缓存已刷新，数据日期: ${latestLocalDate || "无"}`);
+Line 684:   console.log(`[${new Date().toISOString()}] 浜曞垪琛ㄧ紦瀛樺凡鍒锋柊锛岃褰曟暟: ${wells.length}`);
+Line 717:     console.log(`[${new Date().toISOString()}] /api/wells 鍛戒腑SQLite缂撳瓨`);
+Line 726:   console.log(`[${new Date().toISOString()}] /api/wells 鍥炴簮閲嶅缓缂撳瓨`);
+Line 734:     console.log(`[${new Date().toISOString()}] /api/blocks 鍛戒腑SQLite缂撳瓨`);
+Line 738:   console.log(`[${new Date().toISOString()}] /api/blocks 鍥炴簮閲嶅缓缂撳瓨`);
+Line 746:     console.log(`[${new Date().toISOString()}] /api/stations 鍛戒腑SQLite缂撳瓨`);
+Line 750:   console.log(`[${new Date().toISOString()}] /api/stations 鍥炴簮閲嶅缓缂撳瓨`);
+Line 758:     console.log(`[${new Date().toISOString()}] /api/dashboard/bootstrap 鍛戒腑SQLite缂撳瓨`);
+Line 774:   console.log(`[${new Date().toISOString()}] /api/dashboard/bootstrap 返回轻量本地数据，并转后台预热`);
+Line 809:         await withTimingLog("启动后公式修复", async () => {
+Line 830:         await withTimingLog("启动后增量同步", () => performIncrementalSync());
+Line 942:       ["admin", "123456", "绯荤粺绠＄悊鍛?, "admin"]
+Line 1091:     console.log(`[${new Date().toISOString()}] /api/chart/block?blocks=${cacheLabel} 鍛戒腑鍐呭瓨缂撳瓨`);
+Line 1133:     console.log(`[${new Date().toISOString()}] /api/chart/block?blocks=${cacheLabel} 鍥炴簮姹囨€昏〃`);
+Line 1174:   console.log(`[${new Date().toISOString()}] /api/chart/block?blocks=${cacheLabel} 鍥炴簮鐢熶骇琛╜);
+Line 1183:     console.log(`[${new Date().toISOString()}] /api/chart/well?jh=${jh} 鍛戒腑鍐呭瓨缂撳瓨`);
+Line 1198:     console.log(`[${new Date().toISOString()}] /api/chart/well?jh=${jh} 鍥炴簮鏈湴鐢熶骇琛╜);
+Line 1218:     console.log(`[${new Date().toISOString()}] /api/chart/well?jh=${jh} 鍥炴簮Oracle`);
+Line 1225:     console.log(`[${new Date().toISOString()}] /api/chart/well?jh=${jh} 杩斿洖绌虹粨鏋渀);
+Line 1231:   throw new Error("鏁版嵁鑾峰彇澶辫触");
+Line 1238:     return { success: false, error: "鍚屾浠诲姟姝ｅ湪鎵ц锛岃绋嶅悗鍐嶈瘯", startTime, endTime: startTime, duration: 0, count: 0 };
+Line 1242:   console.log(`[${startTime.toISOString()}] >>> 澧為噺鍚屾寮€濮?..`);
+Line 1253:     console.log(`[${new Date().toISOString()}] 鏈湴鏈€鏂版棩鏈? ${latestLocalDateBeforeSync}銆傛鍦ㄤ粠 Oracle 鑾峰彇鏂版暟鎹?..`);
+Line 1271:       throw new Error(result.error || "Oracle 鏁版嵁鑾峰彇澶辫触");
+Line 1319:       console.log(`[${new Date().toISOString()}] 鍥捐〃鍐呭瓨缂撳瓨宸叉竻绌篳);
+Line 1338:     console.log(`[${endTime.toISOString()}] <<< 澧為噺鍚屾瀹屾垚銆俙);
+Line 1339:     console.log(`[缁熻淇℃伅] 鐘舵€? 鎴愬姛 | 鍚屾璁板綍鏁? ${syncedCount} | 鑰楁椂: ${duration}s`);
+Line 1347:     await setSyncMeta("last_error", err.message || "鏈煡閿欒");
+Line 1350:     console.error(`[${endTime.toISOString()}] !!! 澧為噺鍚屾澶辫触 !!!`);
+Line 1351:     console.error(`[閿欒淇℃伅] ${err.message}`);
+Line 1352:     console.error(`[缁熻淇℃伅] 鐘舵€? 澶辫触 | 鑰楁椂: ${duration}s`);
+Line 1465: const OPEN_WELL_TYPE_LABELS = ["掺油开", "注窜开", "转抽开", "检泵开", "转注开", "无备注开"] as const;
+Line 1466: const CLOSED_WELL_TYPE_LABELS = ["掺油关", "转注关", "注窜关", "待检泵关", "其他关井"] as const;
+Line 1467: const INCREMENT_TYPE_LABELS = ["转抽开", "注窜开", "检泵开", "含水下降"] as const;
+Line 1468: const DECREMENT_TYPE_LABELS = ["转注", "注窜", "待检泵", "转抽开（措施递减）", "检泵开（措施递减）", "含水上升", "老井递减"] as const;
+Line 1665:   const transferOpenDate = findFirstRemarkMatch(history?.entries || [], shiftDateDays(rangeB.start, -60), rangeB.end, ["杞娊寮€", "鎶藉紑"]);
+Line 1667:     return `${formatCompareShortDate(transferOpenDate)}杞娊寮€澧炰骇`;
+Line 1670:   const channelOpenDate = findFirstRemarkMatch(history?.entries || [], shiftDateDays(rangeB.start, -60), rangeB.end, ["娉ㄧ獪寮€"]);
+Line 1672:     return `${formatCompareShortDate(channelOpenDate)}娉ㄧ獪寮€澧炰骇`;
+Line 1675:   const pumpOpenDate = findFirstRemarkMatch(history?.entries || [], shiftDateDays(rangeB.start, -30), rangeB.end, ["检泵开", "检泵"]);
+Line 1677:     return `${formatCompareShortDate(pumpOpenDate)}妫€娉靛紑澧炰骇`;
+Line 1681:     return "鍚按涓嬮檷澧炰骇";
+Line 1690:     return `${formatCompareShortDate(transferInjectDate)}杞敞鍗犱骇鍑忎骇`;
+Line 1695:     return `${formatCompareShortDate(channelDate)}娉ㄧ獪鍗犱骇鍑忎骇`;
+Line 1698:   const waitPumpDate = findFirstRemarkMatch(history?.entries || [], shiftDateDays(rangeB.start, -30), rangeB.end, ["待检泵"]);
+Line 1700:     return `${formatCompareShortDate(waitPumpDate)}待检泵占产减产`;
+Line 1703:   const transferOpenDate = findFirstRemarkMatch(history?.entries || [], shiftDateDays(rangeB.start, -200), rangeB.end, ["杞娊寮€", "鎶藉紑"]);
+Line 1705:     return `${formatCompareShortDate(transferOpenDate)}杞娊寮€锛屾帾鏂介€掑噺鍑忎骇`;
+Line 1708:   const pumpOpenDate = findFirstRemarkMatch(history?.entries || [], shiftDateDays(rangeB.start, -100), rangeB.end, ["检泵开", "检泵"]);
+Line 1710:     return "妫€娉甸€掑噺鍑忎骇";
+Line 1714:     return "鍚按涓婂崌鍑忎骇";
+Line 1718:     return "鑰佷簳閫掑噺鍑忎骇";
+Line 1725:   if (note.includes("鎹炴补") || hasAnyRemarkKeyword(history, ["鎹炴补", "鎹?])) {
+Line 1726:     return "鎹炴补寮€";
+Line 1728:   if (note.includes("娉ㄧ獪寮€") || hasAnyRemarkKeyword(history, ["娉ㄧ獪寮€"])) {
+Line 1729:     return "娉ㄧ獪寮€";
+Line 1731:   if (note.includes("杞娊寮€") || note.includes("鎶藉紑") || hasAnyRemarkKeyword(history, ["杞娊寮€", "鎶藉紑"])) {
+Line 1732:     return "杞娊寮€";
+Line 1734:   if (note.includes("妫€娉?) || hasAnyRemarkKeyword(history, ["妫€娉靛紑", "妫€娉?])) {
+Line 1735:     return "妫€娉靛紑";
+Line 1737:   if (note.includes("杞敞") || hasAnyRemarkKeyword(history, ["杞敞"])) {
+Line 1738:     return "杞敞寮€";
+Line 1740:   return "鏃犲娉?;
+Line 1744:   if (note.includes("鎹炴补") || hasAnyRemarkKeyword(history, ["鎹炴补", "鎹?])) {
+Line 1745:     return "鎹炴补鍏?;
+Line 1747:   if (note.includes("杞敞") || hasAnyRemarkKeyword(history, ["杞敞"])) {
+Line 1748:     return "杞敞鍏?;
+Line 1750:   if (note.includes("娉ㄧ獪") || hasAnyRemarkKeyword(history, ["娉ㄧ獪"])) {
+Line 1751:     return "娉ㄧ獪鍏?;
+Line 1753:   if (note.includes("寰呮娉?) || hasAnyRemarkKeyword(history, ["寰呮娉?])) {
+Line 1754:     return "寰呮娉靛叧";
+Line 1756:   return "鍏朵粬鍏充簳";
+Line 1760:   if (reason.includes("杞娊寮€澧炰骇")) {
+Line 1761:     return "杞娊寮€";
+Line 1763:   if (reason.includes("娉ㄧ獪寮€澧炰骇")) {
+Line 1764:     return "娉ㄧ獪寮€";
+Line 1766:   if (reason.includes("妫€娉靛紑澧炰骇")) {
+Line 1767:     return "妫€娉靛紑";
+Line 1769:   if (reason.includes("鍚按涓嬮檷澧炰骇")) {
+Line 1770:     return "鍚按涓嬮檷";
+Line 1776:   if (reason.includes("杞敞鍗犱骇鍑忎骇")) {
+Line 1779:   if (reason.includes("娉ㄧ獪鍗犱骇鍑忎骇")) {
+Line 1782:   if (reason.includes("寰呮娉靛崰浜у噺浜?)) {
+Line 1783:     return "寰呮娉?;
+Line 1785:   if (reason.includes("杞娊寮€锛屾帾鏂介€掑噺鍑忎骇")) {
+Line 1786:     return "杞娊寮€锛堟帾鏂介€掑噺锛?;
+Line 1788:   if (reason.includes("妫€娉甸€掑噺鍑忎骇")) {
+Line 1789:     return "妫€娉靛紑锛堟帾鏂介€掑噺锛?;
+Line 1791:   if (reason.includes("鍚按涓婂崌鍑忎骇")) {
+Line 1792:     return "鍚按涓婂崌";
+Line 1794:   if (reason.includes("鑰佷簳閫掑噺鍑忎骇")) {
+Line 1795:     return "鑰佷簳閫掑噺";
+Line 1837:   const text = String(value || "").trim().replace(/["鈥溾€漖/g, "");
+Line 1842:   const normalized = text.replace(/[./骞碷/g, "-").replace(/[鏈圿/g, "-").replace(/[鏃/g, "").replace("T", " ").trim();
+Line 1875:   if (!text) return "鐢熶骇";
+Line 1876:   if (text.includes("鐒?)) return "鐒栦簳";
+Line 1877:   if (text.includes("杞敞")) return "杞敞";
+Line 1878:   if (text.includes("姝ｆ敞") || text.includes("娉ㄦ苯") || text === "娉?) return "姝ｆ敞";
+Line 1879:   if (text.includes("鐢熶骇") || text.includes("杞娊") || text.includes("鎶?)) return "鐢熶骇";
+Line 1896:     .replace(/["鈥溾€?鈥樷€檂]/g, "")
+Line 1936: const CURRENT_BASELINE_OIL_ALIASES = ["鏈疆鎺墠浜ф补", "鏈疆鎺柦鍓嶄骇娌?, "鏈疆鎺墠鏃ヤ骇娌?, "鏈疆鎺柦鍓嶆棩浜ф补", "鎺柦鍓嶆棩浜ф补", "鎺柦鍓嶄骇娌?, "鎺墠浜ф补"];
+Line 1937: const PREVIOUS_BASELINE_OIL_ALIASES = ["涓婅疆杞娊鎺墠浜ф补", "涓婅疆鎺墠浜ф补", "涓婅疆鎺柦鍓嶄骇娌?, "涓婅疆杞娊鎺柦鍓嶄骇娌?, "涓婅疆鎺柦鍓嶆棩浜ф补", "涓婅疆鎺墠鏃ヤ骇娌?, "鎺柦鍓嶆棩浜ф补", "鎺柦鍓嶄骇娌?, "鎺墠浜ф补"];
+Line 1938: const PREVIOUS_TRANSFER_TIME_ALIASES = ["涓婅疆杞娊鏃堕棿"];
+Line 1940:   seq_no: ["搴忓彿", "搴?],
+Line 1941:   jh: ["浜曞彿", "浜曞悕", "浜?, "浜曞彿/浜曞悕", "浜曞彿锛堜簳鍚嶏級"],
+Line 1942:   block: ["鍖哄潡", "鏂潡", "鍖哄潡/鏂潡", "鎵€灞炲尯鍧?],
+Line 1943:   station: ["璁￠噺绔?, "鎵€灞炶閲忕珯", "绔欏悕", "绔欑偣", "鎵€灞炵珯"],
+Line 1944:   current_status: ["鐩墠鐘舵€?, "褰撳墠鐘舵€?, "鐘舵€?, "鐢熶骇鐘舵€?, "浜曞喌"],
+Line 1945:   current_round_transfer_time: ["鏈疆杞娊鏃堕棿", "杞娊鏃堕棿", "杞娊鏃ユ湡", "鏈疆杞娊鏃ユ湡", "鎺柦鏃ユ湡", "鎺柦鏃堕棿", "褰撳墠杞娊鏃堕棿", "褰撳墠杞浆鎶芥椂闂?],
+Line 1946:   current_round_measure_type: ["鏈疆鎺柦绫诲瀷", "鎺柦绫诲瀷", "鏈疆鎺柦", "褰撳墠鎺柦绫诲瀷", "鏈鎺柦绫诲瀷", "褰撳墠杞帾鏂界被鍨?],
+Line 1947:   measure_name: ["鎺柦鍚嶇О", "鎺柦椤圭洰", "鎺柦鍐呭", "宸ヤ綔鍐呭"],
+Line 1948:   owner: ["璐ｄ换浜?, "璐熻矗浜?, "璐ｄ换鐝粍", "璐ｄ换鍗曚綅", "鐝粍"],
+Line 1949:   pre_measure_daily_oil: ["鏈疆鎺墠浜ф补", "鏈疆鎺柦鍓嶄骇娌?, "鏈疆鎺墠鏃ヤ骇娌?, "鏈疆鎺柦鍓嶆棩浜ф补", "鎺柦鍓嶆棩浜ф补", "鎺柦鍓嶄骇娌?, "鎺墠浜ф补"],
+Line 1950:   production_days: ["鏈疆鐢熶骇澶╂暟", "鐢熶骇澶╂暟", "鏈疆鐢熶骇澶╂暟锛堣嚜鐒舵棩锛?, "鐢熶骇澶╂暟锛堣嚜鐒舵棩锛?, "鏈疆鐢熶骇澶╂暟(鑷劧鏃?", "鐢熶骇澶╂暟(鑷劧鏃?", "鐢熶骇鏃ユ暟", "鑷劧鏃ョ敓浜уぉ鏁?],
+Line 1951:   current_liquid: ["鐩墠娑?, "褰撳墠娑?, "鏃ヤ骇娑?, "褰撳墠鏃ヤ骇娑?, "鐩墠娑查噺"],
+Line 1952:   current_oil: ["鐩墠娌?, "褰撳墠娌?, "鏃ヤ骇娌?, "褰撳墠鏃ヤ骇娌?, "鐩墠娌归噺"],
+Line 1953:   current_diluent: ["鐩墠鎺烘补", "褰撳墠鎺烘补", "鏃ユ幒娌?, "鎺烘补", "鎺烘补閲?, "褰撳墠鎺烘补閲?],
+Line 1954:   current_water_cut: ["鐩墠鍚按", "褰撳墠鍚按", "鍚按", "鍚按鐜?, "鐩墠鍚按鐜?, "褰撳墠鍚按鐜?],
+Line 1955:   cumulative_oil_gain: ["绱娌?, "绱澧炴补", "绱Н澧炴补", "绱澧炰骇娌?],
+Line 1956:   evaluation: ["鎺柦璇勪环", "璇勪环", "鏁堟灉璇勪环", "鎺柦鏁堟灉璇勪环"]
+Line 2018:   return value.trim().toLowerCase().replace(/\uFEFF/g, "").replace(/\s+/g, "").replace(/[锛?]/g, "").replace(/[锛?]/g, "").replace(/["鈥溾€?鈥樷€檂]/g, "").replace(/[:锛歖/g, "").replace(/[_-]/g, "");
+Line 2062:   if (normalizedHeader.includes("涓婅疆")) return "previousRound";
+Line 2181:       if (!next.current_round_measure_type && detailSection === "currentRound" && normalizedHeader.includes("鎺柦绫诲瀷")) {
+Line 2184:       if (!next.measure_name && detailSection === "currentRound" && (normalizedHeader.includes("鎺柦鍚嶇О") || normalizedHeader.includes("鎺柦鍐呭"))) {
+Line 2187:       if (next.pre_measure_daily_oil == null && detailSection === "currentRound" && (normalizedHeader.includes("鎺墠浜ф补") || normalizedHeader.includes("鎺柦鍓嶄骇娌?) || normalizedHeader.includes("鎺柦鍓嶆棩浜ф补"))) {
+Line 2190:       if (next.production_days == null && detailSection === "currentRound" && normalizedHeader.includes("鐢熶骇澶╂暟")) {
+Line 2193:       if (!next.current_round_transfer_time && detailSection === "currentRound" && normalizedHeader.includes("杞娊") && (normalizedHeader.includes("鏃堕棿") || normalizedHeader.includes("鏃ユ湡"))) {
+Line 2196:       if (next.current_liquid == null && detailSection === "currentRound" && (normalizedHeader.includes("鐩墠娑?) || normalizedHeader.includes("褰撳墠娑?) || normalizedHeader.includes("鏃ヤ骇娑?))) {
+Line 2199:       if (next.current_oil == null && detailSection === "currentRound" && (normalizedHeader.includes("鐩墠娌?) || normalizedHeader.includes("褰撳墠娌?) || normalizedHeader.includes("鏃ヤ骇娌?))) {
+Line 2202:       if (next.current_diluent == null && detailSection === "currentRound" && (normalizedHeader.includes("鐩墠鎺烘补") || normalizedHeader.includes("褰撳墠鎺烘补") || normalizedHeader.includes("鎺烘补"))) {
+Line 2205:       if (next.current_water_cut == null && detailSection === "currentRound" && (normalizedHeader.includes("鐩墠鍚按") || normalizedHeader.includes("褰撳墠鍚按") || normalizedHeader.includes("鍚按鐜?))) {
+Line 2208:       if (next.cumulative_oil_gain == null && (normalizedHeader.includes("绱娌?) || normalizedHeader.includes("绱澧炴补") || normalizedHeader.includes("绱Н澧炴补"))) {
+Line 2211:       if (!next.evaluation && (normalizedHeader.includes("鎺柦璇勪环") || normalizedHeader === "璇勪环" || normalizedHeader.includes("鏁堟灉璇勪环"))) {
+Line 2227:     const rawSeqNo = String(row["搴忓彿"] ?? row["搴?] ?? "").trim();
+Line 2234:     next.current_status = "鐢熶骇";
+Line 2274:     throw new Error("Excel 涓湭鎵惧埌鍙鍏ョ殑宸ヤ綔琛?);
+Line 2280:     throw new Error("鏈瘑鍒埌鍙鍏ョ殑鏁版嵁锛岃妫€鏌ヨ〃澶存垨鍐呭");
+Line 2299:         res.status(400).json({ success: false, message: `涓婁紶鏂囦欢杩囧ぇ锛岃鎺у埗鍦?${Math.floor(MEASURE_IMPORT_FILE_LIMIT_BYTES / (1024 * 1024))}MB 浠ュ唴` });
+Line 2302:       res.status(400).json({ success: false, message: "瀵煎叆鏂囦欢璇诲彇澶辫触: " + err.message });
+Line 2513:         ...(!hasPreviousBaselineInDetail && previousBaselineOil !== null ? { "涓婅疆杞娊鎺墠浜ф补": previousBaselineOil } : {}),
+Line 2514:         "涓婅疆鍚屾湡绱骇娌?: previousCumulativeOil ?? "",
+Line 2515:         "涓婅疆鍚屾湡绱娌?: previousGain ?? "",
+Line 2516:         "涓婅疆鍚屾湡鐢熶骇澶╂暟": productionDays || "",
+Line 2517:         "涓婅疆鍚屾湡澶╂暟锛堣嚜鐒舵棩锛?: productionDays || ""
+Line 2521:         ...(!hasCurrentBaselineInDetail && baselineOil !== null ? { "鏈疆鎺墠浜ф补": baselineOil } : {}),
+Line 2522:         "鏈疆绱骇娌?: currentCumulativeOil ?? "",
+Line 2523:         "鏈疆绱娌?: currentGain ?? "",
+Line 2524:         "鏈疆鐢熶骇澶╂暟": productionDays || ""
+Line 2528:         "榛樿璇勪环鍙ｅ緞": "绱骇娌?,
+Line 2529:         "绱骇娌硅瘎浠?: evaluationByCumulativeOil || "",
+Line 2530:         "绱娌硅瘎浠?: evaluationByCumulativeOilGain || "",
+Line 2531:         "璇勪环鎴鏃ユ湡": evaluationEndDate || ""
+Line 2558:       "鏈疆鎺墠浜ф补": preMeasureDailyOil
+Line 2564:       "涓婅疆杞娊鎺墠浜ф补": previousBaselineOil
+Line 2713:     throw new Error("鏈瘑鍒埌鍙鍏ョ殑鏈夋晥鎺柦鏁版嵁");
+Line 2946:           res.json({ success: true, user: { name: "绯荤粺绠＄悊鍛?, role: "admin", username: "admin" } });
+Line 2948:           res.status(401).json({ success: false, message: "鐢ㄦ埛鍚嶆垨瀵嗙爜閿欒" });
+Line 2952:       res.status(500).json({ success: false, message: "鏁版嵁搴撻敊璇? });
+Line 2963:       res.json({ success: true, message: "娉ㄥ唽鎴愬姛" });
+Line 2966:         res.status(400).json({ success: false, message: "鐢ㄦ埛鍚嶅凡瀛樺湪" });
+Line 2968:         res.status(500).json({ success: false, message: "娉ㄥ唽澶辫触: " + err.message });
+Line 2979:         message: syncResult.count > 0 ? `增量同步成功，同步更新 ${syncResult.count} 条记录` : "本地数据已经是最新，无需更新",
+Line 2984:       const statusCode = syncResult.error === "鍚屾浠诲姟姝ｅ湪鎵ц锛岃绋嶅悗鍐嶈瘯" ? 409 : 500;
+Line 2985:       res.status(statusCode).json({ success: false, message: "鍚屾澶辫触: " + syncResult.error });
+Line 2994:       res.status(500).json({ success: false, message: "鍚屾鐘舵€佽幏鍙栧け璐? " + err.message });
+Line 3003:       res.status(500).json({ success: false, message: "棣栭〉鏁版嵁鑾峰彇澶辫触: " + err.message });
+Line 3012:       res.status(500).json({ success: false, message: "鎺柦璺熻釜鏁版嵁鑾峰彇澶辫触: " + err.message });
+Line 3020:         res.status(400).json({ success: false, message: "璇峰～鍐欐湁鏁堢殑鏈疆杞娊鏃堕棿锛屽苟鑷冲皯鎻愪緵浜曞彿" });
+Line 3094:       res.status(500).json({ success: false, message: "鎺柦鏂板澶辫触: " + err.message });
+Line 3102:         res.status(400).json({ success: false, message: "鎺柦璁板綍缂栧彿鏃犳晥" });
+Line 3108:         res.status(404).json({ success: false, message: "措施记录不存在" });
+Line 3123:         res.status(400).json({ success: false, message: "璇峰～鍐欐湁鏁堢殑鏈疆杞娊鏃堕棿锛屽苟鑷冲皯鎻愪緵浜曞彿" });
+Line 3198:       res.status(500).json({ success: false, message: "鎺柦淇敼澶辫触: " + err.message });
+Line 3206:         res.status(400).json({ success: false, message: "鎺柦璁板綍缂栧彿鏃犳晥" });
+Line 3212:         res.status(404).json({ success: false, message: "措施记录不存在" });
+Line 3216:       res.json({ success: true, message: "措施记录已删除" });
+Line 3218:       res.status(500).json({ success: false, message: "鎺柦鍒犻櫎澶辫触: " + err.message });
+Line 3226:         res.status(400).json({ success: false, message: "鏈帴鏀跺埌寰呴妫€鐨?Excel 鏂囦欢" });
+Line 3232:         message: `棰勬瀹屾垚锛屽彲瀵煎叆 ${parsedImport.validRows} 鏉,
+Line 3242:       const message = err?.message || "鏈煡閿欒";
+Line 3243:       const statusCode = /Excel 涓湭鎵惧埌鍙鍏ョ殑宸ヤ綔琛▅鏈瘑鍒埌鍙鍏ョ殑鏁版嵁|鏈帴鏀跺埌寰呴妫€鐨?Excel 鏂囦欢/.test(message) ? 400 : 500;
+Line 3244:       res.status(statusCode).json({ success: false, message: "鎺柦瀵煎叆棰勬澶辫触: " + message });
+Line 3254:         res.status(400).json({ success: false, message: "鏈帴鏀跺埌鍙鍏ョ殑 Excel 鏁版嵁" });
+Line 3260:         message: `覆盖导入成功，共 ${result.count} 条`,
+Line 3274:       const message = err?.message || "鏈煡閿欒";
+Line 3275:       const statusCode = /Excel 涓湭鎵惧埌鍙鍏ョ殑宸ヤ綔琛▅鏈瘑鍒埌鍙鍏ョ殑鏁版嵁|鏈帴鏀跺埌鍙鍏ョ殑 Excel 鏁版嵁/.test(message) ? 400 : 500;
+Line 3276:       res.status(statusCode).json({ success: false, message: "鎺柦瀵煎叆澶辫触: " + message });
+Line 3280:   // 瀵规瘮鍒嗘瀽鎺ュ彛 (SQLite 浼樺寲鐗?
+Line 3286:         res.status(400).json({ success: false, message: "请选择完整的对比时间范围" });
+Line 3293:         res.status(400).json({ success: false, message: "瀵规瘮鏃堕棿鑼冨洿鏃犳晥" });
+Line 3324:               note = "宸插叧鐨勪簳";
+Line 3326:               note = "鏂板紑鐨勪簳";
+Line 3330:             if (hasAnyRemarkKeyword(history, ["掺油", "掺"])) {
+Line 3339:             const openWellType = note.includes("鏂板紑鐨勪簳") ? classifyOpenWell(history, finalNote) : null;
+Line 3340:             const closedWellType = note.includes("宸插叧鐨勪簳") ? classifyClosedWell(history, finalNote) : null;
+Line 3371:       res.status(500).json({ success: false, message: "瀵规瘮鍒嗘瀽澶辫触: " + err.message });
+Line 3377:   // 鑾峰彇鍏ㄥ尯浜ч噺璧板娍
+Line 3383:       res.status(500).json({ success: false, message: "鏁版嵁鑾峰彇澶辫触: " + err.message });
+Line 3387:   // 鑾峰彇浜曞彿鍒楄〃鍙婂睘鎬?  app.get("/api/wells", async (req, res) => {
+Line 3392:       res.status(500).json({ success: false, message: "鏁版嵁鑾峰彇澶辫触: " + err.message });
+Line 3396:   // 鑾峰彇鍖哄潡鍒楄〃
+Line 3402:       res.status(500).json({ success: false, message: "鏁版嵁鑾峰彇澶辫触: " + err.message });
+Line 3406:   // 鑾峰彇璁￠噺绔欏垪琛?  app.get("/api/stations", async (req, res) => {
+Line 3411:       res.status(500).json({ success: false, message: "鏁版嵁鑾峰彇澶辫触: " + err.message });
+Line 3415:   // 鑾峰彇鍖哄潡鐢熶骇鏇茬嚎鏁版嵁
+Line 3429:       res.status(400).json({ success: false, message: "璇烽€夋嫨鍖哄潡" });
+Line 3438:       res.status(500).json({ success: false, message: "鏁版嵁鑾峰彇澶辫触: " + err.message });
+Line 3442:   // 鑾峰彇鍗曚簳鐢熶骇鏇茬嚎鏁版嵁 (浣跨敤 SQLite 鏀寔鍘嗗彶鏌ヨ)
+Line 3449:       res.status(400).json({ success: false, message: "璇烽€夋嫨浜曞彿" });
+Line 3461:       res.status(500).json({ success: false, message: "鏁版嵁鑾峰彇澶辫触" });
+Line 3465:   // 璇婃柇鍒嗘瀽鎺ュ彛锛氭彁渚涘缁村害璇婃柇鏁版嵁
+Line 3472:       res.status(500).json({ success: false, message: "鏁版嵁鑾峰彇澶辫触" });
+Line 3494:       console.error("鍚姩棰勭儹澶辫触:", err.message);
+Line 3498:         console.error("鍚姩鍏紡淇澶辫触:", err.message);
+Line 3503:         console.error("鍚姩鍚屾澶辫触:", err.message);
