@@ -56,3 +56,18 @@ test('does not fill missing curve oil values with zero', () => {
   );
 });
 
+
+test('evaluates wells with the same name in different blocks independently', () => {
+  const result = evaluateWells([
+    { ...cycles[0], wellName: 'Shared', block: 'Block A' },
+    { ...cycles[1], wellName: 'Shared', block: 'Block A' },
+    { ...cycles[2], wellName: 'Shared', block: 'Block A' },
+    { ...cycles[3], wellName: 'Shared', block: 'Block B' },
+  ]);
+
+  assert.deepEqual(
+    result.map((well) => [well.block, well.wellName]),
+    [['Block A', 'Shared'], ['Block B', 'Shared']],
+  );
+  assert.equal(result.find((well) => well.block === 'Block A')?.grade, 'recommended');
+});

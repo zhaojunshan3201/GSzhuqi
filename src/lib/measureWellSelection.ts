@@ -94,9 +94,10 @@ export function evaluateWells(cycles: readonly SelectionCycle[]): EvaluatedWell[
 function groupByWell(cycles: readonly SelectionCycle[]): Map<string, SelectionCycle[]> {
   const grouped = new Map<string, SelectionCycle[]>();
   for (const cycle of cycles) {
-    const wellCycles = grouped.get(cycle.wellName) ?? [];
+    const key = `${cycle.block}\u0000${cycle.wellName}`;
+    const wellCycles = grouped.get(key) ?? [];
     wellCycles.push(cycle);
-    grouped.set(cycle.wellName, wellCycles);
+    grouped.set(key, wellCycles);
   }
   return grouped;
 }
@@ -208,3 +209,4 @@ function parseDay(value: string): number | undefined {
   const day = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
   return Number.isNaN(day) ? undefined : day;
 }
+
