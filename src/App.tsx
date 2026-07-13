@@ -25,10 +25,12 @@ import {
   ShieldCheck,
   FileText,
   Bell,
-  LogIn
+  LogIn,
+  Thermometer
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import * as XLSX from 'xlsx';
+import { getWellTemperatureChartOption } from './wellTemperatureChart';
 
 // --- Types ---
 interface Well {
@@ -62,6 +64,22 @@ interface UserInfo {
   name: string;
   role: string;
   username?: string;
+}
+
+interface WellTemperatureTestSummary {
+  id: number;
+  wellNo: string;
+  testDate: string;
+  perforationTopDepth: number | null;
+  perforationBottomDepth: number | null;
+  pointCount: number;
+  sourceFile: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface WellTemperatureTestDetail extends WellTemperatureTestSummary {
+  points: Array<{ depth: number; temperature: number | null; pressure: number | null }>;
 }
 
 interface SyncStatus {
@@ -2104,7 +2122,7 @@ const DashboardChartSkeleton = ({ title }: { title: string }) => (
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'block' | 'well' | 'analysis' | 'comparison' | 'measures' | 'measureAnalysis' | 'occupancyAnalysis' | 'pumpAnalysis' | 'pumpDeepAnalysis' | 'waterLab' | 'productionForecast'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'block' | 'well' | 'analysis' | 'comparison' | 'measures' | 'measureAnalysis' | 'wellTemperature' | 'occupancyAnalysis' | 'pumpAnalysis' | 'pumpDeepAnalysis' | 'waterLab' | 'productionForecast'>('dashboard');
   const [dailyCompare, setDailyCompare] = useState<any>(null);
 
   // Data States
@@ -2167,6 +2185,14 @@ export default function App() {
   const wellsLoadingRef = React.useRef(false);
   const blockDefaultAutoLoadedRef = React.useRef(false);
   const measureImportInputRef = React.useRef<HTMLInputElement | null>(null);
+  const wellTemperatureImportInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [wellTemperatureTests, setWellTemperatureTests] = useState<WellTemperatureTestSummary[]>([]);
+  const [selectedWellTemperatureId, setSelectedWellTemperatureId] = useState<number | null>(null);
+  const [selectedWellTemperatureTest, setSelectedWellTemperatureTest] = useState<WellTemperatureTestDetail | null>(null);
+  const [wellTemperatureLoading, setWellTemperatureLoading] = useState(false);
+  const [wellTemperatureImporting, setWellTemperatureImporting] = useState(false);
+  const [wellTemperatureError, setWellTemperatureError] = useState('');
+  const [wellTemperatureWellFilter, setWellTemperatureWellFilter] = useState('');
 
   const [measures, setMeasures] = useState<MeasureRow[]>([]);
   const [measureFilterMeta, setMeasureFilterMeta] = useState<MeasureFiltersMeta>({ blocks: [], stations: [], statuses: [] });
@@ -2426,6 +2452,73 @@ export default function App() {
     }
 
     return result;
+  };
+
+  const loadWellTemperatureTests = async (wellNo = wellTemperatureWellFilter) => {
+    setWellTemperatureLoading(true);
+    setWellTemperatureError('');
+    try {
+      const query = wellNo.trim() ? `?wellNo=${encodeURIComponent(wellNo.trim())}` : '';
+      const result = await fetchJson(`/api/well-temperature-tests${query}`);
+      if (!result.success) throw new Error(result.message || '井温记录加载失败');
+      setWellTemperatureTests(result.data);
+    } catch (error: any) {
+      setWellTemperatureError(error?.message || '井温记录加载失败');
+    } finally {
+      setWellTemperatureLoading(false);
+    }
+  };
+
+  const loadWellTemperatureTestDetail = async (id: number) => {
+    setSelectedWellTemperatureId(id);
+    setWellTemperatureLoading(true);
+    setWellTemperatureError('');
+    try {
+      const result = await fetchJson(`/api/well-temperature-tests/${id}`);
+      if (!result.success) throw new Error(result.message || '井温详情加载失败');
+      setSelectedWellTemperatureTest(result.data);
+    } catch (error: any) {
+      setSelectedWellTemperatureTest(null);
+      setWellTemperatureError(error?.message || '井温详情加载失败');
+    } finally {
+      setWellTemperatureLoading(false);
+    }
+  };
+
+  const importWellTemperatureTest = async (file: File) => {
+    setWellTemperatureImporting(true);
+    setWellTemperatureError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const result = await fetchJson('/api/well-temperature-tests/import', { method: 'POST', body: formData });
+      if (!result.success) throw new Error(result.message || '井温文件导入失败');
+      await loadWellTemperatureTests();
+      await loadWellTemperatureTestDetail(result.data.id);
+    } catch (error: any) {
+      setWellTemperatureError(error?.message || '井温文件导入失败');
+    } finally {
+      setWellTemperatureImporting(false);
+      if (wellTemperatureImportInputRef.current) wellTemperatureImportInputRef.current.value = '';
+    }
+  };
+
+  const deleteWellTemperatureTest = async (id: number) => {
+    setWellTemperatureLoading(true);
+    setWellTemperatureError('');
+    try {
+      const result = await fetchJson(`/api/well-temperature-tests/${id}`, { method: 'DELETE' });
+      if (!result.success) throw new Error(result.message || '井温记录删除失败');
+      if (selectedWellTemperatureId === id) {
+        setSelectedWellTemperatureId(null);
+        setSelectedWellTemperatureTest(null);
+      }
+      await loadWellTemperatureTests();
+    } catch (error: any) {
+      setWellTemperatureError(error?.message || '井温记录删除失败');
+    } finally {
+      setWellTemperatureLoading(false);
+    }
   };
 
   const loadSyncStatus = async (silent = false) => {
@@ -4332,6 +4425,12 @@ export default function App() {
   }, [activeTab, isLoggedIn]);
 
   useEffect(() => {
+    if (activeTab === 'wellTemperature') {
+      void loadWellTemperatureTests();
+    }
+  }, [activeTab, isLoggedIn]);
+
+  useEffect(() => {
     if (activeTab !== 'dashboard' || !dashboardExpanded.composition) return;
     if (measures.length === 0 && !measuresLoading) {
       void loadMeasures(true);
@@ -5766,6 +5865,12 @@ export default function App() {
         onClick={() => setActiveTab('measureAnalysis')}
         />
         <SidebarItem
+        icon={Thermometer}
+        label="井温监控"
+        active={activeTab === 'wellTemperature'}
+        onClick={() => setActiveTab('wellTemperature')}
+        />
+        <SidebarItem
         icon={FileSpreadsheet}
         label="占产分析"
         active={activeTab === 'occupancyAnalysis'}
@@ -5836,6 +5941,7 @@ export default function App() {
           {activeTab === 'comparison' && '对比分析'}
           {activeTab === 'measures' && '措施跟踪'}
           {activeTab === 'measureAnalysis' && '措施分析'}
+          {activeTab === 'wellTemperature' && '井温监控'}
           {activeTab === 'occupancyAnalysis' && '占产分析'}
           {activeTab === 'pumpAnalysis' && '检泵跟踪'}
           {activeTab === 'pumpDeepAnalysis' && '检泵分析'}
@@ -6743,6 +6849,97 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {activeTab === 'wellTemperature' && (
+                <div className="page-stack">
+                  <div className="app-card flex flex-wrap items-center justify-between gap-4 p-6">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">井温监控</h3>
+                      <p className="mt-1 text-sm text-slate-500">上传井温测试 xlsx 文件，查看温度、压力随井深变化及射孔段。</p>
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        className={cn('action-button action-primary', wellTemperatureImporting && 'pointer-events-none opacity-60')}
+                        onClick={() => wellTemperatureImportInputRef.current?.click()}
+                      >
+                        <FileSpreadsheet className="h-4 w-4" />
+                        {wellTemperatureImporting ? '导入中...' : '上传 xlsx'}
+                      </button>
+                      <input
+                        ref={wellTemperatureImportInputRef}
+                        type="file"
+                        accept=".xlsx"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void importWellTemperatureTest(file);
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {wellTemperatureError && (
+                    <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{wellTemperatureError}</div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+                    <div className="app-card p-5">
+                      <div className="flex gap-2">
+                        <input
+                          value={wellTemperatureWellFilter}
+                          onChange={(event) => setWellTemperatureWellFilter(event.target.value)}
+                          onKeyDown={(event) => { if (event.key === 'Enter') void loadWellTemperatureTests(); }}
+                          placeholder="按井号筛选"
+                          className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-500"
+                        />
+                        <button type="button" className="action-button action-outline" onClick={() => void loadWellTemperatureTests()}>筛选</button>
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {wellTemperatureLoading && wellTemperatureTests.length === 0 ? (
+                          <div className="py-10 text-center text-sm text-slate-500">井温记录加载中...</div>
+                        ) : wellTemperatureTests.length === 0 ? (
+                          <div className="py-10 text-center text-sm text-slate-400">暂无井温记录</div>
+                        ) : wellTemperatureTests.map((item) => (
+                          <div key={item.id} className={cn('rounded-lg border p-3', selectedWellTemperatureId === item.id ? 'border-emerald-300 bg-emerald-50' : 'border-slate-100 hover:bg-slate-50')}>
+                            <div className="flex items-start justify-between gap-2">
+                              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => void loadWellTemperatureTestDetail(item.id)}>
+                                <div className="font-bold text-slate-900">{item.wellNo}</div>
+                                <div className="mt-1 text-xs text-slate-500">{item.testDate} · {item.pointCount} 点</div>
+                              </button>
+                              <button type="button" className="text-xs font-medium text-red-600 hover:text-red-700" onClick={() => void deleteWellTemperatureTest(item.id)}>删除</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-5">
+                      {wellTemperatureLoading && !selectedWellTemperatureTest ? (
+                        <div className="app-card flex h-[480px] items-center justify-center text-sm text-slate-500">井温详情加载中...</div>
+                      ) : !selectedWellTemperatureTest ? (
+                        <div className="app-card flex h-[480px] items-center justify-center text-sm text-slate-400">请选择一条井温记录查看曲线</div>
+                      ) : (
+                        <>
+                          <div className="app-card p-5">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <h3 className="text-lg font-bold text-slate-900">{selectedWellTemperatureTest.wellNo} 井温测试</h3>
+                                <p className="mt-1 text-sm text-slate-500">测试日期：{selectedWellTemperatureTest.testDate} · 数据点：{selectedWellTemperatureTest.pointCount}</p>
+                              </div>
+                              <div className="text-sm text-slate-600">射孔段：{selectedWellTemperatureTest.perforationTopDepth ?? '--'} m - {selectedWellTemperatureTest.perforationBottomDepth ?? '--'} m</div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 gap-5 2xl:grid-cols-2">
+                            <div className="app-card p-4"><ReactECharts option={getWellTemperatureChartOption('温度-井深曲线', '温度', '℃', '#ef4444', selectedWellTemperatureTest.points, 'temperature', selectedWellTemperatureTest.perforationTopDepth, selectedWellTemperatureTest.perforationBottomDepth)} style={{ height: 420 }} /></div>
+                            <div className="app-card p-4"><ReactECharts option={getWellTemperatureChartOption('压力-井深曲线', '压力', 'MPa', '#2563eb', selectedWellTemperatureTest.points, 'pressure', selectedWellTemperatureTest.perforationTopDepth, selectedWellTemperatureTest.perforationBottomDepth)} style={{ height: 420 }} /></div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
