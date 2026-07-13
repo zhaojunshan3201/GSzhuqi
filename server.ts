@@ -9,6 +9,14 @@ import multer from "multer";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import * as XLSX from "xlsx";
+import { parseWellTemperatureWorkbook } from "./src/lib/wellTemperature.ts";
+import {
+  deleteWellTemperatureTest,
+  getWellTemperatureTest,
+  initWellTemperatureTables,
+  listWellTemperatureTests,
+  replaceWellTemperatureTest,
+} from "./src/lib/wellTemperatureStore.ts";
 
 dotenv.config();
 
@@ -941,6 +949,8 @@ async function initLocalDb() {
     CREATE INDEX IF NOT EXISTS idx_measure_tracking_status ON measure_tracking(status);
     CREATE INDEX IF NOT EXISTS idx_measure_tracking_block_station ON measure_tracking(block, station);
   `);
+
+  await initWellTemperatureTables(localDb);
 
   // Bootstrap default admin if no users exist
   const userCount = await localDb.get("SELECT COUNT(*) as count FROM users");
@@ -2988,6 +2998,66 @@ async function startServer() {
 
   await initLocalDb();
   scheduleSyncJobs();
+
+  const wellTemperatureImportUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
+  });
+  const wellTemperatureImportUploadMiddleware = handleMeasureImportUpload(wellTemperatureImportUpload);
+
+  app.post("/api/well-temperature-tests/import", wellTemperatureImportUploadMiddleware, async (req, res) => {
+    const file = (req as any).file;
+    if (!file || !file.originalname.toLowerCase().endsWith(".xlsx")) {
+      res.status(400).json({ success: false, message: "Please upload a .xlsx file" });
+      return;
+    }
+    try {
+      const parsed = parseWellTemperatureWorkbook(file.originalname, file.buffer);
+      const data = await replaceWellTemperatureTest(localDb, {
+        wellNo: parsed.wellNumber,
+        testDate: parsed.date,
+        perforationTopDepth: parsed.perforationTopDepth,
+        perforationBottomDepth: parsed.perforationBottomDepth,
+        points: parsed.points,
+        sourceFile: file.originalname,
+      });
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error?.message || "Failed to parse well temperature test data" });
+    }
+  });
+
+  app.get("/api/well-temperature-tests", async (req, res) => {
+    const wellNo = typeof req.query.wellNo === "string" ? req.query.wellNo : undefined;
+    res.json({ success: true, data: await listWellTemperatureTests(localDb, wellNo) });
+  });
+
+  app.get("/api/well-temperature-tests/:id", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ success: false, message: "Invalid test ID" });
+      return;
+    }
+    const data = await getWellTemperatureTest(localDb, id);
+    if (!data) {
+      res.status(404).json({ success: false, message: "Well temperature test not found" });
+      return;
+    }
+    res.json({ success: true, data });
+  });
+
+  app.delete("/api/well-temperature-tests/:id", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ success: false, message: "Invalid test ID" });
+      return;
+    }
+    if (!await deleteWellTemperatureTest(localDb, id)) {
+      res.status(404).json({ success: false, message: "Well temperature test not found" });
+      return;
+    }
+    res.json({ success: true });
+  });
 
   // --- Auth APIs ---
   app.post("/api/login", async (req, res) => {
