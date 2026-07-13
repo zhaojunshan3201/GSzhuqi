@@ -97,3 +97,34 @@ test('列表可按井号模糊筛选', async () => {
     assert.deepEqual((await listWellTemperatureTests(db, '2-2')).map((item: any) => item.wellNo), ['高2-2-96']);
   });
 });
+
+
+test('??????????????????', async () => {
+  await withStore(async (db) => {
+    await replaceWellTemperatureTest(db, sample({ wellNo: 'B-1', testDate: '2026-06-20' }));
+    await replaceWellTemperatureTest(db, sample({ wellNo: 'A-1', testDate: '2026-06-19' }));
+    await replaceWellTemperatureTest(db, sample({ wellNo: 'B-1', testDate: '2026-06-21' }));
+    assert.deepEqual(
+      (await listWellTemperatureTests(db)).map((item) => `${item.wellNo}:${item.testDate}`),
+      ['A-1:2026-06-19', 'B-1:2026-06-21', 'B-1:2026-06-20'],
+    );
+  });
+});
+
+test('???????', async () => {
+  await withStore(async (db) => {
+    await initWellTemperatureTables(db);
+    await initWellTemperatureTables(db);
+    assert.equal((await db.get("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'well_temperature_tests'")).count, 1);
+  });
+});
+
+test('????????????????', async () => {
+  await withStore(async (db) => {
+    const stored = await replaceWellTemperatureTest(db, sample());
+    await assert.rejects(() => replaceWellTemperatureTest(db, sample({ points: [{ depth: null as any, temperature: 50, pressure: 2 }] })));
+    const detail = await getWellTemperatureTest(db, stored.id);
+    assert.equal(detail?.pointCount, 2);
+    assert.deepEqual(detail?.points.map((point) => point.depth), [100, 200]);
+  });
+});

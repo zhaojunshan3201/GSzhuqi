@@ -123,8 +123,8 @@ async function getWellTemperatureTestSummary(db: Database, id: number): Promise<
 export async function listWellTemperatureTests(db: Database, wellNo?: string): Promise<WellTemperatureTestSummary[]> {
   const filter = wellNo?.trim();
   const rows = filter
-    ? await db.all('SELECT * FROM well_temperature_tests WHERE well_no LIKE ? ORDER BY test_date DESC, id DESC', [`%${filter}%`])
-    : await db.all('SELECT * FROM well_temperature_tests ORDER BY test_date DESC, id DESC');
+    ? await db.all('SELECT * FROM well_temperature_tests WHERE well_no LIKE ? ORDER BY well_no, test_date DESC, id DESC', [`%${filter}%`])
+    : await db.all('SELECT * FROM well_temperature_tests ORDER BY well_no, test_date DESC, id DESC');
   return rows.map(toSummary);
 }
 
