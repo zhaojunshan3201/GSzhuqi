@@ -30,7 +30,7 @@ export function parseWellTemperatureWorkbook(
   let workbook: XLSX.WorkBook;
 
   try {
-    workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    workbook = XLSX.read(buffer, { type: 'array' });
   } catch {
     throw new Error('无法读取 Excel 文件');
   }
@@ -58,7 +58,10 @@ export function parseWellTemperatureWorkbook(
     const row = rows[rowIndex];
     if (!row) continue;
 
-    wellNumber ??= toText(row[WELL_NUMBER_COLUMN]);
+    wellNumber ??= formatWellNumber(
+      sheet[XLSX.utils.encode_cell({ r: rowIndex, c: WELL_NUMBER_COLUMN })],
+      row[WELL_NUMBER_COLUMN],
+    );
     date ??= formatDate(sheet[XLSX.utils.encode_cell({ r: rowIndex, c: DATE_COLUMN })]);
     perforationTopDepth ??= toNumber(row[PERFORATION_TOP_DEPTH_COLUMN]);
     perforationBottomDepth ??= toNumber(row[PERFORATION_BOTTOM_DEPTH_COLUMN]);
@@ -95,6 +98,10 @@ function toText(value: unknown): string | undefined {
   return text || undefined;
 }
 
+function formatWellNumber(cell: XLSX.CellObject | undefined, value: unknown): string | undefined {
+  return toText(cell?.w) ?? (typeof value === 'number' ? String(value) : toText(value));
+}
+
 function toNumber(value: unknown): number | undefined {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
   if (typeof value !== 'string' || value.trim() === '') return undefined;
@@ -104,6 +111,14 @@ function toNumber(value: unknown): number | undefined {
 
 function formatDate(cell: XLSX.CellObject | undefined): string | undefined {
   if (!cell) return undefined;
+
+  if (typeof cell.v === 'number') {
+    const date = XLSX.SSF.parse_date_code(cell.v);
+    if (date) {
+      return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+    }
+  }
+
   const formatted = cell.w?.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (formatted) return `${formatted[1]}-${formatted[2].padStart(2, '0')}-${formatted[3].padStart(2, '0')}`;
 
@@ -111,10 +126,6 @@ function formatDate(cell: XLSX.CellObject | undefined): string | undefined {
   if (shortDate) {
     const year = shortDate[3].length === 2 ? `20${shortDate[3]}` : shortDate[3];
     return `${year}-${shortDate[1].padStart(2, '0')}-${shortDate[2].padStart(2, '0')}`;
-  }
-
-  if (typeof cell.v === 'number') {
-    return XLSX.SSF.format('yyyy-mm-dd', cell.v);
   }
 
   if (cell.v instanceof Date && !Number.isNaN(cell.v.getTime())) {

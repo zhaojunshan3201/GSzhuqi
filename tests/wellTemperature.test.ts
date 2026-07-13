@@ -28,9 +28,14 @@ test('非工作簿输入会抛出中文错误', () => {
     /无法读取 Excel 文件|未读取到有效测试测点/,
   );
 });
-function createWorkbookBuffer(rows: unknown[][]): Buffer {
+function createWorkbookBuffer(
+  rows: unknown[][],
+  customizeSheet?: (sheet: XLSX.WorkSheet) => void,
+): Buffer {
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  customizeSheet?.(sheet);
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Sheet1');
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 }
 
@@ -58,4 +63,50 @@ test('在表内元数据缺失时从文件名回退', () => {
 
   assert.equal(result.wellNumber, '回退井');
   assert.equal(result.date, '2026-01-01');
+});
+
+test('按 Excel 日期序列和 dd/mm/yy 格式解析测试日期', () => {
+  const buffer = createWorkbookBuffer(
+    [
+      ['header'],
+      ['field'],
+      [null, null, '日期井', null, 100, 10, 20, 30, 0],
+    ],
+    (sheet) => {
+      sheet.D3 = { t: 'n', v: 46035, z: 'dd/mm/yy', w: '13/01/26' };
+    },
+  );
+
+  const result = parseWellTemperatureWorkbook('日期井.xlsx', buffer);
+
+  assert.equal(result.date, '2026-01-13');
+});
+
+test('用 Excel 日期序列消除 01/02/26 的格式歧义', () => {
+  const buffer = createWorkbookBuffer(
+    [
+      ['header'],
+      ['field'],
+      [null, null, '日期井', null, 100, 10, 20, 30, 0],
+    ],
+    (sheet) => {
+      sheet.D3 = { t: 'n', v: 46054, z: 'dd/mm/yy', w: '01/02/26' };
+    },
+  );
+
+  const result = parseWellTemperatureWorkbook('日期井.xlsx', buffer);
+
+  assert.equal(result.date, '2026-02-01');
+});
+
+test('解析无文件名回退的数字井号', () => {
+  const buffer = createWorkbookBuffer([
+    ['header'],
+    ['field'],
+    [null, null, 12345, '2026-06-02', 100, 10, 20, 30, 0],
+  ]);
+
+  const result = parseWellTemperatureWorkbook('测试.xlsx', buffer);
+
+  assert.equal(result.wellNumber, '12345');
 });
