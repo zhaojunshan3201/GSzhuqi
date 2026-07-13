@@ -26,11 +26,13 @@ import {
   FileText,
   Bell,
   LogIn,
-  Thermometer
+  Thermometer,
+  Target
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import * as XLSX from 'xlsx';
 import { getWellTemperatureChartOption } from './wellTemperatureChart';
+import { MeasureWellSelection } from './components/MeasureWellSelection';
 
 // --- Types ---
 interface Well {
@@ -2122,7 +2124,7 @@ const DashboardChartSkeleton = ({ title }: { title: string }) => (
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'block' | 'well' | 'analysis' | 'comparison' | 'measures' | 'measureAnalysis' | 'wellTemperature' | 'occupancyAnalysis' | 'pumpAnalysis' | 'pumpDeepAnalysis' | 'waterLab' | 'productionForecast'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'block' | 'well' | 'analysis' | 'comparison' | 'measureWellSelection' | 'measures' | 'measureAnalysis' | 'wellTemperature' | 'occupancyAnalysis' | 'pumpAnalysis' | 'pumpDeepAnalysis' | 'waterLab' | 'productionForecast'>('dashboard');
   const [dailyCompare, setDailyCompare] = useState<any>(null);
 
   // Data States
@@ -5853,6 +5855,12 @@ export default function App() {
         onClick={() => setActiveTab('comparison')}
         />
         <SidebarItem
+        icon={Target}
+        label="措施选井"
+        active={activeTab === 'measureWellSelection'}
+        onClick={() => setActiveTab('measureWellSelection')}
+        />
+        <SidebarItem
         icon={ClipboardList}
         label="措施跟踪"
         active={activeTab === 'measures'}
@@ -5939,6 +5947,7 @@ export default function App() {
           {activeTab === 'well' && '单井精细化动态分析'}
           {activeTab === 'analysis' && '重点情况分析与建议'}
           {activeTab === 'comparison' && '对比分析'}
+          {activeTab === 'measureWellSelection' && '措施选井'}
           {activeTab === 'measures' && '措施跟踪'}
           {activeTab === 'measureAnalysis' && '措施分析'}
           {activeTab === 'wellTemperature' && '井温监控'}
@@ -5984,6 +5993,7 @@ export default function App() {
           </div>
         </header>
         <main className="app-content">
+              {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
               {activeTab === 'dashboard' && (
                 <div className="page-stack animate-in fade-in duration-500">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
