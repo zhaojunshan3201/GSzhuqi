@@ -1,5 +1,15 @@
 import type { Database } from 'sqlite';
 
+
+const writeQueues = new WeakMap<object, Promise<void>>();
+
+function queueWrite<T>(db: Database, operation: () => Promise<T>): Promise<T> {
+  const previous = writeQueues.get(db) ?? Promise.resolve();
+  const result = previous.catch(() => undefined).then(operation);
+  writeQueues.set(db, result.then(() => undefined, () => undefined));
+  return result;
+}
+
 export interface WellTemperaturePointInput {
   depth: number;
   temperature: number | null;
@@ -72,7 +82,7 @@ export async function initWellTemperatureTables(db: Database): Promise<void> {
   `);
 }
 
-export async function replaceWellTemperatureTest(db: Database, input: WellTemperatureTestInput): Promise<WellTemperatureTestSummary> {
+async function replaceWellTemperatureTestUnsafe(db: Database, input: WellTemperatureTestInput): Promise<WellTemperatureTestSummary> {
   const now = new Date().toISOString();
   await db.exec('BEGIN TRANSACTION');
   try {
@@ -115,6 +125,10 @@ export async function replaceWellTemperatureTest(db: Database, input: WellTemper
   }
 }
 
+export function replaceWellTemperatureTest(db: Database, input: WellTemperatureTestInput): Promise<WellTemperatureTestSummary> {
+  return queueWrite(db, () => replaceWellTemperatureTestUnsafe(db, input));
+}
+
 async function getWellTemperatureTestSummary(db: Database, id: number): Promise<WellTemperatureTestSummary | undefined> {
   const row = await db.get('SELECT * FROM well_temperature_tests WHERE id = ?', [id]);
   return row ? toSummary(row) : undefined;
@@ -135,7 +149,7 @@ export async function getWellTemperatureTest(db: Database, id: number): Promise<
   return { ...summary, points: rows };
 }
 
-export async function deleteWellTemperatureTest(db: Database, id: number): Promise<boolean> {
+async function deleteWellTemperatureTestUnsafe(db: Database, id: number): Promise<boolean> {
   await db.exec('BEGIN TRANSACTION');
   try {
     const existing = await db.get('SELECT id FROM well_temperature_tests WHERE id = ?', [id]);
@@ -151,4 +165,9 @@ export async function deleteWellTemperatureTest(db: Database, id: number): Promi
     await db.exec('ROLLBACK');
     throw error;
   }
+}
+
+
+export function deleteWellTemperatureTest(db: Database, id: number): Promise<boolean> {
+  return queueWrite(db, () => deleteWellTemperatureTestUnsafe(db, id));
 }

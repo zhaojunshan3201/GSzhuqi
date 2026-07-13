@@ -128,3 +128,17 @@ test('????????????????', async () => {
     assert.deepEqual(detail?.points.map((point) => point.depth), [100, 200]);
   });
 });
+
+
+test('????????????????????', async () => {
+  await withStore(async (db) => {
+    await Promise.all(Array.from({ length: 10 }, (_, index) => replaceWellTemperatureTest(db, sample({
+      points: [{ depth: index + 1, temperature: 30 + index, pressure: index }],
+    }))));
+    const tests = await listWellTemperatureTests(db);
+    assert.equal(tests.length, 1);
+    const detail = await getWellTemperatureTest(db, tests[0].id);
+    assert.equal(detail?.pointCount, 1);
+    assert.equal(detail?.points.length, 1);
+  });
+});

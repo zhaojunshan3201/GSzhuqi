@@ -10,6 +10,7 @@ import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import * as XLSX from "xlsx";
 import { parseWellTemperatureWorkbook } from "./src/lib/wellTemperature.ts";
+import { isWellTemperatureClientError } from "./src/lib/wellTemperatureApi.ts";
 import {
   deleteWellTemperatureTest,
   getWellTemperatureTest,
@@ -3023,13 +3024,18 @@ async function startServer() {
       });
       res.json({ success: true, data });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error?.message || "Failed to parse well temperature test data" });
+      const status = isWellTemperatureClientError(error) ? 400 : 500;
+      res.status(status).json({ success: false, message: error?.message || "Failed to import well temperature test" });
     }
   });
 
   app.get("/api/well-temperature-tests", async (req, res) => {
-    const wellNo = typeof req.query.wellNo === "string" ? req.query.wellNo : undefined;
-    res.json({ success: true, data: await listWellTemperatureTests(localDb, wellNo) });
+    try {
+      const wellNo = typeof req.query.wellNo === "string" ? req.query.wellNo : undefined;
+      res.json({ success: true, data: await listWellTemperatureTests(localDb, wellNo) });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Failed to list well temperature tests" });
+    }
   });
 
   app.get("/api/well-temperature-tests/:id", async (req, res) => {
@@ -3038,12 +3044,16 @@ async function startServer() {
       res.status(400).json({ success: false, message: "Invalid test ID" });
       return;
     }
-    const data = await getWellTemperatureTest(localDb, id);
-    if (!data) {
-      res.status(404).json({ success: false, message: "Well temperature test not found" });
-      return;
+    try {
+      const data = await getWellTemperatureTest(localDb, id);
+      if (!data) {
+        res.status(404).json({ success: false, message: "Well temperature test not found" });
+        return;
+      }
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Failed to load well temperature test" });
     }
-    res.json({ success: true, data });
   });
 
   app.delete("/api/well-temperature-tests/:id", async (req, res) => {
@@ -3052,11 +3062,15 @@ async function startServer() {
       res.status(400).json({ success: false, message: "Invalid test ID" });
       return;
     }
-    if (!await deleteWellTemperatureTest(localDb, id)) {
-      res.status(404).json({ success: false, message: "Well temperature test not found" });
-      return;
+    try {
+      if (!await deleteWellTemperatureTest(localDb, id)) {
+        res.status(404).json({ success: false, message: "Well temperature test not found" });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Failed to delete well temperature test" });
     }
-    res.json({ success: true });
   });
 
   // --- Auth APIs ---

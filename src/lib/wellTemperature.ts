@@ -1,5 +1,7 @@
 import XLSX from 'xlsx';
 
+export class WellTemperatureParseError extends Error {}
+
 export interface WellTemperaturePoint {
   depth: number;
   temperature: number | null;
@@ -32,12 +34,12 @@ export function parseWellTemperatureWorkbook(
   try {
     workbook = XLSX.read(buffer, { type: 'array' });
   } catch {
-    throw new Error('无法读取 Excel 文件');
+    throw new WellTemperatureParseError('无法读取 Excel 文件');
   }
 
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
-    throw new Error('未读取到有效测试测点');
+    throw new WellTemperatureParseError('未读取到有效测试测点');
   }
 
   const sheet = workbook.Sheets[sheetName];
@@ -79,13 +81,13 @@ export function parseWellTemperatureWorkbook(
   }
 
   if (points.length === 0) {
-    throw new Error('未读取到有效测试测点');
+    throw new WellTemperatureParseError('未读取到有效测试测点');
   }
 
   wellNumber ??= fallback?.wellNumber;
   date ??= fallback?.date;
   if (!wellNumber || !date) {
-    throw new Error('无法确定井号或测试日期');
+    throw new WellTemperatureParseError('无法确定井号或测试日期');
   }
 
   points.sort((left, right) => left.depth - right.depth);
