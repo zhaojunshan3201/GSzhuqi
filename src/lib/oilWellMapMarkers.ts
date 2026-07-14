@@ -14,3 +14,8 @@ export function fitWellMapToViewport(imageWidth: number, imageHeight: number, vi
   const scale = Math.min(viewportWidth / imageWidth, viewportHeight / imageHeight);
   return { width: Math.round(imageWidth * scale), height: Math.round(imageHeight * scale) };
 }
+
+export function fitWellMapToWidth(imageWidth: number, imageHeight: number, viewportWidth: number) {
+  const scale = viewportWidth / imageWidth;
+  return { width: Math.round(imageWidth * scale), height: Math.round(imageHeight * scale) };
+}
