@@ -3,7 +3,7 @@ import test from 'node:test';
 import XLSX from 'xlsx';
 
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from '../src/lib/oilWellMap.ts';
-import { fitWellMapToViewport, fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers } from '../src/lib/oilWellMapMarkers.ts';
+import { fitWellMapToViewport, fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers, resolveMarkerColor } from '../src/lib/oilWellMapMarkers.ts';
 
 function workbookBuffer(rows: unknown[][]): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -58,4 +58,18 @@ test('anchors the red dot itself at the saved map coordinate', () => {
   assert.deepEqual(getMarkerAnchorStyle(40.5, 35.25), {
     left: '40.5%', top: '35.25%', transform: 'translate(-50%, -50%)',
   });
+});
+
+test('uses the highest priority visible category color', () => {
+  assert.equal(resolveMarkerColor('高246-1', [
+    { id: 1, name: '高含水井', color: '#f59e0b', priority: 20, visible: true },
+    { id: 2, name: '主窜井', color: '#7c3aed', priority: 10, visible: true },
+  ], [{ categoryId: 1, wellNo: '高246-1' }, { categoryId: 2, wellNo: '高246-1' }]), '#7c3aed');
+});
+
+test('falls back to the next visible category or default red', () => {
+  assert.equal(resolveMarkerColor('高246-1', [
+    { id: 1, name: '主窜井', color: '#7c3aed', priority: 10, visible: false },
+    { id: 2, name: '高含水井', color: '#f59e0b', priority: 20, visible: true },
+  ], [{ categoryId: 1, wellNo: '高246-1' }, { categoryId: 2, wellNo: '高246-1' }]), '#f59e0b');
 });

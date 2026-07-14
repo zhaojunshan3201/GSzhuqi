@@ -5,6 +5,19 @@ export interface WellMapMarker {
   yPercent: number;
 }
 
+export interface WellMapCategory {
+  id: number;
+  name: string;
+  color: string;
+  priority: number;
+  visible: boolean;
+}
+
+export interface WellMapCategoryWell {
+  categoryId: number;
+  wellNo: string;
+}
+
 export function getVisibleProductionMarkers(block: string, producingWells: string[], markers: WellMapMarker[]) {
   const producing = new Set(producingWells);
   return markers.filter((marker) => marker.block === block && producing.has(marker.wellNo));
@@ -22,4 +35,11 @@ export function fitWellMapToWidth(imageWidth: number, imageHeight: number, viewp
 
 export function getMarkerAnchorStyle(xPercent: number, yPercent: number) {
   return { left: `${xPercent}%`, top: `${yPercent}%`, transform: 'translate(-50%, -50%)' };
+}
+
+export function resolveMarkerColor(wellNo: string, categories: WellMapCategory[], relations: WellMapCategoryWell[]) {
+  const categoryIds = new Set(relations.filter((relation) => relation.wellNo === wellNo).map((relation) => relation.categoryId));
+  return categories
+    .filter((category) => category.visible && categoryIds.has(category.id))
+    .sort((left, right) => left.priority - right.priority)[0]?.color || '#dc2626';
 }
