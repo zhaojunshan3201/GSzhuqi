@@ -39,6 +39,13 @@ test('shows only producing markers in the selected block', () => {
   ]), [{ wellNo: '高246-1', block: '高246块', xPercent: 12, yPercent: 34 }]);
 });
 
+test('rejects a daily workbook without JH, RQ, and SCSJ columns', () => {
+  assert.throws(
+    () => parseProducingWellsWorkbook(workbookBuffer([['井号', '日期', '生产时间'], ['高246-1', 46001, 1]])),
+    /JH、RQ、SCSJ/,
+  );
+});
+
 test('fits a tall map into the visible viewport without cropping', () => {
   assert.deepEqual(fitWellMapToViewport(5437, 4320, 1380, 538), { width: 677, height: 538 });
 });

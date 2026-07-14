@@ -29,6 +29,10 @@ export function parseProducingWellsWorkbook(buffer: Buffer): ProducingWellsResul
   const workbook = XLSX.read(buffer, { type: 'buffer' });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+  const columns = Object.keys(rows[0] || {});
+  if (!['JH', 'RQ', 'SCSJ'].every((column) => columns.includes(column))) {
+    throw new Error('日数据.xlsx 必须包含 JH、RQ、SCSJ 列');
+  }
   const values = rows
     .map((row) => ({ well: text(row.JH), date: formatDate(row.RQ), scsj: Number(row.SCSJ) }))
     .filter((row) => row.well && row.date && Number.isFinite(row.scsj));

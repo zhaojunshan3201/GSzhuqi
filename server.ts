@@ -3024,6 +3024,11 @@ async function startServer() {
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES }
   });
   const measureImportUploadMiddleware = handleMeasureImportUpload(measureImportUpload);
+  const wellMapDailyUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
+  });
+  const wellMapDailyUploadMiddleware = handleMeasureImportUpload(wellMapDailyUpload);
 
   app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
   app.use(express.urlencoded({ limit: REQUEST_BODY_LIMIT, extended: true }));
@@ -3038,6 +3043,22 @@ async function startServer() {
       res.json({ success: true, data });
     } catch (error: any) {
       res.status(500).json({ success: false, message: `读取日数据失败：${error?.message || "未知错误"}` });
+    }
+  });
+
+  app.post("/api/oil-well-map/daily-data", wellMapDailyUploadMiddleware, async (req, res) => {
+    const file = (req as any).file;
+    if (!file || !file.originalname.toLowerCase().endsWith(".xlsx")) {
+      res.status(400).json({ success: false, message: "请上传日数据.xlsx 文件" });
+      return;
+    }
+
+    try {
+      const data = parseProducingWellsWorkbook(file.buffer);
+      await fs.promises.writeFile(WELL_MAP_DAILY_FILE, file.buffer);
+      res.json({ success: true, data, message: "日数据已更新" });
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error?.message || "日数据校验失败" });
     }
   });
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MapPinned, Minus, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { MapPinned, Minus, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
 import { fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers, type WellMapMarker } from '../lib/oilWellMapMarkers';
 
 const BLOCKS = [
@@ -22,11 +22,16 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [calibrationMode, setCalibrationMode] = useState(false);
+  const [showMarkerSettings, setShowMarkerSettings] = useState(false);
+  const [showLabels, setShowLabels] = useState(false);
+  const [showDeleteButtons, setShowDeleteButtons] = useState(false);
+  const [uploadingDailyData, setUploadingDailyData] = useState(false);
   const [selectedWellNo, setSelectedWellNo] = useState('');
   const [message, setMessage] = useState('');
   const [mapSize, setMapSize] = useState<{ width: number; height: number } | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const mapViewportRef = useRef<HTMLDivElement>(null);
+  const dailyDataInputRef = useRef<HTMLInputElement>(null);
   const selected = BLOCKS.find((block) => block.name === selectedBlock) ?? BLOCKS[0];
 
   const loadMarkers = async (block = selectedBlock) => {
@@ -61,6 +66,8 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ block: selectedBlock, xPercent, yPercent }),
     });
     if (!response.ok) { setMessage('井位标定保存失败'); return; }
+    const payload = await response.json();
+    setMarkers((current) => [...current.filter((marker) => marker.wellNo !== selectedWellNo), payload.data]);
     setSelectedWellNo(''); setMessage(`${selectedWellNo} 已标定`); await loadMarkers();
   };
 
@@ -74,13 +81,35 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
     if (viewport) setMapSize(fitWellMapToWidth(image.naturalWidth, image.naturalHeight, viewport.clientWidth));
   };
 
+  const uploadDailyData = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setUploadingDailyData(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch('/api/oil-well-map/daily-data', { method: 'POST', body: formData });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.message || '日数据上传失败');
+      setProducingWells(payload.data.wells);
+      setSourceDate(payload.data.date);
+      setMessage(`日数据已更新：${payload.data.date}`);
+    } catch (error: any) {
+      setMessage(error?.message || '日数据上传失败');
+    } finally {
+      setUploadingDailyData(false);
+    }
+  };
+
   return <div className="page-stack animate-in fade-in duration-300">
     <section className="app-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div><h3 className="section-title"><MapPinned size={20} className="text-[#D32F2F]" />油井位图</h3><p className="mt-2 text-sm text-slate-500">{sourceDate ? `生产数据日期：${sourceDate}；SCSJ 大于 0 的井以红色显示` : '正在读取生产井数据'}</p></div>
-        {isAdmin && <button className={`action-button ${calibrationMode ? 'action-primary' : 'action-outline'}`} onClick={() => setCalibrationMode((value) => !value)}> {calibrationMode ? '退出标定模式' : '井位标定模式'} </button>}
+        <div className="flex flex-wrap gap-2">{isAdmin && <><input ref={dailyDataInputRef} type="file" accept=".xlsx" className="hidden" onChange={uploadDailyData} /><button className="action-button action-outline" disabled={uploadingDailyData} onClick={() => dailyDataInputRef.current?.click()}><Upload size={16} />{uploadingDailyData ? '上传中...' : '上传日数据.xlsx'}</button><button className={`action-button ${calibrationMode ? 'action-primary' : 'action-outline'}`} onClick={() => setCalibrationMode((value) => !value)}> {calibrationMode ? '退出标定模式' : '井位标定模式'} </button></>}<button className="action-button action-outline" onClick={() => setShowMarkerSettings((value) => !value)}>显示设置</button></div>
       </div>
       <div className="mt-5 flex flex-wrap gap-2">{BLOCKS.map((block) => <button key={block.name} onClick={() => setSelectedBlock(block.name)} className={`rounded px-4 py-2 text-sm font-bold ${selectedBlock === block.name ? 'bg-[#D32F2F] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{block.name}</button>)}</div>
+      {showMarkerSettings && <div className="mt-4 flex flex-wrap items-center gap-5 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"><label className="flex items-center gap-2"><input type="checkbox" checked={showLabels} onChange={(event) => setShowLabels(event.target.checked)} />显示井号标签</label>{isAdmin && calibrationMode && <label className="flex items-center gap-2"><input type="checkbox" checked={showDeleteButtons} onChange={(event) => setShowDeleteButtons(event.target.checked)} />显示删除按钮</label>}</div>}
       {calibrationMode && <div className="mt-4 flex flex-wrap items-center gap-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><span>选择生产井后，直接点击图上的实际位置完成标定：</span><select className="field-control" value={selectedWellNo} onChange={(event) => setSelectedWellNo(event.target.value)}><option value="">请选择生产井</option>{unmarkedWells.map((wellNo) => <option key={wellNo} value={wellNo}>{wellNo}</option>)}</select></div>}
       {message && <p className="status-banner status-banner-info mt-4">{message}</p>}
     </section>
@@ -89,7 +118,7 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
       <div ref={mapViewportRef} className="relative min-h-[70vh] overflow-hidden bg-slate-100" style={{ height: mapSize?.height }} onMouseMove={(event) => dragStart && setOffset({ x: event.clientX - dragStart.x, y: event.clientY - dragStart.y })} onMouseUp={() => setDragStart(null)} onMouseLeave={() => setDragStart(null)}>
         <div ref={mapRef} className={`absolute left-1/2 top-1/2 select-none ${calibrationMode && selectedWellNo ? 'cursor-crosshair' : 'cursor-grab'}`} style={{ width: mapSize?.width, height: mapSize?.height, opacity: mapSize ? 1 : 0, transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onMouseDown={(event) => { if (!calibrationMode) setDragStart({ x: event.clientX - offset.x, y: event.clientY - offset.y }); }} onClick={saveMarker}>
           <img src={selected.image} alt={`${selectedBlock}井位图`} draggable={false} className="block h-full w-full" onLoad={(event) => fitMap(event.currentTarget)} />
-          {visibleMarkers.map((marker) => <div key={marker.wellNo} className="absolute h-3 w-3" style={getMarkerAnchorStyle(marker.xPercent, marker.yPercent)} title={`${marker.wellNo}：生产中`}><span className="block h-3 w-3 rounded-full border-2 border-white bg-red-600 shadow-lg" /><span className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 whitespace-nowrap rounded bg-red-700/90 px-1.5 py-0.5 text-[10px] font-bold text-white">{marker.wellNo}</span>{calibrationMode && <button onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }} className="absolute left-1/2 top-[calc(100%+26px)] -translate-x-1/2 rounded bg-white p-1 text-red-600 shadow"><Trash2 size={12} /></button>}</div>)}
+          {visibleMarkers.map((marker) => <div key={marker.wellNo} className="absolute h-3 w-3" style={getMarkerAnchorStyle(marker.xPercent, marker.yPercent)} title={`${marker.wellNo}：生产中`}><span className="block h-3 w-3 rounded-full border-2 border-white bg-red-600 shadow-lg" />{showLabels && <span className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 whitespace-nowrap rounded bg-red-700/90 px-1.5 py-0.5 text-[10px] font-bold text-white">{marker.wellNo}</span>}{calibrationMode && showDeleteButtons && <button onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }} className={`absolute left-1/2 -translate-x-1/2 rounded bg-white p-1 text-red-600 shadow ${showLabels ? 'top-[calc(100%+26px)]' : 'top-[calc(100%+4px)]'}`}><Trash2 size={12} /></button>}</div>)}
         </div>
       </div>
     </section>
