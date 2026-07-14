@@ -27,12 +27,14 @@ import {
   Bell,
   LogIn,
   Thermometer,
-  Target
+  Target,
+  MapPinned
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import * as XLSX from 'xlsx';
 import { getWellTemperatureChartOption } from './wellTemperatureChart';
 import { MeasureWellSelection } from './components/MeasureWellSelection';
+import { OilWellMap } from './components/OilWellMap';
 
 // --- Types ---
 interface Well {
@@ -2124,7 +2126,7 @@ const DashboardChartSkeleton = ({ title }: { title: string }) => (
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'block' | 'well' | 'analysis' | 'comparison' | 'measureWellSelection' | 'measures' | 'measureAnalysis' | 'wellTemperature' | 'occupancyAnalysis' | 'pumpAnalysis' | 'pumpDeepAnalysis' | 'waterLab' | 'productionForecast'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'oilWellMap' | 'block' | 'well' | 'analysis' | 'comparison' | 'measureWellSelection' | 'measures' | 'measureAnalysis' | 'wellTemperature' | 'occupancyAnalysis' | 'pumpAnalysis' | 'pumpDeepAnalysis' | 'waterLab' | 'productionForecast'>('dashboard');
   const [dailyCompare, setDailyCompare] = useState<any>(null);
 
   // Data States
@@ -5830,6 +5832,12 @@ export default function App() {
         active={activeTab === 'dashboard'} 
         onClick={() => setActiveTab('dashboard')} 
         />
+        <SidebarItem
+        icon={MapPinned}
+        label="油井位图"
+        active={activeTab === 'oilWellMap'}
+        onClick={() => setActiveTab('oilWellMap')}
+        />
         <SidebarItem 
         icon={Activity} 
         label="区块分析" 
@@ -5943,6 +5951,7 @@ export default function App() {
           <Menu className="text-gray-400" size={20} />
           <h2 className="text-gray-700 font-bold text-lg">
           {activeTab === 'dashboard' && '系统概览'}
+          {activeTab === 'oilWellMap' && '油井位图'}
           {activeTab === 'block' && '区块生产动态生成器'}
           {activeTab === 'well' && '单井精细化动态分析'}
           {activeTab === 'analysis' && '重点情况分析与建议'}
@@ -5994,6 +6003,7 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
+              {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} />}
               {activeTab === 'dashboard' && (
                 <div className="page-stack animate-in fade-in duration-500">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

@@ -3,6 +3,7 @@ import test from 'node:test';
 import XLSX from 'xlsx';
 
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from '../src/lib/oilWellMap.ts';
+import { getVisibleProductionMarkers } from '../src/lib/oilWellMapMarkers.ts';
 
 function workbookBuffer(rows: unknown[][]): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -29,4 +30,11 @@ test('accepts only marker coordinates within the map percentage range', () => {
   assert.deepEqual(validateWellMapMarkerInput({ block: '高246块', xPercent: 10.25, yPercent: 20.5 }), {
     block: '高246块', xPercent: 10.25, yPercent: 20.5,
   });
+});
+
+test('shows only producing markers in the selected block', () => {
+  assert.deepEqual(getVisibleProductionMarkers('高246块', ['高246-1'], [
+    { wellNo: '高246-1', block: '高246块', xPercent: 12, yPercent: 34 },
+    { wellNo: '高3-1', block: '高3块', xPercent: 20, yPercent: 40 },
+  ]), [{ wellNo: '高246-1', block: '高246块', xPercent: 12, yPercent: 34 }]);
 });

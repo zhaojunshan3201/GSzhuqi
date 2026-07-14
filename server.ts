@@ -1,5 +1,6 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import oracledb from "oracledb";
@@ -19,12 +20,18 @@ import {
   replaceWellTemperatureTest,
 } from "./src/lib/wellTemperatureStore.ts";
 import { initMeasureWellSelectionTables } from "./src/lib/measureWellSelectionStore.ts";
+import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_FILE = path.join(__dirname, "production.db");
+const WELL_MAP_DATA_DIR = [
+  path.resolve(__dirname, "..", "..", "井位图"),
+  path.resolve(__dirname, "..", "..", "..", "..", "井位图"),
+].find((candidate) => fs.existsSync(candidate)) || path.resolve(__dirname, "..", "..", "井位图");
+const WELL_MAP_DAILY_FILE = path.join(WELL_MAP_DATA_DIR, "日数据.xlsx");
 const DEFAULT_SYNC_START_DATE = "2020-01-01";
 const OVERALL_SCOPE_VALUE = "__overall__";
 const DASHBOARD_BOOTSTRAP_CACHE_KEY = "dashboard_bootstrap";
@@ -938,6 +945,14 @@ async function initLocalDb() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS well_map_markers (
+      well_no TEXT PRIMARY KEY,
+      block TEXT NOT NULL,
+      x_percent REAL NOT NULL,
+      y_percent REAL NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_production_rq ON production(rq);
     CREATE INDEX IF NOT EXISTS idx_production_jh ON production(jh);
     CREATE INDEX IF NOT EXISTS idx_production_station ON production(station);
@@ -950,6 +965,7 @@ async function initLocalDb() {
     CREATE INDEX IF NOT EXISTS idx_measure_tracking_jh ON measure_tracking(jh);
     CREATE INDEX IF NOT EXISTS idx_measure_tracking_status ON measure_tracking(status);
     CREATE INDEX IF NOT EXISTS idx_measure_tracking_block_station ON measure_tracking(block, station);
+    CREATE INDEX IF NOT EXISTS idx_well_map_markers_block ON well_map_markers(block);
   `);
 
   await initWellTemperatureTables(localDb);
@@ -3011,9 +3027,49 @@ async function startServer() {
 
   app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
   app.use(express.urlencoded({ limit: REQUEST_BODY_LIMIT, extended: true }));
+  app.use("/oil-well-map-assets", express.static(WELL_MAP_DATA_DIR));
 
   await initLocalDb();
   scheduleSyncJobs();
+
+  app.get("/api/oil-well-map/production-wells", async (_req, res) => {
+    try {
+      const data = parseProducingWellsWorkbook(await fs.promises.readFile(WELL_MAP_DAILY_FILE));
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: `读取日数据失败：${error?.message || "未知错误"}` });
+    }
+  });
+
+  app.get("/api/oil-well-map/markers", async (req, res) => {
+    const block = String(req.query.block || "").trim();
+    const data = await localDb.all(
+      "SELECT well_no AS wellNo, block, x_percent AS xPercent, y_percent AS yPercent FROM well_map_markers WHERE block = ? ORDER BY well_no",
+      [block],
+    );
+    res.json({ success: true, data });
+  });
+
+  app.put("/api/oil-well-map/markers/:wellNo", async (req, res) => {
+    const wellNo = String(req.params.wellNo || "").trim();
+    const marker = validateWellMapMarkerInput(req.body || {});
+    if (!wellNo || !marker) {
+      res.status(400).json({ success: false, message: "井号、区块和 0 到 100 的坐标不能为空" });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    await localDb.run(
+      "INSERT INTO well_map_markers (well_no, block, x_percent, y_percent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(well_no) DO UPDATE SET block = excluded.block, x_percent = excluded.x_percent, y_percent = excluded.y_percent, updated_at = excluded.updated_at",
+      [wellNo, marker.block, marker.xPercent, marker.yPercent, now, now],
+    );
+    res.json({ success: true, data: { wellNo, ...marker } });
+  });
+
+  app.delete("/api/oil-well-map/markers/:wellNo", async (req, res) => {
+    await localDb.run("DELETE FROM well_map_markers WHERE well_no = ?", [String(req.params.wellNo || "").trim()]);
+    res.status(204).end();
+  });
 
   const wellTemperatureImportUpload = multer({
     storage: multer.memoryStorage(),
