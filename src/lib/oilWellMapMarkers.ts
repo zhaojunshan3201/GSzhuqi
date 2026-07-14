@@ -9,3 +9,8 @@ export function getVisibleProductionMarkers(block: string, producingWells: strin
   const producing = new Set(producingWells);
   return markers.filter((marker) => marker.block === block && producing.has(marker.wellNo));
 }
+
+export function fitWellMapToViewport(imageWidth: number, imageHeight: number, viewportWidth: number, viewportHeight: number) {
+  const scale = Math.min(viewportWidth / imageWidth, viewportHeight / imageHeight);
+  return { width: Math.round(imageWidth * scale), height: Math.round(imageHeight * scale) };
+}

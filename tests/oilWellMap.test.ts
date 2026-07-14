@@ -3,7 +3,7 @@ import test from 'node:test';
 import XLSX from 'xlsx';
 
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from '../src/lib/oilWellMap.ts';
-import { getVisibleProductionMarkers } from '../src/lib/oilWellMapMarkers.ts';
+import { fitWellMapToViewport, getVisibleProductionMarkers } from '../src/lib/oilWellMapMarkers.ts';
 
 function workbookBuffer(rows: unknown[][]): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -37,4 +37,8 @@ test('shows only producing markers in the selected block', () => {
     { wellNo: '高246-1', block: '高246块', xPercent: 12, yPercent: 34 },
     { wellNo: '高3-1', block: '高3块', xPercent: 20, yPercent: 40 },
   ]), [{ wellNo: '高246-1', block: '高246块', xPercent: 12, yPercent: 34 }]);
+});
+
+test('fits a tall map into the visible viewport without cropping', () => {
+  assert.deepEqual(fitWellMapToViewport(5437, 4320, 1380, 538), { width: 677, height: 538 });
 });

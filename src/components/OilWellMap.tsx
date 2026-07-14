@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapPinned, Minus, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { getVisibleProductionMarkers, type WellMapMarker } from '../lib/oilWellMapMarkers';
+import { fitWellMapToViewport, getVisibleProductionMarkers, type WellMapMarker } from '../lib/oilWellMapMarkers';
 
 const BLOCKS = [
   { name: '高3块', image: '/oil-well-map-assets/高3块.bmp' },
@@ -24,7 +24,9 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
   const [calibrationMode, setCalibrationMode] = useState(false);
   const [selectedWellNo, setSelectedWellNo] = useState('');
   const [message, setMessage] = useState('');
+  const [mapSize, setMapSize] = useState<{ width: number; height: number } | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+  const mapViewportRef = useRef<HTMLDivElement>(null);
   const selected = BLOCKS.find((block) => block.name === selectedBlock) ?? BLOCKS[0];
 
   const loadMarkers = async (block = selectedBlock) => {
@@ -43,7 +45,7 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
   }, []);
 
   useEffect(() => {
-    setScale(1); setOffset({ x: 0, y: 0 }); setSelectedWellNo('');
+    setScale(1); setOffset({ x: 0, y: 0 }); setSelectedWellNo(''); setMapSize(null);
     void loadMarkers(selectedBlock).catch(() => setMessage('井位标定读取失败'));
   }, [selectedBlock]);
 
@@ -67,6 +69,11 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
     await loadMarkers();
   };
 
+  const fitMap = (image: HTMLImageElement) => {
+    const viewport = mapViewportRef.current;
+    if (viewport) setMapSize(fitWellMapToViewport(image.naturalWidth, image.naturalHeight, viewport.clientWidth, viewport.clientHeight));
+  };
+
   return <div className="page-stack animate-in fade-in duration-300">
     <section className="app-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -79,9 +86,9 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
     </section>
     <section className="app-card overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 p-3"><span className="text-sm font-bold text-slate-700">{selectedBlock} · 生产井 {visibleMarkers.length} 口</span><div className="flex gap-2"><button className="action-button action-outline h-8 px-3" onClick={() => setScale((value) => Math.max(0.5, value - 0.2))}><Minus size={16} /></button><button className="action-button action-outline h-8 px-3" onClick={() => setScale((value) => Math.min(3, value + 0.2))}><Plus size={16} /></button><button className="action-button action-outline h-8 px-3" onClick={() => { setScale(1); setOffset({ x: 0, y: 0 }); }}><RotateCcw size={16} /></button></div></div>
-      <div className="relative h-[70vh] overflow-hidden bg-slate-100" onMouseMove={(event) => dragStart && setOffset({ x: event.clientX - dragStart.x, y: event.clientY - dragStart.y })} onMouseUp={() => setDragStart(null)} onMouseLeave={() => setDragStart(null)}>
-        <div ref={mapRef} className={`absolute left-1/2 top-1/2 w-full max-w-[1400px] -translate-x-1/2 -translate-y-1/2 select-none ${calibrationMode && selectedWellNo ? 'cursor-crosshair' : 'cursor-grab'}`} style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onMouseDown={(event) => { if (!calibrationMode) setDragStart({ x: event.clientX - offset.x, y: event.clientY - offset.y }); }} onClick={saveMarker}>
-          <img src={selected.image} alt={`${selectedBlock}井位图`} draggable={false} className="block h-auto w-full" />
+      <div ref={mapViewportRef} className="relative h-[70vh] overflow-hidden bg-slate-100" onMouseMove={(event) => dragStart && setOffset({ x: event.clientX - dragStart.x, y: event.clientY - dragStart.y })} onMouseUp={() => setDragStart(null)} onMouseLeave={() => setDragStart(null)}>
+        <div ref={mapRef} className={`absolute left-1/2 top-1/2 select-none ${calibrationMode && selectedWellNo ? 'cursor-crosshair' : 'cursor-grab'}`} style={{ width: mapSize?.width, height: mapSize?.height, opacity: mapSize ? 1 : 0, transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onMouseDown={(event) => { if (!calibrationMode) setDragStart({ x: event.clientX - offset.x, y: event.clientY - offset.y }); }} onClick={saveMarker}>
+          <img src={selected.image} alt={`${selectedBlock}井位图`} draggable={false} className="block h-full w-full" onLoad={(event) => fitMap(event.currentTarget)} />
           {visibleMarkers.map((marker) => <div key={marker.wellNo} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${marker.xPercent}%`, top: `${marker.yPercent}%` }} title={`${marker.wellNo}：生产中`}><span className="block h-3 w-3 rounded-full border-2 border-white bg-red-600 shadow-lg" /><span className="mt-1 block whitespace-nowrap rounded bg-red-700/90 px-1.5 py-0.5 text-[10px] font-bold text-white">{marker.wellNo}</span>{calibrationMode && <button onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }} className="mt-1 rounded bg-white p-1 text-red-600 shadow"><Trash2 size={12} /></button>}</div>)}
         </div>
       </div>
