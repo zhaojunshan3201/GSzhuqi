@@ -953,6 +953,21 @@ async function initLocalDb() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS well_map_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      color TEXT NOT NULL,
+      priority INTEGER NOT NULL,
+      remark TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS well_map_category_wells (
+      category_id INTEGER NOT NULL,
+      well_no TEXT NOT NULL,
+      PRIMARY KEY (category_id, well_no),
+      FOREIGN KEY (category_id) REFERENCES well_map_categories(id) ON DELETE CASCADE
+    );
     CREATE INDEX IF NOT EXISTS idx_production_rq ON production(rq);
     CREATE INDEX IF NOT EXISTS idx_production_jh ON production(jh);
     CREATE INDEX IF NOT EXISTS idx_production_station ON production(station);
@@ -966,6 +981,7 @@ async function initLocalDb() {
     CREATE INDEX IF NOT EXISTS idx_measure_tracking_status ON measure_tracking(status);
     CREATE INDEX IF NOT EXISTS idx_measure_tracking_block_station ON measure_tracking(block, station);
     CREATE INDEX IF NOT EXISTS idx_well_map_markers_block ON well_map_markers(block);
+    CREATE INDEX IF NOT EXISTS idx_well_map_category_wells_well ON well_map_category_wells(well_no);
   `);
 
   await initWellTemperatureTables(localDb);
@@ -3059,6 +3075,62 @@ async function startServer() {
       res.json({ success: true, data, message: "日数据已更新" });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error?.message || "日数据校验失败" });
+    }
+  });
+
+  app.get("/api/oil-well-map/categories", async (_req, res) => {
+    const categories = await localDb.all("SELECT id, name, color, priority, remark FROM well_map_categories ORDER BY priority, id");
+    const relations = await localDb.all("SELECT category_id AS categoryId, well_no AS wellNo FROM well_map_category_wells");
+    res.json({ success: true, data: { categories, relations } });
+  });
+
+  app.post("/api/oil-well-map/categories", async (req, res) => {
+    const name = String(req.body?.name || "").trim();
+    const color = String(req.body?.color || "").trim();
+    const priority = Number(req.body?.priority);
+    const remark = String(req.body?.remark || "").trim();
+    if (!name || !/^#[0-9a-fA-F]{6}$/.test(color) || !Number.isInteger(priority)) {
+      res.status(400).json({ success: false, message: "分类名称、颜色和优先级不正确" });
+      return;
+    }
+    const now = new Date().toISOString();
+    const result = await localDb.run("INSERT INTO well_map_categories (name, color, priority, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", [name, color, priority, remark, now, now]);
+    res.json({ success: true, data: { id: result.lastID, name, color, priority, remark } });
+  });
+
+  app.put("/api/oil-well-map/categories/:id", async (req, res) => {
+    const id = Number(req.params.id);
+    const name = String(req.body?.name || "").trim();
+    const color = String(req.body?.color || "").trim();
+    const priority = Number(req.body?.priority);
+    const remark = String(req.body?.remark || "").trim();
+    if (!Number.isInteger(id) || !name || !/^#[0-9a-fA-F]{6}$/.test(color) || !Number.isInteger(priority)) {
+      res.status(400).json({ success: false, message: "分类参数不正确" });
+      return;
+    }
+    await localDb.run("UPDATE well_map_categories SET name = ?, color = ?, priority = ?, remark = ?, updated_at = ? WHERE id = ?", [name, color, priority, remark, new Date().toISOString(), id]);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/oil-well-map/categories/:id", async (req, res) => {
+    const id = Number(req.params.id);
+    await localDb.run("DELETE FROM well_map_category_wells WHERE category_id = ?", [id]);
+    await localDb.run("DELETE FROM well_map_categories WHERE id = ?", [id]);
+    res.status(204).end();
+  });
+
+  app.put("/api/oil-well-map/categories/:id/wells", async (req, res) => {
+    const id = Number(req.params.id);
+    const wells = [...new Set((Array.isArray(req.body?.wells) ? req.body.wells : []).map((well) => String(well).trim()).filter(Boolean))];
+    await localDb.run("BEGIN");
+    try {
+      await localDb.run("DELETE FROM well_map_category_wells WHERE category_id = ?", [id]);
+      for (const well of wells) await localDb.run("INSERT INTO well_map_category_wells (category_id, well_no) VALUES (?, ?)", [id, well]);
+      await localDb.run("COMMIT");
+      res.json({ success: true, data: wells });
+    } catch (error: any) {
+      await localDb.run("ROLLBACK");
+      res.status(500).json({ success: false, message: error?.message || "分类井号保存失败" });
     }
   });
 
