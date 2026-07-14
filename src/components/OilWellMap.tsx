@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapPinned, Minus, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { fitWellMapToWidth, getVisibleProductionMarkers, type WellMapMarker } from '../lib/oilWellMapMarkers';
+import { fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers, type WellMapMarker } from '../lib/oilWellMapMarkers';
 
 const BLOCKS = [
   { name: '高3块', image: '/oil-well-map-assets/高3块.bmp' },
@@ -89,7 +89,7 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
       <div ref={mapViewportRef} className="relative min-h-[70vh] overflow-hidden bg-slate-100" style={{ height: mapSize?.height }} onMouseMove={(event) => dragStart && setOffset({ x: event.clientX - dragStart.x, y: event.clientY - dragStart.y })} onMouseUp={() => setDragStart(null)} onMouseLeave={() => setDragStart(null)}>
         <div ref={mapRef} className={`absolute left-1/2 top-1/2 select-none ${calibrationMode && selectedWellNo ? 'cursor-crosshair' : 'cursor-grab'}`} style={{ width: mapSize?.width, height: mapSize?.height, opacity: mapSize ? 1 : 0, transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onMouseDown={(event) => { if (!calibrationMode) setDragStart({ x: event.clientX - offset.x, y: event.clientY - offset.y }); }} onClick={saveMarker}>
           <img src={selected.image} alt={`${selectedBlock}井位图`} draggable={false} className="block h-full w-full" onLoad={(event) => fitMap(event.currentTarget)} />
-          {visibleMarkers.map((marker) => <div key={marker.wellNo} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${marker.xPercent}%`, top: `${marker.yPercent}%` }} title={`${marker.wellNo}：生产中`}><span className="block h-3 w-3 rounded-full border-2 border-white bg-red-600 shadow-lg" /><span className="mt-1 block whitespace-nowrap rounded bg-red-700/90 px-1.5 py-0.5 text-[10px] font-bold text-white">{marker.wellNo}</span>{calibrationMode && <button onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }} className="mt-1 rounded bg-white p-1 text-red-600 shadow"><Trash2 size={12} /></button>}</div>)}
+          {visibleMarkers.map((marker) => <div key={marker.wellNo} className="absolute h-3 w-3" style={getMarkerAnchorStyle(marker.xPercent, marker.yPercent)} title={`${marker.wellNo}：生产中`}><span className="block h-3 w-3 rounded-full border-2 border-white bg-red-600 shadow-lg" /><span className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 whitespace-nowrap rounded bg-red-700/90 px-1.5 py-0.5 text-[10px] font-bold text-white">{marker.wellNo}</span>{calibrationMode && <button onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }} className="absolute left-1/2 top-[calc(100%+26px)] -translate-x-1/2 rounded bg-white p-1 text-red-600 shadow"><Trash2 size={12} /></button>}</div>)}
         </div>
       </div>
     </section>

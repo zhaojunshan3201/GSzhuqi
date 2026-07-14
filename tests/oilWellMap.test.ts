@@ -3,7 +3,7 @@ import test from 'node:test';
 import XLSX from 'xlsx';
 
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from '../src/lib/oilWellMap.ts';
-import { fitWellMapToViewport, fitWellMapToWidth, getVisibleProductionMarkers } from '../src/lib/oilWellMapMarkers.ts';
+import { fitWellMapToViewport, fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers } from '../src/lib/oilWellMapMarkers.ts';
 
 function workbookBuffer(rows: unknown[][]): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -45,4 +45,10 @@ test('fits a tall map into the visible viewport without cropping', () => {
 
 test('fills the content width while preserving the complete map aspect ratio', () => {
   assert.deepEqual(fitWellMapToWidth(5437, 4320, 1380), { width: 1380, height: 1096 });
+});
+
+test('anchors the red dot itself at the saved map coordinate', () => {
+  assert.deepEqual(getMarkerAnchorStyle(40.5, 35.25), {
+    left: '40.5%', top: '35.25%', transform: 'translate(-50%, -50%)',
+  });
 });

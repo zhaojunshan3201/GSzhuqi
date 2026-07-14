@@ -19,3 +19,7 @@ export function fitWellMapToWidth(imageWidth: number, imageHeight: number, viewp
   const scale = viewportWidth / imageWidth;
   return { width: Math.round(imageWidth * scale), height: Math.round(imageHeight * scale) };
 }
+
+export function getMarkerAnchorStyle(xPercent: number, yPercent: number) {
+  return { left: `${xPercent}%`, top: `${yPercent}%`, transform: 'translate(-50%, -50%)' };
+}
