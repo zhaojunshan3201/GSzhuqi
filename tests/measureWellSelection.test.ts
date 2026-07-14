@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { alignOilCurve, evaluateWells } from '../src/lib/measureWellSelection.ts';
@@ -35,18 +35,18 @@ test('sorts tied scores by well name', () => {
   assert.deepEqual(result.map((well) => well.wellName), ['Well-A', 'Well-B']);
 });
 
-test('aligns oil curves at transfer day zero and excludes earlier dates', () => {
+test('aligns oil curves to the transfer day within the -30 to +180 day window', () => {
   assert.deepEqual(
     alignOilCurve('2026-01-10', [
-      { date: '2026-01-09', oil: 1 },
-      { date: '2026-01-10', oil: 2 },
-      { date: '2026-01-12', oil: 5 },
+      { date: '2025-12-10', oil: 1 },
+      { date: '2025-12-11', oil: 2 },
+      { date: '2026-01-10', oil: 3 },
+      { date: '2026-07-09', oil: 4 },
+      { date: '2026-07-10', oil: 5 },
     ]),
-    [{ day: 0, oil: 2 }, { day: 2, oil: 5 }],
+    [{ day: -30, oil: 2 }, { day: 0, oil: 3 }, { day: 180, oil: 4 }],
   );
-});
-
-test('does not fill missing curve oil values with zero', () => {
+});test('does not fill missing curve oil values with zero', () => {
   assert.deepEqual(
     alignOilCurve('2026-01-10', [
       { date: '2026-01-10', oil: null },

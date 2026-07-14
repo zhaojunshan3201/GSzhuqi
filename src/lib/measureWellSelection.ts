@@ -1,4 +1,4 @@
-﻿export const SCORE_WEIGHTS = {
+export const SCORE_WEIGHTS = {
   oilSteamRatio: 40,
   cycleOil: 20,
   peakOil: 15,
@@ -71,7 +71,7 @@ export function alignOilCurve(transferDate: string, points: readonly OilPoint[])
   return points
     .flatMap((point) => {
       const day = parseDay(point.date);
-      if (day === undefined || day < transferDay || !isFiniteNumber(point.oil)) return [];
+      if (day === undefined || day < transferDay - 30 * 86_400_000 || day > transferDay + 180 * 86_400_000 || !isFiniteNumber(point.oil)) return [];
       return [{ day: (day - transferDay) / 86_400_000, oil: point.oil }];
     })
     .sort((left, right) => left.day - right.day);

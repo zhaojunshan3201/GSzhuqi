@@ -2987,6 +2987,19 @@ function buildLargeChangeData(rows: CompareResultRow[]) {
   };
 }
 
+async function rebuildMeasureWellSelection() {
+  const trackingRows = await localDb.all('SELECT jh, block, station, detail_json FROM measure_tracking');
+  const cycles = buildSelectionCyclesFromTrackingRows(trackingRows);
+  await upsertSelectionCycles(localDb, cycles);
+  const scores = evaluateWells(cycles.filter((cycle) => cycle.actualSteam != null && cycle.cycleOil != null));
+  await replaceSelectionScores(localDb, scores);
+  return { cycleCount: cycles.length, wellCount: scores.length };
+}
+
+async function ensureMeasureWellSelectionScores() {
+  const existing = await localDb.get('SELECT COUNT(*) AS count FROM measure_well_scores');
+  return Number(existing?.count || 0) > 0 ? undefined : rebuildMeasureWellSelection();
+}
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -4528,6 +4541,38 @@ app.post("/api/register", async (req, res) => {
     }
   });
 
+  app.post('/api/measure-well-selection/recalculate', async (_req, res) => {
+    try { res.json({ success: true, data: await rebuildMeasureWellSelection() }); }
+    catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
+  app.get('/api/measure-well-selection/wells', async (req, res) => {
+    try {
+      await ensureMeasureWellSelectionScores();
+      const data = await listSelectionWells(localDb, {
+        block: typeof req.query.block === 'string' ? req.query.block : undefined,
+        station: typeof req.query.station === 'string' ? req.query.station : undefined,
+        grade: typeof req.query.grade === 'string' ? req.query.grade as any : undefined,
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+      });
+      res.json({ success: true, data });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
+  app.get('/api/measure-well-selection/wells/:wellName', async (req, res) => {
+    try {
+      await ensureMeasureWellSelectionScores();
+      const detail = await getSelectionWellDetail(localDb, req.params.wellName);
+      if (!detail) { res.status(404).json({ success: false, message: 'well not found' }); return; }
+      const curves = await Promise.all(detail.cycles.map(async (cycle) => {
+        const rows = await localDb.all('SELECT rq AS date, oil FROM production WHERE jh = ? AND rq BETWEEN ? AND ? ORDER BY rq ASC', [
+          cycle.wellName, shiftDateDays(cycle.transferDate, -30), shiftDateDays(cycle.transferDate, 180),
+        ]);
+        return { round: cycle.round, transferDate: cycle.transferDate, oilSeeingDay: cycle.oilSeeingDays, points: alignOilCurve(cycle.transferDate, rows) };
+      }));
+      res.json({ success: true, data: { ...detail, curves } });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+  });
   // --- API Routes ---
 
   // ___________________________________
