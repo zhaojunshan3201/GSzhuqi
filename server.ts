@@ -3223,7 +3223,19 @@ async function startServer() {
         res.status(404).json({ success: false, message: "未找到措施选井数据" });
         return;
       }
-      res.json({ success: true, data });
+      const curves = await Promise.all(data.cycles.map(async (cycle) => {
+        const rows = await localDb.all(
+          'SELECT rq AS date, oil FROM production WHERE jh = ? AND rq BETWEEN ? AND ? ORDER BY rq ASC',
+          [cycle.wellName, shiftDateDays(cycle.transferDate, -30), shiftDateDays(cycle.transferDate, 180)],
+        );
+        return {
+          round: cycle.round,
+          transferDate: cycle.transferDate,
+          oilSeeingDay: cycle.oilSeeingDays,
+          points: alignOilCurve(cycle.transferDate, rows),
+        };
+      }));
+      res.json({ success: true, data: { ...data, curves } });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error?.message || "措施选井详情加载失败" });
     }
