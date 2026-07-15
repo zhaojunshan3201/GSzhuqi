@@ -1,5 +1,22 @@
 export type SidebarGroupKey = 'overview' | 'analysis' | 'focus' | 'measures' | 'production';
 
+export type SidebarTab =
+  | 'dashboard'
+  | 'oilWellMap'
+  | 'wellTemperature'
+  | 'well'
+  | 'block'
+  | 'comparison'
+  | 'pumpDeepAnalysis'
+  | 'occupancyAnalysis'
+  | 'analysis'
+  | 'waterLab'
+  | 'pumpAnalysis'
+  | 'measureWellSelection'
+  | 'measures'
+  | 'measureAnalysis'
+  | 'productionForecast';
+
 export type SidebarIcon =
   | 'LayoutDashboard'
   | 'MapPinned'
@@ -16,7 +33,7 @@ export type SidebarIcon =
   | 'MessageSquare';
 
 export interface SidebarNavigationItem {
-  tab: string;
+  tab: SidebarTab;
   label: string;
   icon: SidebarIcon;
 }
