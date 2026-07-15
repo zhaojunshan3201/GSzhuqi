@@ -83,6 +83,14 @@ export async function initMeasureWellSelectionTables(db: Database): Promise<void
   `);
 }
 
+export async function createSelectionImport(db: Database, sourceFile: string, rowCount: number): Promise<number> {
+  const result = await db.run(
+    'INSERT INTO measure_well_imports (source_file, imported_at, row_count) VALUES (?, ?, ?)',
+    [sourceFile, new Date().toISOString(), rowCount],
+  );
+  return result.lastID!;
+}
+
 export function upsertSelectionCycles(db: Database, cycles: readonly StoredSelectionCycle[]): Promise<void> {
   return queueWrite(db, async () => {
     const now = new Date().toISOString();
@@ -163,15 +171,17 @@ export async function listSelectionWells(db: Database, filter: SelectionFilter =
   return rows.map((row: any) => ({ ...JSON.parse(row.score_json), station: row.station, calculatedAt: row.calculated_at }));
 }
 
-export async function getSelectionWellDetail(db: Database, wellName: string): Promise<SelectionWellDetail | undefined> {
+export async function getSelectionWellDetail(db: Database, wellName: string, block?: string): Promise<SelectionWellDetail | undefined> {
+  const blockFilter = block === undefined ? '' : ' AND block = ?';
+  const values = block === undefined ? [wellName] : [wellName, block];
   const scoreRow = await db.get(
-    'SELECT score_json, station, calculated_at FROM measure_well_scores WHERE well_name = ? ORDER BY score DESC, block ASC LIMIT 1',
-    [wellName],
+    `SELECT score_json, station, calculated_at FROM measure_well_scores WHERE well_name = ?${blockFilter} ORDER BY score DESC, block ASC LIMIT 1`,
+    values,
   );
   if (!scoreRow) return undefined;
   const cycles = await db.all(
-    `SELECT * FROM measure_well_cycles WHERE well_name = ? ORDER BY transfer_date DESC, round_no DESC LIMIT 3`,
-    [wellName],
+    `SELECT * FROM measure_well_cycles WHERE well_name = ?${blockFilter} ORDER BY transfer_date DESC, round_no DESC LIMIT 3`,
+    values,
   );
   return {
     score: { ...JSON.parse((scoreRow as any).score_json), station: (scoreRow as any).station, calculatedAt: (scoreRow as any).calculated_at },

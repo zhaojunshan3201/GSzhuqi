@@ -7,6 +7,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
 import {
+  createSelectionImport,
   getSelectionWellDetail,
   initMeasureWellSelectionTables,
   listSelectionWells,
@@ -88,6 +89,25 @@ test('returns a well score and its three newest cycles', async () => {
     const detail = await getSelectionWellDetail(db, 'A-1');
     assert.equal(detail?.score.score, 82);
     assert.deepEqual(detail?.cycles.map((item) => item.round), [4, 3, 2]);
+  });
+});
+
+test('records an import batch and scopes a well detail to its block', async () => {
+  await withStore(async (db) => {
+    const importId = await createSelectionImport(db, '措施选井.xlsx', 2);
+    await upsertSelectionCycles(db, [
+      cycle({ importId, block: 'A', transferDate: '2026-01-01', round: 3 }),
+      cycle({ importId, block: 'B', transferDate: '2026-06-01', round: 4 }),
+    ]);
+    await replaceSelectionScores(db, [
+      score({ block: 'A', score: 82 }),
+      score({ block: 'B', score: 70 }),
+    ]);
+
+    assert.equal((await db.get('SELECT row_count FROM measure_well_imports WHERE id = ?', [importId])).row_count, 2);
+    const detail = await getSelectionWellDetail(db, 'A-1', 'B');
+    assert.equal(detail?.score.block, 'B');
+    assert.deepEqual(detail?.cycles.map((item) => item.block), ['B']);
   });
 });
 
