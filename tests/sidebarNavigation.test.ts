@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { getSidebarGroupKey, sidebarNavigationGroups } from '../src/lib/sidebarNavigation.ts';
-import type { SidebarTab } from '../src/lib/sidebarNavigation.ts';
+import type { SidebarGroupKey, SidebarTab } from '../src/lib/sidebarNavigation.ts';
 
 test('defines the five requested groups and all fifteen entries in order', () => {
   const configuredTabs: SidebarTab[] = sidebarNavigationGroups.flatMap((group) => group.items.map((item) => item.tab));
@@ -22,9 +22,30 @@ test('defines the five requested groups and all fifteen entries in order', () =>
   assert.equal(sidebarNavigationGroups.flatMap((group) => group.items).length, 15);
 });
 
-test('finds the group containing each active tab and returns undefined for an unknown tab', () => {
-  assert.equal(getSidebarGroupKey('wellTemperature'), 'overview');
-  assert.equal(getSidebarGroupKey('pumpDeepAnalysis'), 'analysis');
-  assert.equal(getSidebarGroupKey('productionForecast'), 'production');
+test('assigns every configured tab to its sidebar group', () => {
+  const expectedGroups: Record<SidebarTab, SidebarGroupKey> = {
+    dashboard: 'overview',
+    oilWellMap: 'overview',
+    wellTemperature: 'overview',
+    well: 'analysis',
+    block: 'analysis',
+    comparison: 'analysis',
+    pumpDeepAnalysis: 'analysis',
+    occupancyAnalysis: 'analysis',
+    analysis: 'focus',
+    waterLab: 'focus',
+    pumpAnalysis: 'focus',
+    measureWellSelection: 'measures',
+    measures: 'measures',
+    measureAnalysis: 'measures',
+    productionForecast: 'production',
+  };
+
+  for (const [tab, group] of Object.entries(expectedGroups)) {
+    assert.equal(getSidebarGroupKey(tab), group);
+  }
+});
+
+test('returns undefined for an unknown tab', () => {
   assert.equal(getSidebarGroupKey('missing-tab'), undefined);
 });

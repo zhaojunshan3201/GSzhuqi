@@ -35,6 +35,9 @@ import * as XLSX from 'xlsx';
 import { getWellTemperatureChartOption } from './wellTemperatureChart';
 import { MeasureWellSelection } from './components/MeasureWellSelection';
 import { OilWellMap } from './components/OilWellMap';
+import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNavigation';
+import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
+import type { LucideIcon } from 'lucide-react';
 
 // --- Types ---
 interface Well {
@@ -1943,7 +1946,23 @@ const Login = ({ onLogin, globalError }: { onLogin: (user: any) => void; globalE
   );
 };
 
-const SidebarItem = ({ icon: Icon, label, active, onClick }: { icon: any, label: string, active?: boolean, onClick: () => void }) => (
+const sidebarIconMap: Record<SidebarIcon, LucideIcon> = {
+  LayoutDashboard,
+  MapPinned,
+  Thermometer,
+  Database,
+  Activity,
+  TrendingUp,
+  ClipboardList,
+  FileSpreadsheet,
+  AlertTriangle,
+  Droplets,
+  Filter,
+  Target,
+  MessageSquare,
+};
+
+const SidebarItem = ({ icon: Icon, label, active, onClick }: { icon: LucideIcon, label: string, active?: boolean, onClick: () => void }) => (
   <div
     onClick={onClick}
     className={cn(
@@ -2126,8 +2145,14 @@ const DashboardChartSkeleton = ({ title }: { title: string }) => (
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'oilWellMap' | 'block' | 'well' | 'analysis' | 'comparison' | 'measureWellSelection' | 'measures' | 'measureAnalysis' | 'wellTemperature' | 'occupancyAnalysis' | 'pumpAnalysis' | 'pumpDeepAnalysis' | 'waterLab' | 'productionForecast'>('dashboard');
+  const [activeTab, setActiveTab] = useState<SidebarTab>('dashboard');
+  const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<SidebarGroupKey | null>(getSidebarGroupKey('dashboard') ?? 'overview');
   const [dailyCompare, setDailyCompare] = useState<any>(null);
+
+  useEffect(() => {
+    const activeGroup = getSidebarGroupKey(activeTab);
+    if (activeGroup) setExpandedSidebarGroup(activeGroup);
+  }, [activeTab]);
 
   // Data States
   const [overallData, setOverallData] = useState<ChartData | null>(null);
@@ -5826,96 +5851,31 @@ export default function App() {
         </div>
         
         <nav className="mt-4 flex-1">
-        <SidebarItem 
-        icon={LayoutDashboard} 
-        label="系统概览" 
-        active={activeTab === 'dashboard'} 
-        onClick={() => setActiveTab('dashboard')} 
-        />
-        <SidebarItem
-        icon={MapPinned}
-        label="油井位图"
-        active={activeTab === 'oilWellMap'}
-        onClick={() => setActiveTab('oilWellMap')}
-        />
-        <SidebarItem 
-        icon={Activity} 
-        label="区块分析" 
-        active={activeTab === 'block'} 
-        onClick={() => setActiveTab('block')} 
-        />
-        <SidebarItem 
-        icon={Database} 
-        label="单井分析" 
-        active={activeTab === 'well'} 
-        onClick={() => setActiveTab('well')} 
-        />
-        <SidebarItem 
-        icon={AlertTriangle} 
-        label="重点监控" 
-        active={activeTab === 'analysis'} 
-        onClick={() => setActiveTab('analysis')} 
-        />
-        <SidebarItem
-        icon={TrendingUp}
-        label="对比分析"
-        active={activeTab === 'comparison'}
-        onClick={() => setActiveTab('comparison')}
-        />
-        <SidebarItem
-        icon={Target}
-        label="措施选井"
-        active={activeTab === 'measureWellSelection'}
-        onClick={() => setActiveTab('measureWellSelection')}
-        />
-        <SidebarItem
-        icon={ClipboardList}
-        label="措施跟踪"
-        active={activeTab === 'measures'}
-        onClick={() => setActiveTab('measures')}
-        />
-        <SidebarItem
-        icon={MessageSquare}
-        label="措施分析"
-        active={activeTab === 'measureAnalysis'}
-        onClick={() => setActiveTab('measureAnalysis')}
-        />
-        <SidebarItem
-        icon={Thermometer}
-        label="井温监控"
-        active={activeTab === 'wellTemperature'}
-        onClick={() => setActiveTab('wellTemperature')}
-        />
-        <SidebarItem
-        icon={FileSpreadsheet}
-        label="占产分析"
-        active={activeTab === 'occupancyAnalysis'}
-        onClick={() => setActiveTab('occupancyAnalysis')}
-        />
-        <SidebarItem
-        icon={Filter}
-        label="检泵跟踪"
-        active={activeTab === 'pumpAnalysis'}
-        onClick={() => setActiveTab('pumpAnalysis')}
-        />
-        <SidebarItem
-        icon={ClipboardList}
-        label="检泵分析"
-        active={activeTab === 'pumpDeepAnalysis'}
-        onClick={() => setActiveTab('pumpDeepAnalysis')}
-        />
-        <SidebarItem
-        icon={Droplets}
-        label="含水化验"
-        active={activeTab === 'waterLab'}
-        onClick={() => setActiveTab('waterLab')}
-        />
-        <SidebarItem
-        icon={TrendingUp}
-        label="产量预测"
-        active={activeTab === 'productionForecast'}
-        onClick={() => setActiveTab('productionForecast')}
-        />
+        {sidebarNavigationGroups.map((group) => {
+          const expanded = expandedSidebarGroup === group.key;
+
+          return (
+            <div key={group.key}>
+              <button
+                type="button"
+                onClick={() => setExpandedSidebarGroup(expanded ? null : group.key)}
+                className="flex w-full items-center justify-between px-5 py-3 text-left text-xs font-semibold tracking-wide text-slate-400 transition-colors hover:text-white"
+              >
+                <span>{group.label}</span>
+                <ChevronRight size={16} className={cn('transition-transform', expanded && 'rotate-90')} />
+              </button>
+              {expanded && group.items.map((item) => (
+                <SidebarItem
+                  key={item.tab}
+                  icon={sidebarIconMap[item.icon]}
+                  label={item.label}
+                  active={activeTab === item.tab}
+                  onClick={() => setActiveTab(item.tab)}
+                />
+              ))}
+            </div>
+          );
+        })}
 
         <div className="mt-8 border-t border-white/10 pt-4">
         <div className="px-5 py-3 flex items-center gap-3 text-gray-400">
