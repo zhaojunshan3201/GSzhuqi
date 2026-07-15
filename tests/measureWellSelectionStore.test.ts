@@ -108,6 +108,10 @@ test('records an import batch and scopes a well detail to its block', async () =
     const detail = await getSelectionWellDetail(db, 'A-1', 'B');
     assert.equal(detail?.score.block, 'B');
     assert.deepEqual(detail?.cycles.map((item) => item.block), ['B']);
+
+    const legacyDetail = await getSelectionWellDetail(db, 'A-1');
+    assert.equal(legacyDetail?.score.block, 'A');
+    assert.deepEqual(legacyDetail?.cycles.map((item) => item.block), ['B', 'A']);
   });
 });
 
