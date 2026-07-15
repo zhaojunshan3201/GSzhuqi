@@ -24,6 +24,8 @@ const headers = {
 } as const;
 
 type ColumnName = keyof typeof headers;
+type Columns = Record<ColumnName, number | undefined>;
+const requiredColumns: readonly ColumnName[] = ['block', 'wellName', 'transferDate', 'round'];
 
 export function parseMeasureWellWorkbook(workbook: XLSX.WorkBook): MeasureWellImportResult {
   const sheetName = workbook.SheetNames[0];
@@ -72,12 +74,12 @@ export function parseMeasureWellWorkbook(workbook: XLSX.WorkBook): MeasureWellIm
   return { cycles, skippedRows };
 }
 
-function findColumns(headerRow: unknown[]): Record<ColumnName, number> {
+function findColumns(headerRow: unknown[]): Columns {
   const locations = new Map(headerRow.map((value, index) => [normalizeHeader(value), index]));
-  const columns = {} as Record<ColumnName, number>;
+  const columns = {} as Columns;
   for (const [name, header] of Object.entries(headers) as Array<[ColumnName, string]>) {
     const column = locations.get(normalizeHeader(header));
-    if (column === undefined) throw new Error(`缺少必填列：${header}`);
+    if (column === undefined && requiredColumns.includes(name)) throw new Error(`缺少必填列：${header}`);
     columns[name] = column;
   }
   return columns;
@@ -91,26 +93,28 @@ function isBlank(value: unknown): boolean {
   return value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
 }
 
-function textAt(row: unknown[], column: number): string | undefined {
+function textAt(row: unknown[], column: number | undefined): string | undefined {
+  if (column === undefined) return undefined;
   const value = row[column];
   if (isBlank(value)) return undefined;
   return String(value).trim();
 }
 
-function numberAt(row: unknown[], column: number): number | undefined {
+function numberAt(row: unknown[], column: number | undefined): number | undefined {
+  if (column === undefined) return undefined;
   const value = row[column];
   if (isBlank(value)) return undefined;
   const number = typeof value === 'number' ? value : Number(String(value).trim());
   return Number.isFinite(number) ? number : undefined;
 }
 
-function roundAt(row: unknown[], column: number, fallback: number): number {
+function roundAt(row: unknown[], column: number | undefined, fallback: number): number {
   const digits = String(row[column] ?? '').match(/\d+/g)?.join('');
   const round = digits ? Number(digits) : fallback;
   return Number.isSafeInteger(round) ? round : fallback;
 }
 
-function booleanAt(row: unknown[], column: number): boolean | null {
+function booleanAt(row: unknown[], column: number | undefined): boolean | null {
   const value = textAt(row, column)?.toLowerCase();
   if (!value) return null;
   if (['是', 'y', 'yes', 'true', '1'].includes(value)) return true;
@@ -118,9 +122,10 @@ function booleanAt(row: unknown[], column: number): boolean | null {
   return null;
 }
 
-function dateAt(row: unknown[], column: number): string | undefined {
+function dateAt(row: unknown[], column: number | undefined): string | undefined {
+  if (column === undefined) return undefined;
   const value = row[column];
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return formatDate(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate());
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return formatDate(value.getFullYear(), value.getMonth() + 1, value.getDate());
   if (typeof value === 'number') {
     const date = XLSX.SSF.parse_date_code(value);
     return date ? formatDate(date.y, date.m, date.d) : undefined;

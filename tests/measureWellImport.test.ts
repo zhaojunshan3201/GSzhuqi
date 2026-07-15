@@ -62,3 +62,35 @@ test('uses a stable row-number fallback for a round value without digits and ign
   assert.equal(parsed.cycles[0].injectN2, true);
   assert.equal(parsed.cycles.length, 1);
 });
+
+test('preserves the local calendar day for Date cells', () => {
+  class LocalExcelDate extends Date {
+    getFullYear() { return 2024; }
+    getMonth() { return 10; }
+    getDate() { return 1; }
+    getUTCFullYear() { return 2024; }
+    getUTCMonth() { return 9; }
+    getUTCDate() { return 31; }
+  }
+  const workbook = workbookWithRows([
+    headers,
+    ['高21', '12站', '高3-70-68', '', 13, 2500, 16.2, 12, '否', '华66', 3.1, 86, 348],
+  ]);
+  workbook.Sheets[workbook.SheetNames[0]].D2 = { t: 'd', v: new LocalExcelDate(2024, 10, 1) };
+  const parsed = parseMeasureWellWorkbook(workbook);
+
+  assert.equal(parsed.cycles[0].transferDate, '2024-11-01');
+});
+
+test('accepts workbooks with only required headers', () => {
+  const parsed = parseMeasureWellWorkbook(workbookWithRows([
+    ['区块', '井号', '上轮转抽时间', '上轮轮次'],
+    ['高21', '高3-70-68', '2025.8.26', '补3'],
+  ]));
+
+  assert.deepEqual(parsed.cycles, [{
+    block: '高21', station: null, wellName: '高3-70-68', transferDate: '2025-08-26', round: 3,
+    designSteam: undefined, actualSteam: undefined, maxPressure: undefined, pressure: undefined,
+    rate: undefined, injectN2: null, boiler: null, peakOil: undefined, oilSeeingDays: undefined, cycleOil: undefined,
+  }]);
+});
