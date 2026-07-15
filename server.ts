@@ -26,6 +26,7 @@ import {
   type SelectionFilter,
 } from "./src/lib/measureWellSelectionStore.ts";
 import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
+import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 
 dotenv.config();
