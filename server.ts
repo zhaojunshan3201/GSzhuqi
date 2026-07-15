@@ -19,7 +19,13 @@ import {
   listWellTemperatureTests,
   replaceWellTemperatureTest,
 } from "./src/lib/wellTemperatureStore.ts";
-import { initMeasureWellSelectionTables } from "./src/lib/measureWellSelectionStore.ts";
+import {
+  getSelectionWellDetail,
+  initMeasureWellSelectionTables,
+  listSelectionWells,
+  type SelectionFilter,
+} from "./src/lib/measureWellSelectionStore.ts";
+import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 
 dotenv.config();
@@ -3169,6 +3175,58 @@ async function startServer() {
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
   });
   const wellTemperatureImportUploadMiddleware = handleMeasureImportUpload(wellTemperatureImportUpload);
+
+  const measureWellSelectionImportUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
+  });
+  const measureWellSelectionImportUploadMiddleware = handleMeasureImportUpload(measureWellSelectionImportUpload);
+
+  app.post("/api/measure-well-selection/import", measureWellSelectionImportUploadMiddleware, async (req, res) => {
+    const file = (req as any).file;
+    if (!file || !file.originalname.toLowerCase().endsWith(".xlsx")) {
+      res.status(400).json({ success: false, message: "请上传 .xlsx 文件" });
+      return;
+    }
+    try {
+      const workbook = XLSX.read(file.buffer, { type: "buffer" });
+      const data = await importMeasureWellWorkbook(localDb, file.originalname, workbook);
+      res.json({ success: true, data });
+    } catch (error: any) {
+      const message = error?.message || "措施选井文件解析失败";
+      const clientError = /工作簿|工作表|表头|必填列|不能为空|无效/.test(message);
+      res.status(clientError ? 400 : 500).json({ success: false, message });
+    }
+  });
+
+  app.get("/api/measure-well-selection/wells", async (req, res) => {
+    try {
+      const readFilter = (name: "block" | "station" | "grade") =>
+        typeof req.query[name] === "string" ? req.query[name] : undefined;
+      const filter: SelectionFilter = {
+        block: readFilter("block"),
+        station: readFilter("station"),
+        grade: readFilter("grade") as SelectionFilter["grade"],
+      };
+      res.json({ success: true, data: await listSelectionWells(localDb, filter) });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "措施选井列表加载失败" });
+    }
+  });
+
+  app.get("/api/measure-well-selection/wells/:wellName", async (req, res) => {
+    try {
+      const block = typeof req.query.block === "string" ? req.query.block : undefined;
+      const data = await getSelectionWellDetail(localDb, req.params.wellName, block);
+      if (!data) {
+        res.status(404).json({ success: false, message: "未找到措施选井数据" });
+        return;
+      }
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "措施选井详情加载失败" });
+    }
+  });
 
   app.post("/api/well-temperature-tests/import", wellTemperatureImportUploadMiddleware, async (req, res) => {
     const file = (req as any).file;

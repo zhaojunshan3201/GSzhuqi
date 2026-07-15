@@ -154,6 +154,13 @@ export function replaceSelectionScores(db: Database, rows: readonly EvaluatedWel
   });
 }
 
+export async function listSelectionCycles(db: Database): Promise<StoredSelectionCycle[]> {
+  const rows = await db.all(
+    'SELECT * FROM measure_well_cycles ORDER BY transfer_date DESC, round_no DESC, well_name ASC',
+  );
+  return rows.map(toCycle);
+}
+
 export async function listSelectionWells(db: Database, filter: SelectionFilter = {}): Promise<SelectionWellSummary[]> {
   const where: string[] = [];
   const values: unknown[] = [];

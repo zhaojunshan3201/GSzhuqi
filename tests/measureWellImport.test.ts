@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
 
-import { parseMeasureWellWorkbook } from '../src/lib/measureWellImport.ts';
+import { importMeasureWellWorkbook, parseMeasureWellWorkbook } from '../src/lib/measureWellImport.ts';
+import { initMeasureWellSelectionTables, listSelectionWells } from '../src/lib/measureWellSelectionStore.ts';
 
 const headers = [
   '区块', '井站', '井号', '上轮转抽时间', '上轮轮次', '上轮设计注汽量',
@@ -16,6 +22,34 @@ function workbookWithRows(rows: unknown[][]): XLSX.WorkBook {
   XLSX.utils.book_append_sheet(workbook, sheet, '措施选井');
   return workbook;
 }
+
+async function withStore(run: (db: any) => Promise<void>) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'measure-well-import-'));
+  const db = await open({ filename: path.join(directory, 'test.db'), driver: sqlite3.Database });
+  try {
+    await initMeasureWellSelectionTables(db);
+    await run(db);
+  } finally {
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test('stores parsed cycles and recalculates the selection score snapshot', async () => {
+  await withStore(async (db) => {
+    const rows: unknown[][] = [headers];
+    for (let index = 1; index <= 27; index += 1) {
+      rows.push(['高3', '13站', `高3-${index}`, '2025.8.26', index, 2000, 13.8, 18, '否', '高采03-1', 5.93, 1, 662.4]);
+    }
+
+    const result = await importMeasureWellWorkbook(db, '措施选井.xlsx', workbookWithRows(rows));
+
+    assert.equal(result.importedCount, 27);
+    assert.equal(result.wellCount, 27);
+    assert.equal((await listSelectionWells(db)).length, 27);
+    assert.equal((await db.get('SELECT actual_steam FROM measure_well_cycles LIMIT 1')).actual_steam, 2000);
+  });
+});
 
 test('parses selection headers with whitespace and uses design steam for actual steam', () => {
   const parsed = parseMeasureWellWorkbook(workbookWithRows([

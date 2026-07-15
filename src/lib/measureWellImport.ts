@@ -1,10 +1,41 @@
 import XLSX from 'xlsx';
+import type { Database } from 'sqlite';
 
-import type { StoredSelectionCycle } from './measureWellSelectionStore.ts';
+import { evaluateWells } from './measureWellSelection.ts';
+import {
+  createSelectionImport,
+  listSelectionCycles,
+  listSelectionWells,
+  replaceSelectionScores,
+  type StoredSelectionCycle,
+  upsertSelectionCycles,
+} from './measureWellSelectionStore.ts';
 
 export interface MeasureWellImportResult {
   cycles: StoredSelectionCycle[];
   skippedRows: Array<{ row: number; reason: string }>;
+}
+
+export interface MeasureWellWorkbookImportResult {
+  importedCount: number;
+  skippedRows: Array<{ row: number; reason: string }>;
+  wellCount: number;
+}
+
+export async function importMeasureWellWorkbook(
+  db: Database,
+  fileName: string,
+  workbook: XLSX.WorkBook,
+): Promise<MeasureWellWorkbookImportResult> {
+  const parsed = parseMeasureWellWorkbook(workbook);
+  const importId = await createSelectionImport(db, fileName, parsed.cycles.length);
+  await upsertSelectionCycles(db, parsed.cycles.map((cycle) => ({ ...cycle, importId })));
+  await replaceSelectionScores(db, evaluateWells(await listSelectionCycles(db)));
+  return {
+    importedCount: parsed.cycles.length,
+    skippedRows: parsed.skippedRows,
+    wellCount: (await listSelectionWells(db)).length,
+  };
 }
 
 const headers = {
