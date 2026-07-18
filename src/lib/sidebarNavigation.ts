@@ -15,7 +15,8 @@ export type SidebarTab =
   | 'measureWellSelection'
   | 'measures'
   | 'measureAnalysis'
-  | 'productionForecast';
+  | 'productionForecast'
+  | 'externalTransferTracking';
 
 export type SidebarIcon =
   | 'LayoutDashboard'
@@ -89,6 +90,9 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     items: [{ tab: 'productionForecast', label: '产量预测', icon: 'TrendingUp' }],
   },
 ];
+
+const productionNavigation = sidebarNavigationGroups.find((group) => group.key === 'production');
+productionNavigation?.items.push({ tab: 'externalTransferTracking', label: '外输跟踪', icon: 'TrendingUp' });
 
 export const getSidebarGroupKey = (tab: string) => (
   sidebarNavigationGroups.find((group) => group.items.some((item) => item.tab === tab))?.key
