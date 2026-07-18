@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
 
 import { parseExternalTransferWorkbook, summarizeExternalTransfer } from '../src/lib/externalTransferTracking.ts';
+
+test('ExternalTransferTracking uses the shared chart option helper', async () => {
+  const source = await readFile(new URL('../src/components/ExternalTransferTracking.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /getExternalTransferChartOption/);
+  assert.doesNotMatch(source, /function chartOption/);
+});
 
 const headers = ['日期', '计量站', '井数', '日产液总量', '日产油总量', '日掺油总量', '综合含水', '外输', '外输差', '排污', '回流', '稀油用量（方）'];
 
