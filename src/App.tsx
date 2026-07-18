@@ -35,6 +35,7 @@ import * as XLSX from 'xlsx';
 import { getWellTemperatureChartOption } from './wellTemperatureChart';
 import { MeasureWellSelection } from './components/MeasureWellSelection';
 import { OilWellMap } from './components/OilWellMap';
+import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -5910,6 +5911,7 @@ export default function App() {
           <div className="flex items-center gap-3">
           <Menu className="text-gray-400" size={20} />
           <h2 className="text-gray-700 font-bold text-lg">
+          {activeTab === 'externalTransferTracking' && '外输跟踪'}
           {activeTab === 'dashboard' && '系统概览'}
           {activeTab === 'oilWellMap' && '油井位图'}
           {activeTab === 'block' && '区块生产动态生成器'}
@@ -5964,6 +5966,7 @@ export default function App() {
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
               {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} />}
+              {activeTab === 'externalTransferTracking' && <ExternalTransferTracking />}
               {activeTab === 'dashboard' && (
                 <div className="page-stack animate-in fade-in duration-500">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
