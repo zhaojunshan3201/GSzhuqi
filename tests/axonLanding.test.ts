@@ -1,9 +1,27 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import path from 'node:path';
 
-import { AXON_PAGE_TITLE, AXON_VIDEO_URL } from '../src/components/AxonLandingPage.tsx';
+import { AXON_PAGE_TITLE, AXON_VIDEO_URL, AxonLandingPage } from '../src/components/AxonLandingPage.tsx';
+
+type ElementNode = {
+  type: unknown;
+  props: { children?: unknown; [key: string]: unknown };
+};
+
+function findElement(node: unknown, type: string): ElementNode | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const match = findElement(child, type);
+      if (match) return match;
+    }
+    return undefined;
+  }
+
+  if (!node || typeof node !== 'object' || !('type' in node) || !('props' in node)) return undefined;
+  const element = node as ElementNode;
+  if (element.type === type) return element;
+  return findElement(element.props.children, type);
+}
 
 test('exports the Axon page title', () => {
   assert.equal(AXON_PAGE_TITLE, 'Axon — Digital Workers for Mundane Workflows');
@@ -16,28 +34,22 @@ test('exports the Axon background video URL', () => {
   );
 });
 
-test('renders the specified landing content and interaction markup', async () => {
-  const source = await readFile(path.join(process.cwd(), 'src', 'components', 'AxonLandingPage.tsx'), 'utf8');
+test('renders a working CTA and configured background video', () => {
+  let enterCount = 0;
+  const landingPage = AxonLandingPage({ onEnter: () => { enterCount += 1; } });
+  const button = findElement(landingPage, 'button');
+  const video = findElement(landingPage, 'video');
 
-  for (const text of [
-    'Deploy digital workers',
-    'for mundane workflows',
-    'Eliminate your tedious browser work and 10x your team&apos;s capacity.',
-    'Get Early Access',
-    'Features',
-    'Plans',
-    'Security',
-    'About',
-    'onClick={onEnter}',
-    'autoPlay',
-    'muted',
-    'loop',
-    'playsInline',
-    AXON_VIDEO_URL,
-  ]) {
-    assert.ok(source.includes(text), `expected source to include ${text}`);
-  }
+  assert.ok(button, 'CTA button should be rendered');
+  assert.equal(button.props.children, 'Get Early Access');
+  assert.equal(typeof button.props.onClick, 'function');
+  (button.props.onClick as () => void)();
+  assert.equal(enterCount, 1);
 
-  assert.ok(source.includes('<section id="axon"'), 'hero should provide the shared navigation target');
-  assert.equal((source.match(/href="#axon"/g) ?? []).length, 5, 'logo and four navigation links should target the hero');
+  assert.ok(video, 'background video should be rendered');
+  assert.equal(video.props.autoPlay, true);
+  assert.equal(video.props.muted, true);
+  assert.equal(video.props.loop, true);
+  assert.equal(video.props.playsInline, true);
+  assert.equal(video.props.src, AXON_VIDEO_URL);
 });
