@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getDateLabelInterval } from '../src/lib/externalTransferChart';
+import { getDateLabelInterval, getExternalTransferChartOption } from '../src/lib/externalTransferChart';
 
 test('getDateLabelInterval uses adaptive date label boundaries', () => {
   const cases = [
@@ -24,4 +24,33 @@ test('getDateLabelInterval keeps visible labels within the readable range', () =
 
     assert.ok(visibleLabelCount >= 6 && visibleLabelCount <= 12);
   }
+});
+
+test('getExternalTransferChartOption styles dense two-line charts for readability', () => {
+  const daily = Array.from({ length: 20 }, (_, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, '0')}`,
+    liquid: index,
+    transfer: index + 1,
+  }));
+
+  const option = getExternalTransferChartOption('井口液与外输', daily, [
+    { name: '日产液总量', metric: 'liquid' },
+    { name: '外输', metric: 'transfer' },
+  ]);
+
+  assert.deepEqual(option.xAxis.axisLabel, { interval: 1, rotate: 0, hideOverlap: true });
+  assert.equal('lineStyle' in option.series[0] && option.series[0].lineStyle.type, 'solid');
+  assert.equal('lineStyle' in option.series[1] && option.series[1].lineStyle.type, 'dashed');
+  assert.notEqual(option.series[0].itemStyle.color, option.series[1].itemStyle.color);
+  assert.equal(option.dataZoom[1].bottom, 14);
+});
+
+test('getExternalTransferChartOption styles dual-axis bar and right axis by its series color', () => {
+  const option = getExternalTransferChartOption('井口产油', [{ date: '2026-07-01', oil: 10, wellCount: 4 }], [
+    { name: '日产油总量', metric: 'oil', type: 'bar' },
+    { name: '井数', metric: 'wellCount', yAxisIndex: 1 },
+  ], true);
+
+  assert.deepEqual(option.series[0].itemStyle.borderRadius, [4, 4, 0, 0]);
+  assert.equal(option.yAxis[1].axisLabel.color, option.series[1].itemStyle.color);
 });
