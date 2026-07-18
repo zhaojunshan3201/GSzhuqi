@@ -94,3 +94,15 @@ test('uses the approved fixed color for every external transfer metric', () => {
     '#1e3a8a', '#16a34a', '#eab308', '#6b7280', '#ec4899',
   ]);
 });
+
+test('renders oil as a line and well count as bars', () => {
+  const option = getExternalTransferChartOption('井口产油', [{ date: '2026-07-01', oil: 10, wellCount: 4 }], [
+    { name: '日产油总量', metric: 'oil' },
+    { name: '井数', metric: 'wellCount', type: 'bar', yAxisIndex: 1 },
+  ], true);
+
+  assert.equal(option.series[0].type, 'line');
+  assert.equal(option.series[1].type, 'bar');
+  assert.equal(option.series[0].itemStyle.color, '#ef4444');
+  assert.equal(option.series[1].itemStyle.color, '#1e3a8a');
+});

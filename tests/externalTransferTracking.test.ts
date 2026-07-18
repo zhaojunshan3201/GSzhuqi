@@ -12,6 +12,13 @@ test('ExternalTransferTracking uses the shared chart option helper', async () =>
   assert.doesNotMatch(source, /function chartOption/);
 });
 
+test('ExternalTransferTracking renders oil as a line and well count as bars', async () => {
+  const source = await readFile(new URL('../src/components/ExternalTransferTracking.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /metric: 'oil' \}/);
+  assert.match(source, /metric: 'wellCount', type: 'bar', yAxisIndex: 1/);
+});
+
 const headers = ['日期', '计量站', '井数', '日产液总量', '日产油总量', '日掺油总量', '综合含水', '外输', '外输差', '排污', '回流', '稀油用量（方）'];
 
 function workbook(sheetName: string, rows: unknown[][]) {

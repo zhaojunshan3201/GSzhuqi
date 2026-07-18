@@ -103,7 +103,7 @@ export function ExternalTransferTracking() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <div className="app-card p-3"><ReactECharts option={getExternalTransferChartOption('井口液与外输', daily, [{ name: '日产液总量', metric: 'liquid' }, { name: '外输', metric: 'transfer' }])} style={{ height: 320 }} /></div>
           <div className="app-card p-3"><ReactECharts option={getExternalTransferChartOption('稀油用量与井口稀油', daily, [{ name: '日掺油总量', metric: 'diluent' }, { name: '稀油用量（方）', metric: 'thinOil' }])} style={{ height: 320 }} /></div>
-          <div className="app-card p-3"><ReactECharts option={getExternalTransferChartOption('井口产油', daily, [{ name: '日产油总量', metric: 'oil', type: 'bar' }, { name: '井数', metric: 'wellCount', yAxisIndex: 1 }], true)} style={{ height: 320 }} /></div>
+          <div className="app-card p-3"><ReactECharts option={getExternalTransferChartOption('井口产油', daily, [{ name: '日产油总量', metric: 'oil' }, { name: '井数', metric: 'wellCount', type: 'bar', yAxisIndex: 1 }], true)} style={{ height: 320 }} /></div>
           <div className="app-card p-3"><ReactECharts option={getExternalTransferChartOption('含水', daily, [{ name: '综合含水', metric: 'waterCut' }])} style={{ height: 320 }} /></div>
           <div className="app-card p-3"><ReactECharts option={getExternalTransferChartOption('外输差值', daily, [{ name: '外输差', metric: 'transferDifference' }])} style={{ height: 320 }} /></div>
           <div className="app-card p-3"><ReactECharts option={getExternalTransferChartOption('排污/回流', daily, [{ name: '排污', metric: 'sewage' }, { name: '回流', metric: 'returnFlow', yAxisIndex: 1 }], true)} style={{ height: 320 }} /></div>
