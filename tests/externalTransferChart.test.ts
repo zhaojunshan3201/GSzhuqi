@@ -90,7 +90,7 @@ test('uses the approved fixed color for every external transfer metric', () => {
   ]);
 
   assert.deepEqual(option.series.map((item) => item.itemStyle.color), [
-    '#ef4444', '#2563eb', '#7c3aed', '#2563eb', '#ef4444',
+    '#ef4444', '#2563eb', '#8b5a2b', '#2563eb', '#ef4444',
     '#1e3a8a', '#16a34a', '#eab308', '#6b7280', '#ec4899',
   ]);
 });

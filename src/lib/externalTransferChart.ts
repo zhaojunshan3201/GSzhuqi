@@ -12,7 +12,7 @@ export interface ExternalTransferChartSeries<T extends string> {
 const metricColors: Record<string, string> = {
   liquid: '#ef4444',
   transfer: '#2563eb',
-  diluent: '#7c3aed',
+  diluent: '#8b5a2b',
   thinOil: '#2563eb',
   oil: '#ef4444',
   wellCount: '#1e3a8a',
