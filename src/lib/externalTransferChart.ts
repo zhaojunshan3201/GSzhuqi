@@ -23,11 +23,13 @@ const metricColors: Record<string, string> = {
 };
 
 const fallbackColors = ['#2563eb', '#84cc16', '#f59e0b', '#8b5cf6'];
-const valueLabel = {
+function valueLabel(position: 'top' | 'bottom') {
+  return {
   show: true,
-  position: 'top',
+  position,
   formatter: ({ value }: { value: unknown }) => typeof value === 'number' ? value.toFixed(1) : '',
-};
+  };
+}
 
 export function getExternalTransferChartOption<T extends string>(
   title: string,
@@ -40,6 +42,7 @@ export function getExternalTransferChartOption<T extends string>(
   const configuredSecondaryAxisIndex = series.findIndex((item) => item.yAxisIndex === 1);
   const primaryAxisIndex = configuredPrimaryAxisIndex === -1 ? 0 : configuredPrimaryAxisIndex;
   const secondaryAxisIndex = configuredSecondaryAxisIndex === -1 ? Math.min(1, series.length - 1) : configuredSecondaryAxisIndex;
+  const lineSeriesCount = series.filter((item) => (item.type ?? 'line') === 'line').length;
 
   return {
     title: { text: title, left: 'center', textStyle: { color: '#1f2937', fontSize: 17, fontWeight: 600 } },
@@ -72,6 +75,8 @@ export function getExternalTransferChartOption<T extends string>(
     series: series.map((item, index) => {
       const color = seriesColors[index];
       const type = item.type ?? 'line';
+      const lineIndex = series.slice(0, index + 1).filter((candidate) => (candidate.type ?? 'line') === 'line').length - 1;
+      const label = valueLabel(type === 'line' && lineSeriesCount > 1 && lineIndex > 0 ? 'bottom' : 'top');
 
       return {
         name: item.name,
@@ -79,7 +84,7 @@ export function getExternalTransferChartOption<T extends string>(
         yAxisIndex: item.yAxisIndex ?? 0,
         data: daily.map((row) => row[item.metric]),
         ...(type === 'bar'
-          ? { barMaxWidth: 28, itemStyle: { color, borderRadius: [4, 4, 0, 0] }, label: valueLabel }
+          ? { barMaxWidth: 28, itemStyle: { color, borderRadius: [4, 4, 0, 0] }, label }
           : {
             symbol: 'circle',
             symbolSize: 5,
@@ -87,7 +92,7 @@ export function getExternalTransferChartOption<T extends string>(
             connectNulls: false,
             lineStyle: { width: 2.5, type: index === 0 ? 'solid' : 'dashed' },
             itemStyle: { color },
-            label: valueLabel,
+            label,
           }),
       };
     }),

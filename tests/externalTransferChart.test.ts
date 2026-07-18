@@ -42,6 +42,8 @@ test('getExternalTransferChartOption styles dense two-line charts for readabilit
   assert.equal('lineStyle' in option.series[0] && option.series[0].lineStyle.type, 'solid');
   assert.equal('lineStyle' in option.series[1] && option.series[1].lineStyle.type, 'dashed');
   assert.notEqual(option.series[0].itemStyle.color, option.series[1].itemStyle.color);
+  assert.equal(option.series[0].label.position, 'top');
+  assert.equal(option.series[1].label.position, 'bottom');
   assert.equal(option.dataZoom[1].bottom, 14);
 });
 
