@@ -6,7 +6,7 @@ export interface ExternalTransferChartSeries<T extends string> {
   name: string;
   metric: T;
   type?: 'line' | 'bar';
-  yAxisIndex?: number;
+  yAxisIndex?: 0 | 1;
 }
 
 const chartColors = ['#2563eb', '#84cc16', '#f59e0b', '#8b5cf6'];
@@ -18,6 +18,8 @@ export function getExternalTransferChartOption<T extends string>(
   dualAxis = false,
 ) {
   const seriesColors = series.map((_, index) => chartColors[index % chartColors.length]);
+  const configuredSecondaryAxisIndex = series.findIndex((item) => item.yAxisIndex === 1);
+  const secondaryAxisIndex = configuredSecondaryAxisIndex === -1 ? Math.min(1, series.length - 1) : configuredSecondaryAxisIndex;
 
   return {
     title: { text: title, left: 'center', textStyle: { color: '#1f2937', fontSize: 17, fontWeight: 600 } },
@@ -35,10 +37,10 @@ export function getExternalTransferChartOption<T extends string>(
         { type: 'value', name: series[0]?.name },
         {
           type: 'value',
-          name: series[1]?.name,
+          name: series[secondaryAxisIndex]?.name,
           position: 'right',
-          axisLabel: { color: seriesColors[1] },
-          axisLine: { lineStyle: { color: seriesColors[1] } },
+          axisLabel: { color: seriesColors[secondaryAxisIndex] },
+          axisLine: { lineStyle: { color: seriesColors[secondaryAxisIndex] } },
         },
       ]
       : { type: 'value' },

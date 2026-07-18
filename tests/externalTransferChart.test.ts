@@ -54,3 +54,14 @@ test('getExternalTransferChartOption styles dual-axis bar and right axis by its 
   assert.deepEqual(option.series[0].itemStyle.borderRadius, [4, 4, 0, 0]);
   assert.equal(option.yAxis[1].axisLabel.color, option.series[1].itemStyle.color);
 });
+
+test('getExternalTransferChartOption uses the configured secondary-axis series metadata', () => {
+  const option = getExternalTransferChartOption('多系列双轴', [{ date: '2026-07-01', liquid: 10, oil: 8, wellCount: 4 }], [
+    { name: '日产液总量', metric: 'liquid' },
+    { name: '日产油总量', metric: 'oil' },
+    { name: '井数', metric: 'wellCount', yAxisIndex: 1 },
+  ], true);
+
+  assert.equal(option.yAxis[1].name, '井数');
+  assert.equal(option.yAxis[1].axisLabel.color, option.series[2].itemStyle.color);
+});
