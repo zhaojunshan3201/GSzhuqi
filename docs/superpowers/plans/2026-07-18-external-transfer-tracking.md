@@ -130,3 +130,51 @@ Run: git add src/lib/sidebarNavigation.ts src/App.tsx tests/sidebarNavigation.te
 - Sheet1 限制、字段校验、空/错误状态由 Task 1 和 2 覆盖。
 - 四图、计量站多选、日期范围及连续日期趋势由 Task 2 覆盖。
 - 未实现自动异常阈值，符合仅供人工判读的范围。
+
+## 2026-07-18 图表扩展
+
+### Task 4: 增加外输差、排污和回流指标
+
+**Files:**
+- Modify: `tests/externalTransferTracking.test.ts`
+- Modify: `src/lib/externalTransferTracking.ts`
+- Modify: `src/components/ExternalTransferTracking.tsx`
+
+- [ ] **Step 1: 写入失败测试**
+
+在测试工作簿表头加入 `外输差`、`排污`、`回流`，并在样例记录中加入数值。断言解析结果包含 `transferDifference`、`sewage`、`returnFlow`；多站同日汇总时三项数值均求和。
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `npm test -- tests/externalTransferTracking.test.ts`
+
+Expected: FAIL，新增字段尚未定义。
+
+- [ ] **Step 3: 更新数据模型与解析**
+
+在 `ExternalTransferRecord` 和 `ExternalTransferDaily` 中新增 `transferDifference`、`sewage`、`returnFlow`，三个字段均为 `number | null`。在表头映射中分别绑定 `外输差`、`排污`、`回流`，并在 `summarizeExternalTransfer` 中逐日求和。
+
+- [ ] **Step 4: 增加两张图表**
+
+在现有看板网格中增加：
+
+```ts
+chartOption('外输差值', daily, [{ name: '外输差', metric: 'transferDifference' }])
+chartOption('排污/回流', daily, [
+  { name: '排污', metric: 'sewage' },
+  { name: '回流', metric: 'returnFlow', yAxisIndex: 1 },
+], true)
+```
+
+排污/回流图必须传入双轴配置，确保排污为左侧主坐标轴、回流为右侧副坐标轴。
+
+- [ ] **Step 5: 验证并提交**
+
+Run: `npm test; npm run build`
+
+Expected: 两条命令均 PASS。
+
+```bash
+git add src/lib/externalTransferTracking.ts src/components/ExternalTransferTracking.tsx tests/externalTransferTracking.test.ts
+git commit -m "feat: add external transfer difference charts"
+```

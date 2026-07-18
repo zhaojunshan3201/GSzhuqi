@@ -9,6 +9,9 @@ export interface ExternalTransferRecord {
   diluent: number | null;
   waterCut: number | null;
   transfer: number | null;
+  transferDifference: number | null;
+  sewage: number | null;
+  returnFlow: number | null;
   thinOil: number | null;
 }
 
@@ -23,6 +26,9 @@ const headers = {
   diluent: '日掺油总量',
   waterCut: '综合含水',
   transfer: '外输',
+  transferDifference: '外输差',
+  sewage: '排污',
+  returnFlow: '回流',
   thinOil: '稀油用量（方）',
 } as const;
 
@@ -53,6 +59,9 @@ export function parseExternalTransferWorkbook(workbook: XLSX.WorkBook) {
       diluent: normalizeNumber(valueAt(row, 'diluent')),
       waterCut: normalizeNumber(valueAt(row, 'waterCut')),
       transfer: normalizeNumber(valueAt(row, 'transfer')),
+      transferDifference: normalizeNumber(valueAt(row, 'transferDifference')),
+      sewage: normalizeNumber(valueAt(row, 'sewage')),
+      returnFlow: normalizeNumber(valueAt(row, 'returnFlow')),
       thinOil: normalizeNumber(valueAt(row, 'thinOil')),
     }];
   });
@@ -91,6 +100,9 @@ export function summarizeExternalTransfer(
       diluent: sum('diluent'),
       waterCut: totalWaterWells ? totalWaterWeight / totalWaterWells : null,
       transfer: sum('transfer'),
+      transferDifference: sum('transferDifference'),
+      sewage: sum('sewage'),
+      returnFlow: sum('returnFlow'),
       thinOil: sum('thinOil'),
     };
   });
