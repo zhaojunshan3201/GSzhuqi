@@ -29,6 +29,7 @@ import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts";
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
+import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 
 dotenv.config();
 
@@ -994,6 +995,7 @@ async function initLocalDb() {
 
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
+  await initExternalTransferTables(localDb);
 
   // Bootstrap default admin if no users exist
   const userCount = await localDb.get("SELECT COUNT(*) as count FROM users");
@@ -3943,6 +3945,28 @@ app.post("/api/register", async (req, res) => {
   });
 
   // --- Pump Tracking APIs ---
+  app.post("/api/external-transfer/upload", async (req, res) => {
+    try {
+      const { fileName, records } = req.body || {};
+      if (!Array.isArray(records) || records.length === 0) {
+        res.status(400).json({ success: false, message: "缺少有效外输数据" });
+        return;
+      }
+      await replaceExternalTransferUpload(localDb, { fileName: String(fileName || ''), records });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: `保存外输数据失败: ${err.message}` });
+    }
+  });
+
+  app.get("/api/external-transfer/upload", async (_req, res) => {
+    try {
+      res.json({ success: true, data: await getExternalTransferUpload(localDb) });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: `读取外输数据失败: ${err.message}` });
+    }
+  });
+
   app.post("/api/pump-tracking/upload-data", async (req, res) => {
     try {
       const { fileName, sheetName, rows, columns } = req.body || {};

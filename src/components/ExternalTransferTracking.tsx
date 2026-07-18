@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import * as XLSX from 'xlsx';
 import { FileSpreadsheet, RefreshCw, Upload } from 'lucide-react';
@@ -26,6 +26,23 @@ export function ExternalTransferTracking() {
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
 
+  const applyUpload = (upload: { fileName: string; records: ExternalTransferRecord[] }) => {
+    const dates = upload.records.map((record) => record.date).sort();
+    const stationList = [...new Set(upload.records.map((record) => record.station))].sort((left, right) => left.localeCompare(right, 'zh-CN'));
+    setRecords(upload.records);
+    setStations(stationList);
+    setSelectedStations(new Set(stationList));
+    setStartDate(dates[0] ?? '');
+    setEndDate(dates.at(-1) ?? '');
+    setFileName(upload.fileName);
+  };
+
+  useEffect(() => {
+    void fetch('/api/external-transfer/upload').then((response) => response.json()).then((result) => {
+      if (result.success && result.data) applyUpload(result.data);
+    }).catch(() => undefined);
+  }, []);
+
   const daily = useMemo(
     () => startDate && endDate ? summarizeExternalTransferByTenDayPeriod(summarizeExternalTransfer(records, selectedStations, startDate, endDate)) : [],
     [records, selectedStations, startDate, endDate],
@@ -42,12 +59,12 @@ export function ExternalTransferTracking() {
       const dates = parsed.records.map((record) => record.date).sort();
       if (!dates.length) throw new Error('Sheet1 中没有可用的日期和计量站数据');
 
-      setRecords(parsed.records);
-      setStations(parsed.stations);
-      setSelectedStations(new Set(parsed.stations));
-      setStartDate(dates[0]);
-      setEndDate(dates.at(-1) ?? dates[0]);
-      setFileName(file.name);
+      const response = await fetch('/api/external-transfer/upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: file.name, records: parsed.records }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || '保存外输数据失败');
+      applyUpload({ fileName: file.name, records: parsed.records });
       setError('');
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : '文件读取失败，请重新上传');
