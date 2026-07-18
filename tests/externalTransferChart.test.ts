@@ -118,3 +118,18 @@ test('shows a value label for every ten-day chart point', () => {
   assert.equal(option.series[0].label.position, 'top');
   assert.equal(option.series[0].label.formatter({ value: 10.456 }), '10.5');
 });
+
+test('places each dual-line value label above or below by its relative height', () => {
+  const option = getExternalTransferChartOption('双曲线', [
+    { date: '2026-07上旬', liquid: 100, transfer: 200 },
+    { date: '2026-07中旬', liquid: 300, transfer: 150 },
+  ], [
+    { name: '日产液总量', metric: 'liquid' },
+    { name: '外输', metric: 'transfer' },
+  ]);
+
+  assert.equal(option.series[0].data[0].label.position, 'bottom');
+  assert.equal(option.series[1].data[0].label.position, 'top');
+  assert.equal(option.series[0].data[1].label.position, 'top');
+  assert.equal(option.series[1].data[1].label.position, 'bottom');
+});

@@ -42,7 +42,8 @@ export function getExternalTransferChartOption<T extends string>(
   const configuredSecondaryAxisIndex = series.findIndex((item) => item.yAxisIndex === 1);
   const primaryAxisIndex = configuredPrimaryAxisIndex === -1 ? 0 : configuredPrimaryAxisIndex;
   const secondaryAxisIndex = configuredSecondaryAxisIndex === -1 ? Math.min(1, series.length - 1) : configuredSecondaryAxisIndex;
-  const lineSeriesCount = series.filter((item) => (item.type ?? 'line') === 'line').length;
+  const lineSeries = series.filter((item) => (item.type ?? 'line') === 'line');
+  const lineSeriesCount = lineSeries.length;
 
   return {
     title: { text: title, left: 'center', textStyle: { color: '#1f2937', fontSize: 17, fontWeight: 600 } },
@@ -77,12 +78,19 @@ export function getExternalTransferChartOption<T extends string>(
       const type = item.type ?? 'line';
       const lineIndex = series.slice(0, index + 1).filter((candidate) => (candidate.type ?? 'line') === 'line').length - 1;
       const label = valueLabel(type === 'line' && lineSeriesCount > 1 && lineIndex > 0 ? 'bottom' : 'top');
+      const data = daily.map((row) => {
+        const value = row[item.metric];
+        if (type !== 'line' || lineSeriesCount < 2 || value === null) return value;
+
+        const lineValues = lineSeries.map((line) => row[line.metric]).filter((lineValue): lineValue is number => lineValue !== null);
+        return { value, label: valueLabel(value >= Math.max(...lineValues) ? 'top' : 'bottom') };
+      });
 
       return {
         name: item.name,
         type,
         yAxisIndex: item.yAxisIndex ?? 0,
-        data: daily.map((row) => row[item.metric]),
+        data,
         ...(type === 'bar'
           ? { barMaxWidth: 28, itemStyle: { color, borderRadius: [4, 4, 0, 0] }, label }
           : {
