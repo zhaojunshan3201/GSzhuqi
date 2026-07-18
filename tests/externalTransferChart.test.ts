@@ -76,3 +76,21 @@ test('getExternalTransferChartOption uses the configured primary-axis series met
   assert.equal(option.yAxis[1].name, '井数');
   assert.equal(option.yAxis[0].axisLabel.color, option.series[1].itemStyle.color);
 });
+
+test('uses the approved fixed color for every external transfer metric', () => {
+  const option = getExternalTransferChartOption('颜色映射', [{
+    date: '2026-07-01', liquid: 1, transfer: 1, diluent: 1, thinOil: 1, oil: 1,
+    wellCount: 1, waterCut: 1, transferDifference: 1, sewage: 1, returnFlow: 1,
+  }], [
+    { name: '日产液总量', metric: 'liquid' }, { name: '外输', metric: 'transfer' },
+    { name: '日掺油总量', metric: 'diluent' }, { name: '稀油用量', metric: 'thinOil' },
+    { name: '日产油总量', metric: 'oil' }, { name: '井数', metric: 'wellCount' },
+    { name: '含水', metric: 'waterCut' }, { name: '外输差值', metric: 'transferDifference' },
+    { name: '排污', metric: 'sewage' }, { name: '回流', metric: 'returnFlow' },
+  ]);
+
+  assert.deepEqual(option.series.map((item) => item.itemStyle.color), [
+    '#ef4444', '#2563eb', '#7c3aed', '#2563eb', '#ef4444',
+    '#1e3a8a', '#16a34a', '#eab308', '#6b7280', '#ec4899',
+  ]);
+});

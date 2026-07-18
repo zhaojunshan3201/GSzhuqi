@@ -9,7 +9,20 @@ export interface ExternalTransferChartSeries<T extends string> {
   yAxisIndex?: 0 | 1;
 }
 
-const chartColors = ['#2563eb', '#84cc16', '#f59e0b', '#8b5cf6'];
+const metricColors: Record<string, string> = {
+  liquid: '#ef4444',
+  transfer: '#2563eb',
+  diluent: '#7c3aed',
+  thinOil: '#2563eb',
+  oil: '#ef4444',
+  wellCount: '#1e3a8a',
+  waterCut: '#16a34a',
+  transferDifference: '#eab308',
+  sewage: '#6b7280',
+  returnFlow: '#ec4899',
+};
+
+const fallbackColors = ['#2563eb', '#84cc16', '#f59e0b', '#8b5cf6'];
 
 export function getExternalTransferChartOption<T extends string>(
   title: string,
@@ -17,7 +30,7 @@ export function getExternalTransferChartOption<T extends string>(
   series: ExternalTransferChartSeries<T>[],
   dualAxis = false,
 ) {
-  const seriesColors = series.map((_, index) => chartColors[index % chartColors.length]);
+  const seriesColors = series.map((item, index) => metricColors[item.metric] ?? fallbackColors[index % fallbackColors.length]);
   const configuredPrimaryAxisIndex = series.findIndex((item) => item.yAxisIndex !== 1);
   const configuredSecondaryAxisIndex = series.findIndex((item) => item.yAxisIndex === 1);
   const primaryAxisIndex = configuredPrimaryAxisIndex === -1 ? 0 : configuredPrimaryAxisIndex;
