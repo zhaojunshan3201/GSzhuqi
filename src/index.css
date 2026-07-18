@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=Manrope:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -10,6 +11,8 @@
 @layer base {
   body {
     @apply bg-slate-100 text-slate-900 antialiased;
+    font-family: 'Inter', sans-serif;
+    color: #1B133C;
     font-feature-settings: "tnum";
   }
 
