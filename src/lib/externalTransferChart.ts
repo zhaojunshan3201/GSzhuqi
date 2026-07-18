@@ -23,6 +23,11 @@ const metricColors: Record<string, string> = {
 };
 
 const fallbackColors = ['#2563eb', '#84cc16', '#f59e0b', '#8b5cf6'];
+const valueLabel = {
+  show: true,
+  position: 'top',
+  formatter: ({ value }: { value: unknown }) => typeof value === 'number' ? value.toFixed(1) : '',
+};
 
 export function getExternalTransferChartOption<T extends string>(
   title: string,
@@ -74,7 +79,7 @@ export function getExternalTransferChartOption<T extends string>(
         yAxisIndex: item.yAxisIndex ?? 0,
         data: daily.map((row) => row[item.metric]),
         ...(type === 'bar'
-          ? { barMaxWidth: 28, itemStyle: { color, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top' } }
+          ? { barMaxWidth: 28, itemStyle: { color, borderRadius: [4, 4, 0, 0] }, label: valueLabel }
           : {
             symbol: 'circle',
             symbolSize: 5,
@@ -82,7 +87,7 @@ export function getExternalTransferChartOption<T extends string>(
             connectNulls: false,
             lineStyle: { width: 2.5, type: index === 0 ? 'solid' : 'dashed' },
             itemStyle: { color },
-            label: { show: true, position: 'top' },
+            label: valueLabel,
           }),
       };
     }),

@@ -112,5 +112,7 @@ test('shows a value label for every ten-day chart point', () => {
     { name: '日产液总量', metric: 'liquid' },
   ]);
 
-  assert.deepEqual(option.series[0].label, { show: true, position: 'top' });
+  assert.equal(option.series[0].label.show, true);
+  assert.equal(option.series[0].label.position, 'top');
+  assert.equal(option.series[0].label.formatter({ value: 10.456 }), '10.5');
 });
