@@ -108,6 +108,32 @@ export function summarizeExternalTransfer(
   });
 }
 
+export function summarizeExternalTransferByTenDayPeriod(daily: ExternalTransferDaily[]): ExternalTransferDaily[] {
+  const grouped = new Map<string, ExternalTransferDaily[]>();
+
+  for (const item of daily) {
+    const day = Number(item.date.slice(-2));
+    const period = day <= 10 ? '上旬' : day <= 20 ? '中旬' : '下旬';
+    const key = `${item.date.slice(0, 7)}${period}`;
+    const items = grouped.get(key) ?? [];
+    items.push(item);
+    grouped.set(key, items);
+  }
+
+  const metrics: Array<Exclude<keyof ExternalTransferDaily, 'date'>> = [
+    'wellCount', 'liquid', 'oil', 'diluent', 'waterCut', 'transfer', 'transferDifference', 'sewage', 'returnFlow', 'thinOil',
+  ];
+
+  return [...grouped.entries()].map(([date, items]) => {
+    const result: ExternalTransferDaily = { date, wellCount: null, liquid: null, oil: null, diluent: null, waterCut: null, transfer: null, transferDifference: null, sewage: null, returnFlow: null, thinOil: null };
+    for (const metric of metrics) {
+      const values = items.map((item) => item[metric]).filter((value): value is number => value !== null);
+      result[metric] = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    }
+    return result;
+  });
+}
+
 function normalizeNumber(value: unknown): number | null {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const number = typeof value === 'number' ? value : Number(String(value).trim());

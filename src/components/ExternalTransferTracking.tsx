@@ -6,6 +6,7 @@ import { FileSpreadsheet, RefreshCw, Upload } from 'lucide-react';
 import {
   parseExternalTransferWorkbook,
   summarizeExternalTransfer,
+  summarizeExternalTransferByTenDayPeriod,
   type ExternalTransferDaily,
   type ExternalTransferRecord,
 } from '../lib/externalTransferTracking';
@@ -26,7 +27,7 @@ export function ExternalTransferTracking() {
   const [error, setError] = useState('');
 
   const daily = useMemo(
-    () => startDate && endDate ? summarizeExternalTransfer(records, selectedStations, startDate, endDate) : [],
+    () => startDate && endDate ? summarizeExternalTransferByTenDayPeriod(summarizeExternalTransfer(records, selectedStations, startDate, endDate)) : [],
     [records, selectedStations, startDate, endDate],
   );
 

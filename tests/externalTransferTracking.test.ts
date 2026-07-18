@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
 
-import { parseExternalTransferWorkbook, summarizeExternalTransfer } from '../src/lib/externalTransferTracking.ts';
+import { parseExternalTransferWorkbook, summarizeExternalTransfer, summarizeExternalTransferByTenDayPeriod } from '../src/lib/externalTransferTracking.ts';
 
 test('ExternalTransferTracking uses the shared chart option helper', async () => {
   const source = await readFile(new URL('../src/components/ExternalTransferTracking.tsx', import.meta.url), 'utf8');
@@ -54,4 +54,17 @@ test('sums metrics and weights water cut by well count', () => {
     date: '2026-01-01', wellCount: 30, liquid: 150, oil: 45, diluent: 15,
     waterCut: 66.66666666666667, transfer: 165, transferDifference: 3, sewage: 30, returnFlow: 10, thinOil: 12,
   });
+});
+
+test('averages daily external transfer metrics by ten-day period', () => {
+  const periods = summarizeExternalTransferByTenDayPeriod([
+    { date: '2026-01-01', wellCount: 10, liquid: 100, oil: 30, diluent: 10, waterCut: 60, transfer: 110, transferDifference: 4, sewage: 24, returnFlow: 8, thinOil: 8 },
+    { date: '2026-01-10', wellCount: 20, liquid: 200, oil: 50, diluent: 20, waterCut: 80, transfer: 210, transferDifference: 6, sewage: 36, returnFlow: 12, thinOil: null },
+    { date: '2026-01-11', wellCount: 30, liquid: 300, oil: 70, diluent: 30, waterCut: 70, transfer: 310, transferDifference: 8, sewage: 48, returnFlow: 16, thinOil: 12 },
+  ]);
+
+  assert.deepEqual(periods, [
+    { date: '2026-01上旬', wellCount: 15, liquid: 150, oil: 40, diluent: 15, waterCut: 70, transfer: 160, transferDifference: 5, sewage: 30, returnFlow: 10, thinOil: 8 },
+    { date: '2026-01中旬', wellCount: 30, liquid: 300, oil: 70, diluent: 30, waterCut: 70, transfer: 310, transferDifference: 8, sewage: 48, returnFlow: 16, thinOil: 12 },
+  ]);
 });

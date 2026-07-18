@@ -74,7 +74,7 @@ export function getExternalTransferChartOption<T extends string>(
         yAxisIndex: item.yAxisIndex ?? 0,
         data: daily.map((row) => row[item.metric]),
         ...(type === 'bar'
-          ? { barMaxWidth: 28, itemStyle: { color, borderRadius: [4, 4, 0, 0] } }
+          ? { barMaxWidth: 28, itemStyle: { color, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top' } }
           : {
             symbol: 'circle',
             symbolSize: 5,
@@ -82,6 +82,7 @@ export function getExternalTransferChartOption<T extends string>(
             connectNulls: false,
             lineStyle: { width: 2.5, type: index === 0 ? 'solid' : 'dashed' },
             itemStyle: { color },
+            label: { show: true, position: 'top' },
           }),
       };
     }),

@@ -106,3 +106,11 @@ test('renders oil as a line and well count as bars', () => {
   assert.equal(option.series[0].itemStyle.color, '#ef4444');
   assert.equal(option.series[1].itemStyle.color, '#1e3a8a');
 });
+
+test('shows a value label for every ten-day chart point', () => {
+  const option = getExternalTransferChartOption('旬均值', [{ date: '2026-07上旬', liquid: 10 }], [
+    { name: '日产液总量', metric: 'liquid' },
+  ]);
+
+  assert.deepEqual(option.series[0].label, { show: true, position: 'top' });
+});
