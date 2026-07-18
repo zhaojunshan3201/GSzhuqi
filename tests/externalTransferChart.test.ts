@@ -65,3 +65,14 @@ test('getExternalTransferChartOption uses the configured secondary-axis series m
   assert.equal(option.yAxis[1].name, '井数');
   assert.equal(option.yAxis[1].axisLabel.color, option.series[2].itemStyle.color);
 });
+
+test('getExternalTransferChartOption uses the configured primary-axis series metadata', () => {
+  const option = getExternalTransferChartOption('双轴顺序', [{ date: '2026-07-01', wellCount: 4, oil: 8 }], [
+    { name: '井数', metric: 'wellCount', yAxisIndex: 1 },
+    { name: '日产油总量', metric: 'oil' },
+  ], true);
+
+  assert.equal(option.yAxis[0].name, '日产油总量');
+  assert.equal(option.yAxis[1].name, '井数');
+  assert.equal(option.yAxis[0].axisLabel.color, option.series[1].itemStyle.color);
+});

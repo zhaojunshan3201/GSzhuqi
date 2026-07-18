@@ -18,7 +18,9 @@ export function getExternalTransferChartOption<T extends string>(
   dualAxis = false,
 ) {
   const seriesColors = series.map((_, index) => chartColors[index % chartColors.length]);
+  const configuredPrimaryAxisIndex = series.findIndex((item) => item.yAxisIndex !== 1);
   const configuredSecondaryAxisIndex = series.findIndex((item) => item.yAxisIndex === 1);
+  const primaryAxisIndex = configuredPrimaryAxisIndex === -1 ? 0 : configuredPrimaryAxisIndex;
   const secondaryAxisIndex = configuredSecondaryAxisIndex === -1 ? Math.min(1, series.length - 1) : configuredSecondaryAxisIndex;
 
   return {
@@ -34,7 +36,12 @@ export function getExternalTransferChartOption<T extends string>(
     },
     yAxis: dualAxis
       ? [
-        { type: 'value', name: series[0]?.name },
+        {
+          type: 'value',
+          name: series[primaryAxisIndex]?.name,
+          axisLabel: { color: seriesColors[primaryAxisIndex] },
+          axisLine: { lineStyle: { color: seriesColors[primaryAxisIndex] } },
+        },
         {
           type: 'value',
           name: series[secondaryAxisIndex]?.name,
