@@ -39,6 +39,7 @@ import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNaviga
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
 import { AxonLandingPage } from './components/AxonLandingPage';
+import { DatacoreLandingPage } from './components/DatacoreLandingPage';
 
 // --- Types ---
 interface Well {
@@ -1775,7 +1776,7 @@ const calculateDiluentRatioSeries = (
 
 // --- Components ---
 
-const Login = ({ onLogin, globalError }: { onLogin: (user: any) => void; globalError?: string }) => {
+const Login = ({ onLogin, globalError, overlay = false, onCancel }: { onLogin: (user: any) => void; globalError?: string; overlay?: boolean; onCancel?: () => void }) => {
   const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -1824,14 +1825,15 @@ const Login = ({ onLogin, globalError }: { onLogin: (user: any) => void; globalE
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#1a2634] relative overflow-hidden">
+    <div className={overlay ? 'absolute inset-0 z-40 flex items-center justify-center bg-slate-950/25 p-4 backdrop-blur-md' : 'relative flex min-h-screen items-center justify-center overflow-hidden bg-[#1a2634]'}>
       {/* Background decoration */}
-      <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+      {!overlay && <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500 rounded-full blur-[120px]"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-red-500 rounded-full blur-[120px]"></div>
-      </div>
+      </div>}
 
-      <div className="w-full max-w-md p-8 bg-white/10 backdrop-blur-xl rounded-2xl border border-white/20 shadow-2xl relative z-10">
+      <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/30 bg-slate-900/35 p-8 shadow-2xl shadow-slate-950/30 ring-1 ring-white/10 backdrop-blur-2xl">
+        {onCancel && <button type="button" onClick={onCancel} className="absolute right-4 top-3 text-2xl text-white/70 transition hover:text-white" aria-label="关闭登录框">×</button>}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg shadow-blue-500/30">
             <Droplets className="text-white w-8 h-8" />
@@ -2146,6 +2148,9 @@ const DashboardChartSkeleton = ({ title }: { title: string }) => (
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showLanding, setShowLanding] = useState(true);
+  const [showDatacoreLanding, setShowDatacoreLanding] = useState(() => window.location.pathname === '/datacore');
+  const [showDatacoreLogin, setShowDatacoreLogin] = useState(false);
+  const [showAccessLogin, setShowAccessLogin] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [activeTab, setActiveTab] = useState<SidebarTab>('dashboard');
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<SidebarGroupKey | null>(getSidebarGroupKey('dashboard') ?? 'overview');
@@ -2449,11 +2454,51 @@ export default function App() {
 
   const handleEnterFromLanding = () => {
     setShowLanding(false);
-    handleLogin({ name: '系统管理员', role: 'admin', username: 'admin' });
+    setShowDatacoreLanding(false);
+    setUser({ name: '访客', role: 'guest', username: 'guest' });
+    setIsLoggedIn(true);
+    localStorage.removeItem('oil_system_user');
+  };
+
+  const handleNavigateFromDatacoreLanding = (tab: SidebarTab) => {
+    setShowLanding(false);
+    setShowDatacoreLanding(false);
+    setActiveTab(tab);
+    setUser({ name: '访客', role: 'guest', username: 'guest' });
+    setIsLoggedIn(true);
+    localStorage.removeItem('oil_system_user');
+  };
+
+  const handleDatacoreLogin = (userData: UserInfo) => {
+    setShowDatacoreLogin(false);
+    setShowDatacoreLanding(false);
+    setShowLanding(false);
+    handleLogin(userData);
+  };
+
+  const handleAccessLogin = (userData: UserInfo) => {
+    setShowAccessLogin(false);
+    handleLogin(userData);
+  };
+
+  const isGuest = user?.role === 'guest';
+  const requestAccessLogin = () => setShowAccessLogin(true);
+  const blockGuestMutation = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isGuest) return;
+    const action = (event.target as Element).closest('button,[role="button"]');
+    if (action && /(新增|编辑|删除|导入|上传|保存|提交|更新|确认覆盖)/.test(action.textContent || '')) {
+      event.preventDefault();
+      event.stopPropagation();
+      requestAccessLogin();
+    }
   };
 
   const handleLogout = () => {
     setGlobalError('');
+    setShowAccessLogin(false);
+    setShowLanding(false);
+    setShowDatacoreLanding(true);
+    window.history.pushState({}, '', '/datacore');
     setIsLoggedIn(false);
     setUser(null);
     setWells([]);
@@ -5839,6 +5884,10 @@ export default function App() {
     );
   };
 
+  if (showDatacoreLanding) {
+    return <DatacoreLandingPage onEnter={handleEnterFromLanding} onLogin={() => setShowDatacoreLogin(true)} onNavigate={handleNavigateFromDatacoreLanding} loginOverlay={showDatacoreLogin ? <Login overlay onLogin={handleDatacoreLogin} onCancel={() => setShowDatacoreLogin(false)} globalError={globalError} /> : null} />;
+  }
+
   if (showLanding) {
     return <AxonLandingPage onEnter={handleEnterFromLanding} />;
   }
@@ -5848,7 +5897,19 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <>
+    <div
+      className="app-shell"
+      onClickCapture={blockGuestMutation}
+      onChangeCapture={(event) => {
+        const input = event.target as HTMLInputElement;
+        if (isGuest && input.type === 'file') {
+          event.stopPropagation();
+          input.value = '';
+          requestAccessLogin();
+        }
+      }}
+    >
       {/* Sidebar */}
       <aside className="app-sidebar">
         <div className="app-sidebar-brand">
@@ -5895,9 +5956,10 @@ export default function App() {
         </div>
         <div className="flex-1 overflow-hidden">
         <p className="text-sm font-medium text-white truncate">{user?.name || '系统管理员'}</p>
-        <p className="text-[10px] text-gray-500 truncate tracking-tighter">{user?.role === 'admin' ? '系统管理员' : '系统用户'}</p>
+        <p className="text-[10px] text-gray-500 truncate tracking-tighter">{user?.role === 'admin' ? '系统管理员' : user?.role === 'guest' ? '访客浏览' : '系统用户'}</p>
         </div>
         </div>
+        {isGuest && <SidebarItem icon={LogIn} label="系统登录" onClick={requestAccessLogin} />}
         <SidebarItem 
         icon={LogIn} 
         label="退出系统" 
@@ -9906,5 +9968,7 @@ export default function App() {
         </main>
       </div>
     </div>
+    {showAccessLogin && <Login overlay onLogin={handleAccessLogin} onCancel={() => setShowAccessLogin(false)} globalError={globalError} />}
+    </>
   );
 }

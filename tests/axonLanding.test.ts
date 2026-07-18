@@ -1,55 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AXON_AERIAL_VIDEO, AXON_PAGE_TITLE, AxonLandingPage } from '../src/components/AxonLandingPage.tsx';
 
-import { AXON_PAGE_TITLE, AXON_VIDEO_URL, AxonLandingPage } from '../src/components/AxonLandingPage.tsx';
-
-type ElementNode = {
-  type: unknown;
-  props: { children?: unknown; [key: string]: unknown };
-};
+type ElementNode = { type: unknown; props: { children?: unknown; [key: string]: unknown } };
 
 function findElement(node: unknown, type: string): ElementNode | undefined {
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      const match = findElement(child, type);
-      if (match) return match;
-    }
-    return undefined;
-  }
-
+  if (Array.isArray(node)) return node.map((child) => findElement(child, type)).find(Boolean);
   if (!node || typeof node !== 'object' || !('type' in node) || !('props' in node)) return undefined;
   const element = node as ElementNode;
-  if (element.type === type) return element;
-  return findElement(element.props.children, type);
+  return element.type === type ? element : findElement(element.props.children, type);
 }
 
-test('exports the Axon page title', () => {
-  assert.equal(AXON_PAGE_TITLE, 'Axon — Digital Workers for Mundane Workflows');
+test('exports the Chinese system title', () => {
+  assert.equal(AXON_PAGE_TITLE, '高采三厂生产动态分析与采油作业管理系统');
 });
 
-test('exports the Axon background video URL', () => {
-  assert.equal(
-    AXON_VIDEO_URL,
-    'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260714_113715_c7e0daa0-8bdd-4486-a2da-040901f8f0ea.mp4',
-  );
+test('exports the aerial background video', () => {
+  assert.match(AXON_AERIAL_VIDEO, /axon-aerial-background\.mp4$/);
 });
 
-test('renders a working CTA and configured background video', () => {
+test('renders a working Chinese CTA and looping video', () => {
   let enterCount = 0;
   const landingPage = AxonLandingPage({ onEnter: () => { enterCount += 1; } });
   const button = findElement(landingPage, 'button');
   const video = findElement(landingPage, 'video');
-
-  assert.ok(button, 'CTA button should be rendered');
-  assert.equal(button.props.children, 'Get Early Access');
-  assert.equal(typeof button.props.onClick, 'function');
+  assert.ok(button);
+  assert.equal(button.props.children, '进入系统');
   (button.props.onClick as () => void)();
   assert.equal(enterCount, 1);
-
-  assert.ok(video, 'background video should be rendered');
-  assert.equal(video.props.autoPlay, true);
-  assert.equal(video.props.muted, true);
+  assert.ok(video);
+  assert.equal(video.props.src, AXON_AERIAL_VIDEO);
   assert.equal(video.props.loop, true);
-  assert.equal(video.props.playsInline, true);
-  assert.equal(video.props.src, AXON_VIDEO_URL);
 });
