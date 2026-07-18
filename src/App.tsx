@@ -38,6 +38,7 @@ import { OilWellMap } from './components/OilWellMap';
 import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
+import { AxonLandingPage } from './components/AxonLandingPage';
 
 // --- Types ---
 interface Well {
@@ -2144,6 +2145,7 @@ const DashboardChartSkeleton = ({ title }: { title: string }) => (
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showLanding, setShowLanding] = useState(true);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [activeTab, setActiveTab] = useState<SidebarTab>('dashboard');
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<SidebarGroupKey | null>(getSidebarGroupKey('dashboard') ?? 'overview');
@@ -2443,6 +2445,11 @@ export default function App() {
     setUser(userData);
     setIsLoggedIn(true);
     localStorage.setItem('oil_system_user', JSON.stringify(userData));
+  };
+
+  const handleEnterFromLanding = () => {
+    setShowLanding(false);
+    handleLogin({ name: '系统管理员', role: 'admin', username: 'admin' });
   };
 
   const handleLogout = () => {
@@ -5831,6 +5838,10 @@ export default function App() {
       </div>
     );
   };
+
+  if (showLanding) {
+    return <AxonLandingPage onEnter={handleEnterFromLanding} />;
+  }
 
   if (!isLoggedIn) {
     return <Login onLogin={handleLogin} globalError={globalError} />;
