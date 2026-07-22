@@ -18,9 +18,11 @@ type SeriesConfig = ExternalTransferChartSeries<Metric>;
 
 export function ExternalTransferTracking() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const stationSelectorRef = useRef<HTMLDivElement>(null);
   const [records, setRecords] = useState<ExternalTransferRecord[]>([]);
   const [stations, setStations] = useState<string[]>([]);
   const [selectedStations, setSelectedStations] = useState<Set<string>>(new Set());
+  const [isStationSelectorOpen, setIsStationSelectorOpen] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [fileName, setFileName] = useState('');
@@ -41,6 +43,15 @@ export function ExternalTransferTracking() {
     void fetch('/api/external-transfer/upload').then((response) => response.json()).then((result) => {
       if (result.success && result.data) applyUpload(result.data);
     }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!stationSelectorRef.current?.contains(event.target as Node)) setIsStationSelectorOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
   const daily = useMemo(
@@ -89,16 +100,35 @@ export function ExternalTransferTracking() {
   return (
     <section className="space-y-4">
       <div className="app-card flex flex-wrap items-end gap-4 p-4">
-        <div className="min-w-[190px] flex-1">
+        <div ref={stationSelectorRef} className="relative min-w-[190px] flex-1">
           <label className="mb-1 block text-xs font-medium text-slate-500">计量站（可多选）</label>
-          <select
-            multiple
-            value={Array.from(selectedStations)}
-            className="field-control h-28 w-full"
-            onChange={(event) => setSelectedStations(new Set(Array.from(event.target.selectedOptions, (option) => option.value)))}
+          <button
+            type="button"
+            className="field-control h-10 w-full truncate text-left"
+            aria-expanded={isStationSelectorOpen}
+            onClick={() => setIsStationSelectorOpen((isOpen) => !isOpen)}
           >
-            {stations.map((station) => <option key={station} value={station}>{station}</option>)}
-          </select>
+            已选 {selectedStations.size} 个：{Array.from(selectedStations).join('、')}
+          </button>
+          {isStationSelectorOpen && (
+            <div className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white p-2 shadow-lg">
+              {stations.map((station) => (
+                <label key={station} className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm text-slate-700 hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={selectedStations.has(station)}
+                    onChange={() => setSelectedStations((current) => {
+                      const next = new Set(current);
+                      if (next.has(station)) next.delete(station);
+                      else next.add(station);
+                      return next;
+                    })}
+                  />
+                  {station}
+                </label>
+              ))}
+            </div>
+          )}
         </div>
         <label className="min-w-[150px] text-xs font-medium text-slate-500">开始日期
           <input className="field-control mt-1 w-full" type="date" value={startDate} max={endDate} onChange={(event) => setStartDate(event.target.value)} />

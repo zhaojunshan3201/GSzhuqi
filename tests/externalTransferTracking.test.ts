@@ -19,6 +19,16 @@ test('ExternalTransferTracking renders oil as a line and well count as bars', as
   assert.match(source, /metric: 'wellCount', type: 'bar', yAxisIndex: 1/);
 });
 
+test('ExternalTransferTracking uses a compact collapsible station selector', async () => {
+  const source = await readFile(new URL('../src/components/ExternalTransferTracking.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /stationSelectorRef/);
+  assert.match(source, /isStationSelectorOpen/);
+  assert.match(source, /已选 \{selectedStations\.size\} 个：\{Array\.from\(selectedStations\)\.join\('、'\)\}/);
+  assert.match(source, /type="checkbox"/);
+  assert.doesNotMatch(source, /<select\b[\s\S]*?\bmultiple\b/);
+});
+
 const headers = ['日期', '计量站', '井数', '日产液总量', '日产油总量', '日掺油总量', '综合含水', '外输', '外输差', '排污', '回流', '稀油用量（方）'];
 
 function workbook(sheetName: string, rows: unknown[][]) {
