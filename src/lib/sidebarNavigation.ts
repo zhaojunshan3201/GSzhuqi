@@ -54,7 +54,6 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
       { tab: 'dashboard', label: '系统概览', icon: 'LayoutDashboard' },
       { tab: 'oilWellMap', label: '油井位图', icon: 'MapPinned' },
       { tab: 'wellTemperature', label: '井温监控', icon: 'Thermometer' },
-      { tab: 'runtimeLogs', label: '运行日志', icon: 'ClipboardList' },
     ],
   },
   {
@@ -92,6 +91,12 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     items: [{ tab: 'productionForecast', label: '产量预测', icon: 'TrendingUp' }],
   },
 ];
+
+export const runtimeLogNavigationItem: SidebarNavigationItem = {
+  tab: 'runtimeLogs',
+  label: '运行日志',
+  icon: 'ClipboardList',
+};
 
 const productionNavigation = sidebarNavigationGroups.find((group) => group.key === 'production');
 productionNavigation?.items.push({ tab: 'externalTransferTracking', label: '外输跟踪', icon: 'TrendingUp' });

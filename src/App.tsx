@@ -36,7 +36,7 @@ import { getWellTemperatureChartOption } from './wellTemperatureChart';
 import { MeasureWellSelection } from './components/MeasureWellSelection';
 import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
-import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNavigation';
+import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
 import { AxonLandingPage } from './components/AxonLandingPage';
@@ -5960,6 +5960,12 @@ export default function App() {
             </div>
           );
         })}
+        <SidebarItem
+          icon={sidebarIconMap[runtimeLogNavigationItem.icon]}
+          label={runtimeLogNavigationItem.label}
+          active={activeTab === runtimeLogNavigationItem.tab}
+          onClick={() => setActiveTab(runtimeLogNavigationItem.tab)}
+        />
 
         <div className="mt-8 border-t border-white/10 pt-4">
         <div className="px-5 py-3 flex items-center gap-3 text-gray-400">
