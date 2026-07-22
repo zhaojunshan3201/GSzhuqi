@@ -101,6 +101,14 @@ interface SyncStatus {
   hasData: boolean;
 }
 
+export const getRuntimeSyncStatus = (syncStatus: SyncStatus | null, syncing: boolean) => {
+  if (!syncStatus) return { label: '状态未知', className: 'text-amber-600' };
+  if (syncStatus.syncing || syncing) return { label: '同步中', className: 'text-blue-600' };
+  if (syncStatus.lastSyncStatus === 'error') return { label: '同步失败', className: 'text-red-600' };
+  if (syncStatus.lastSyncStatus === 'success') return { label: '同步正常', className: 'text-emerald-600' };
+  return { label: '状态未知', className: 'text-amber-600' };
+};
+
 interface DashboardBootstrapData {
   overallData: ChartData;
   analysisData: AnalysisData;
@@ -1967,10 +1975,11 @@ const sidebarIconMap: Record<SidebarIcon, LucideIcon> = {
 };
 
 const SidebarItem = ({ icon: Icon, label, active, onClick }: { icon: LucideIcon, label: string, active?: boolean, onClick: () => void }) => (
-  <div
+  <button
+    type="button"
     onClick={onClick}
     className={cn(
-      "group mx-3 mb-1 flex cursor-pointer items-center gap-3 rounded-md border-l-4 px-4 py-3 text-sm transition-all duration-200",
+      "group mx-3 mb-1 flex w-[calc(100%-1.5rem)] cursor-pointer items-center gap-3 rounded-md border-0 border-l-4 bg-transparent px-4 py-3 text-left text-sm transition-all duration-200",
       active
         ? "border-l-emerald-400 bg-emerald-400/10 text-white font-bold shadow-sm"
         : "border-l-transparent text-slate-300 hover:bg-white/7 hover:text-white"
@@ -1978,7 +1987,7 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: { icon: LucideIcon,
   >
     <Icon size={18} className={cn(active ? "text-emerald-300" : "text-slate-400 group-hover:text-white")} />
     <span>{label}</span>
-  </div>
+  </button>
 );
 
 const formatDiffText = (value: number, suffix = '') => (value > 0 ? `+${value}${suffix}` : `${value}${suffix}`);
@@ -5637,6 +5646,8 @@ export default function App() {
           ? '暂无本地缓存，请先同步'
           : '本地缓存待检查';
 
+  const runtimeSyncStatus = getRuntimeSyncStatus(syncStatus, syncing);
+
   const showDashboardSkeleton = activeTab === 'dashboard' && dashboardBootstrapLoading && !dashboardBootstrapLoaded;
 
   const blockChartSourceText = blockChartSource === 'memory'
@@ -6041,8 +6052,8 @@ export default function App() {
                       </div>
                       <div className="bg-white p-5">
                         <div className="text-sm text-slate-500">同步状态</div>
-                        <div className={cn('mt-2 font-semibold', syncStatus?.syncing || syncing ? 'text-blue-600' : syncStatus?.lastSyncStatus === 'error' ? 'text-red-600' : 'text-emerald-600')}>
-                          {syncStatus?.syncing || syncing ? '同步中' : syncStatus?.lastSyncStatus === 'error' ? '同步失败' : '同步正常'}
+                        <div className={cn('mt-2 font-semibold', runtimeSyncStatus.className)}>
+                          {runtimeSyncStatus.label}
                         </div>
                       </div>
                       <div className="bg-white p-5">
