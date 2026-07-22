@@ -4,6 +4,7 @@ export type SidebarTab =
   | 'dashboard'
   | 'oilWellMap'
   | 'wellTemperature'
+  | 'runtimeLogs'
   | 'well'
   | 'block'
   | 'comparison'
@@ -53,6 +54,7 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
       { tab: 'dashboard', label: '系统概览', icon: 'LayoutDashboard' },
       { tab: 'oilWellMap', label: '油井位图', icon: 'MapPinned' },
       { tab: 'wellTemperature', label: '井温监控', icon: 'Thermometer' },
+      { tab: 'runtimeLogs', label: '运行日志', icon: 'ClipboardList' },
     ],
   },
   {

@@ -6000,23 +6000,10 @@ export default function App() {
           {activeTab === 'pumpDeepAnalysis' && '检泵分析'}
           {activeTab === 'waterLab' && '含水化验'}
           {activeTab === 'productionForecast' && '产量预测'}
+          {activeTab === 'runtimeLogs' && '运行日志'}
           </h2>
           </div>
           <div className="flex min-w-0 items-center gap-4">
-          <div className="hidden xl:flex max-w-[520px] flex-wrap justify-end gap-x-3 gap-y-0.5 text-xs leading-5 text-slate-500">
-          <span>
-          {syncStatus?.lastLocalDataDate ? `数据更新至 ${syncStatus.lastLocalDataDate}` : '本地缓存待同步'}
-          </span>
-          <span className={cn(syncStatus?.syncing || syncing ? 'text-blue-600' : syncStatus?.lastSyncStatus === 'error' ? 'text-red-500' : 'text-green-600')}>
-          {syncStatus?.syncing || syncing ? '后台同步中...' : syncStatus?.lastSyncStatus === 'error' ? `同步异常${syncStatus?.lastError ? `：${syncStatus.lastError}` : ''}` : '本地缓存可用'}
-          </span>
-          <span className={cn(cacheInfo.cacheWarm ? 'text-emerald-600' : 'text-amber-500')}>
-          {cacheInfo.cacheWarm ? `首页缓存已预热${cacheInfo.generatedAt ? `：${new Date(cacheInfo.generatedAt).toLocaleString('zh-CN')}` : ''}` : '首页缓存预热中...'}
-          </span>
-          <span className={cn(cacheInfo.cacheSource === 'sqlite' ? 'text-sky-600' : cacheInfo.cacheSource === 'rebuilt' ? 'text-orange-500' : cacheInfo.cacheWarm ? 'text-sky-600' : 'text-gray-400')}>
-          {cacheSourceText}
-          </span>
-          </div>
           <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
           <input
@@ -6040,6 +6027,44 @@ export default function App() {
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
               {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} />}
               {activeTab === 'externalTransferTracking' && <ExternalTransferTracking />}
+              {activeTab === 'runtimeLogs' && (
+                <div className="page-stack">
+                  <div className="app-card overflow-hidden border-t-4 border-t-slate-600">
+                    <div className="app-card-header">
+                      <h3 className="text-lg font-bold text-slate-900">运行日志</h3>
+                      <p className="mt-1 text-sm text-slate-500">查看本地数据同步与首页缓存状态</p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-px bg-slate-100 md:grid-cols-2">
+                      <div className="bg-white p-5">
+                        <div className="text-sm text-slate-500">数据更新日期</div>
+                        <div className="mt-2 font-semibold text-slate-900">{syncStatus?.lastLocalDataDate || '--'}</div>
+                      </div>
+                      <div className="bg-white p-5">
+                        <div className="text-sm text-slate-500">同步状态</div>
+                        <div className={cn('mt-2 font-semibold', syncStatus?.syncing || syncing ? 'text-blue-600' : syncStatus?.lastSyncStatus === 'error' ? 'text-red-600' : 'text-emerald-600')}>
+                          {syncStatus?.syncing || syncing ? '同步中' : syncStatus?.lastSyncStatus === 'error' ? '同步失败' : '同步正常'}
+                        </div>
+                      </div>
+                      <div className="bg-white p-5">
+                        <div className="text-sm text-slate-500">缓存预热</div>
+                        <div className={cn('mt-2 font-semibold', cacheInfo.cacheWarm ? 'text-emerald-600' : 'text-amber-600')}>
+                          {cacheInfo.cacheWarm ? '已预热' : dashboardBootstrapLoading ? '预热中' : '未预热'}
+                        </div>
+                      </div>
+                      <div className="bg-white p-5">
+                        <div className="text-sm text-slate-500">缓存来源</div>
+                        <div className="mt-2 font-semibold text-slate-900">{cacheSourceText}</div>
+                      </div>
+                    </div>
+                  </div>
+                  {syncStatus?.lastError && (
+                    <div className="app-card border border-red-200 bg-red-50 p-5">
+                      <h3 className="font-bold text-red-800">同步错误详情</h3>
+                      <pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm text-red-700">{syncStatus.lastError}</pre>
+                    </div>
+                  )}
+                </div>
+              )}
               {activeTab === 'dashboard' && (
                 <div className="page-stack animate-in fade-in duration-500">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

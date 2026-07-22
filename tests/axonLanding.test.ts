@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { AXON_AERIAL_VIDEO, AXON_PAGE_TITLE, AxonLandingPage } from '../src/components/AxonLandingPage.tsx';
 
@@ -31,4 +32,20 @@ test('renders a working Chinese CTA and looping video', () => {
   assert.ok(video);
   assert.equal(video.props.src, AXON_AERIAL_VIDEO);
   assert.equal(video.props.loop, true);
+});
+
+test('moves runtime status details out of the header and into the runtime logs page', () => {
+  const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const header = appSource.match(/<header className="app-header">([\s\S]*?)<\/header>/)?.[1];
+
+  assert.ok(header);
+  assert.doesNotMatch(header, /syncStatus|cacheInfo|cacheSourceText/);
+  assert.match(appSource, /activeTab === 'runtimeLogs'/);
+  assert.match(appSource, /数据更新日期/);
+  assert.match(appSource, /同步状态/);
+  assert.match(appSource, /缓存预热/);
+  assert.match(appSource, /缓存来源/);
+  assert.match(appSource, /同步错误详情/);
+  assert.match(appSource, /syncStatus\?\.lastError &&/);
+  assert.match(appSource, /\{syncStatus\.lastError\}/);
 });
