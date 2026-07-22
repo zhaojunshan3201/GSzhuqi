@@ -2157,8 +2157,8 @@ const DashboardChartSkeleton = ({ title }: { title: string }) => (
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [showLanding, setShowLanding] = useState(true);
-  const [showDatacoreLanding, setShowDatacoreLanding] = useState(() => window.location.pathname === '/datacore');
+  const [showLanding, setShowLanding] = useState(() => window.location.pathname === '/axon');
+  const [showDatacoreLanding, setShowDatacoreLanding] = useState(() => window.location.pathname !== '/axon');
   const [showDatacoreLogin, setShowDatacoreLogin] = useState(false);
   const [showAccessLogin, setShowAccessLogin] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
@@ -2553,6 +2553,7 @@ export default function App() {
       const result = await fetchJson(`/api/well-temperature-tests${query}`);
       if (!result.success) throw new Error(result.message || '井温记录加载失败');
       setWellTemperatureTests(result.data);
+      return result.data as WellTemperatureTestSummary[];
     } catch (error: any) {
       setWellTemperatureError(error?.message || '井温记录加载失败');
     } finally {
@@ -4517,7 +4518,9 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab === 'wellTemperature') {
-      void loadWellTemperatureTests();
+      void loadWellTemperatureTests().then((tests) => {
+        if (tests?.[0]) void loadWellTemperatureTestDetail(tests[0].id);
+      });
     }
   }, [activeTab, isLoggedIn]);
 
@@ -5924,14 +5927,11 @@ export default function App() {
     >
       {/* Sidebar */}
       <aside className="app-sidebar">
-        <div className="app-sidebar-brand">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-emerald-300 bg-red-600 text-white shadow-lg">
-        <Droplets size={32} />
-        </div>
-        <div className="text-center">
-        <h1 className="text-2xl font-bold text-white mb-2">油井采油作业管理系统</h1>
-        <p className="text-[#95A5A6] text-[10px] tracking-widest mt-1">生产动态管理平台</p>
-        </div>
+        <div className="app-sidebar-brand flex items-center gap-3 px-5 py-5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white shadow-sm">
+            <Droplets size={19} />
+          </div>
+          <h1 className="text-base font-semibold tracking-wide text-white">数智化注采管理系统</h1>
         </div>
         
         <nav className="mt-4 flex-1">
@@ -5939,11 +5939,11 @@ export default function App() {
           const expanded = expandedSidebarGroup === group.key;
 
           return (
-            <div key={group.key}>
+            <div key={group.key} className="mx-3 mb-2 overflow-hidden rounded-lg border border-white/5 bg-white/[0.025]">
               <button
                 type="button"
                 onClick={() => setExpandedSidebarGroup(expanded ? null : group.key)}
-                className="flex w-full items-center justify-between px-5 py-3 text-left text-xs font-semibold tracking-wide text-slate-400 transition-colors hover:text-white"
+                className="flex w-full items-center justify-between px-4 py-3.5 text-left text-sm font-medium text-slate-300 transition-colors hover:bg-white/[0.05] hover:text-white"
               >
                 <span>{group.label}</span>
                 <ChevronRight size={16} className={cn('transition-transform', expanded && 'rotate-90')} />
@@ -5967,7 +5967,7 @@ export default function App() {
           onClick={() => setActiveTab(runtimeLogNavigationItem.tab)}
         />
 
-        <div className="mt-8 border-t border-white/10 pt-4">
+        <div className="mt-auto border-t border-white/10 pt-4">
         <div className="px-5 py-3 flex items-center gap-3 text-gray-400">
         <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-inner">
         {user?.name?.[0] || 'A'}

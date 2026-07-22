@@ -45,7 +45,10 @@
 
   .app-sidebar {
     @apply z-20 flex w-64 shrink-0 flex-col bg-slate-950 shadow-xl;
-    background: linear-gradient(180deg, #0f172a 0%, #111827 50%, #0f172a 100%);
+    background:
+      linear-gradient(180deg, rgba(15, 23, 42, 0.78) 0%, rgba(15, 23, 42, 0.76) 48%, rgba(15, 23, 42, 0.08) 100%),
+      url('./assets/oil-pumpjack-sidebar.png') center bottom / 125% auto no-repeat,
+      #0f172a;
   }
 
   .app-sidebar-brand {
