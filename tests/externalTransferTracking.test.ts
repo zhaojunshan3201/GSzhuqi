@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
 
+import { getExternalTransferStationSummary, toggleExternalTransferStation } from '../src/lib/externalTransferStationSelector.ts';
 import { parseExternalTransferWorkbook, summarizeExternalTransfer, summarizeExternalTransferByTenDayPeriod } from '../src/lib/externalTransferTracking.ts';
 
 test('ExternalTransferTracking uses the shared chart option helper', async () => {
@@ -24,9 +25,23 @@ test('ExternalTransferTracking uses a compact collapsible station selector', asy
 
   assert.match(source, /stationSelectorRef/);
   assert.match(source, /isStationSelectorOpen/);
-  assert.match(source, /已选 \{selectedStations\.size\} 个：\{Array\.from\(selectedStations\)\.join\('、'\)\}/);
+  assert.match(source, /getExternalTransferStationSummary\(selectedStations\)/);
   assert.match(source, /type="checkbox"/);
   assert.doesNotMatch(source, /<select\b[\s\S]*?\bmultiple\b/);
+});
+
+test('summarizes all selected external transfer stations', () => {
+  assert.equal(getExternalTransferStationSummary(new Set(['一站', '二站'])), '已选 2 个：一站、二站');
+});
+
+test('toggles an external transfer station without mutating the existing selection', () => {
+  const selectedStations = new Set(['一站', '二站']);
+  const withoutFirst = toggleExternalTransferStation(selectedStations, '一站');
+  const restored = toggleExternalTransferStation(withoutFirst, '一站');
+
+  assert.deepEqual([...selectedStations], ['一站', '二站']);
+  assert.deepEqual([...withoutFirst], ['二站']);
+  assert.deepEqual([...restored], ['二站', '一站']);
 });
 
 const headers = ['日期', '计量站', '井数', '日产液总量', '日产油总量', '日掺油总量', '综合含水', '外输', '外输差', '排污', '回流', '稀油用量（方）'];

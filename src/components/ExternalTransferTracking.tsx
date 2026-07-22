@@ -11,6 +11,7 @@ import {
   type ExternalTransferRecord,
 } from '../lib/externalTransferTracking';
 import { getExternalTransferChartOption, type ExternalTransferChartSeries } from '../lib/externalTransferChart';
+import { getExternalTransferStationSummary, toggleExternalTransferStation } from '../lib/externalTransferStationSelector';
 
 type Metric = Exclude<keyof ExternalTransferDaily, 'date'>;
 
@@ -108,7 +109,7 @@ export function ExternalTransferTracking() {
             aria-expanded={isStationSelectorOpen}
             onClick={() => setIsStationSelectorOpen((isOpen) => !isOpen)}
           >
-            已选 {selectedStations.size} 个：{Array.from(selectedStations).join('、')}
+            {getExternalTransferStationSummary(selectedStations)}
           </button>
           {isStationSelectorOpen && (
             <div className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white p-2 shadow-lg">
@@ -117,12 +118,7 @@ export function ExternalTransferTracking() {
                   <input
                     type="checkbox"
                     checked={selectedStations.has(station)}
-                    onChange={() => setSelectedStations((current) => {
-                      const next = new Set(current);
-                      if (next.has(station)) next.delete(station);
-                      else next.add(station);
-                      return next;
-                    })}
+                    onChange={() => setSelectedStations((current) => toggleExternalTransferStation(current, station))}
                   />
                   {station}
                 </label>
