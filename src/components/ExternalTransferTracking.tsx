@@ -11,7 +11,7 @@ import {
   type ExternalTransferRecord,
 } from '../lib/externalTransferTracking';
 import { getExternalTransferChartOption, type ExternalTransferChartSeries } from '../lib/externalTransferChart';
-import { getExternalTransferStationSummary, toggleExternalTransferStation } from '../lib/externalTransferStationSelector';
+import { getExternalTransferStationSummary, selectAllExternalTransferStations, toggleExternalTransferStation } from '../lib/externalTransferStationSelector';
 
 type Metric = Exclude<keyof ExternalTransferDaily, 'date'>;
 
@@ -34,7 +34,7 @@ export function ExternalTransferTracking() {
     const stationList = [...new Set(upload.records.map((record) => record.station))].sort((left, right) => left.localeCompare(right, 'zh-CN'));
     setRecords(upload.records);
     setStations(stationList);
-    setSelectedStations(new Set(stationList));
+    setSelectedStations(selectAllExternalTransferStations(stationList));
     setStartDate(dates[0] ?? '');
     setEndDate(dates.at(-1) ?? '');
     setFileName(upload.fileName);
@@ -133,7 +133,7 @@ export function ExternalTransferTracking() {
           <input className="field-control mt-1 w-full" type="date" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} />
         </label>
         <div className="flex gap-2">
-          <button type="button" className="secondary-btn" onClick={() => setSelectedStations(new Set(stations))}>全选计量站</button>
+          <button type="button" className="secondary-btn" onClick={() => setSelectedStations(selectAllExternalTransferStations(stations))}>全选计量站</button>
           <button type="button" className="secondary-btn inline-flex items-center gap-1" onClick={() => inputRef.current?.click()}><RefreshCw size={15} />重新上传</button>
         </div>
         <p className="w-full text-xs text-slate-400">当前文件：{fileName} · 已加载 {records.length} 条记录</p>

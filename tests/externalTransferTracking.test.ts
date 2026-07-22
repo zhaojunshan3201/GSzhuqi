@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
 
-import { getExternalTransferStationSummary, toggleExternalTransferStation } from '../src/lib/externalTransferStationSelector.ts';
+import { getExternalTransferStationSummary, selectAllExternalTransferStations, toggleExternalTransferStation } from '../src/lib/externalTransferStationSelector.ts';
 import { parseExternalTransferWorkbook, summarizeExternalTransfer, summarizeExternalTransferByTenDayPeriod } from '../src/lib/externalTransferTracking.ts';
 
 test('ExternalTransferTracking uses the shared chart option helper', async () => {
@@ -42,6 +42,16 @@ test('toggles an external transfer station without mutating the existing selecti
   assert.deepEqual([...selectedStations], ['一站', '二站']);
   assert.deepEqual([...withoutFirst], ['二站']);
   assert.deepEqual([...restored], ['二站', '一站']);
+});
+
+test('selects all external transfer stations without modifying a prior selection', () => {
+  const stations = ['一站', '二站', '三站'];
+  const priorSelection = new Set(['二站']);
+  const allStations = selectAllExternalTransferStations(stations);
+
+  assert.deepEqual([...priorSelection], ['二站']);
+  assert.deepEqual([...allStations], stations);
+  assert.equal(getExternalTransferStationSummary(allStations), '已选 3 个：一站、二站、三站');
 });
 
 const headers = ['日期', '计量站', '井数', '日产液总量', '日产油总量', '日掺油总量', '综合含水', '外输', '外输差', '排污', '回流', '稀油用量（方）'];
