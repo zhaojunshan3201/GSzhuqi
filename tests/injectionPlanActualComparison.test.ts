@@ -49,8 +49,8 @@ test('uses the latest actual injection start for normalized well numbers and cal
 
     const result = await buildInjectionPlanActualComparison(db);
 
-    assert.equal(result.length, 2);
-    assert.deepEqual(result.map((row) => [row.wellNo, row.actualStartDate, row.startVarianceDays, row.endVarianceDays, row.comparisonStatus]), [
+    assert.equal(result.rows.length, 2);
+    assert.deepEqual(result.rows.map((row) => [row.wellNo, row.actualStartDate, row.startVarianceDays, row.endVarianceDays, row.comparisonStatus]), [
       ['A-1', '2026-07-11', 1, 2, 'delayed'],
       ['B-1', '2026-07-08', -2, -2, 'early'],
     ]);
@@ -68,9 +68,9 @@ test('classifies running, unstarted, and incomplete rows', async () => {
 
     const result = await buildInjectionPlanActualComparison(db);
 
-    assert.equal(result.find((row) => row.wellNo === 'RUN-1')?.comparisonStatus, 'in_progress');
-    assert.equal(result.find((row) => row.wellNo === 'WAIT-1')?.comparisonStatus, 'not_started');
-    assert.equal(result.find((row) => row.wellNo === 'BAD-1')?.comparisonStatus, 'incomplete');
+    assert.equal(result.rows.find((row) => row.wellNo === 'RUN-1')?.comparisonStatus, 'in_progress');
+    assert.equal(result.rows.find((row) => row.wellNo === 'WAIT-1')?.comparisonStatus, 'not_started');
+    assert.equal(result.rows.find((row) => row.wellNo === 'BAD-1')?.comparisonStatus, 'incomplete');
   });
 });
 
@@ -82,12 +82,12 @@ test('reads current-round columns, exposes boiler and steam comparisons, and fil
     await db.run(`INSERT INTO measure_tracking VALUES (1, 'C-1', NULL, '2026-07-10', '2026-07-20', '\u9505\u7089-X', 120, '\u84b8\u6c7d\u541e\u5410', NULL)`);
 
     const all = await buildInjectionPlanActualComparison(db);
-    const row = all.find((item) => item.wellNo === 'C-1')!;
+    const row = all.rows.find((item) => item.wellNo === 'C-1')!;
     assert.deepEqual([row.actualBoiler, row.boilerMatches, row.actualSteam, row.steamVariance, row.completionRate, row.actualProcess, row.comparisonStatus], ['锅炉-X', false, 120, 20, 1.2, '蒸汽吞吐', 'on_schedule']);
 
     const filtered = await buildInjectionPlanActualComparison(db, { planMonth: '2026-07', unit: '一队', boiler: '锅炉-A', status: 'on_schedule' });
-    assert.deepEqual(filtered.map((item) => item.wellNo), ['C-1']);
-    assert.equal((await buildInjectionPlanActualComparison(db, { planMonth: '2026-08' }))[0]?.wellNo, 'D-1');
+    assert.deepEqual(filtered.rows.map((item) => item.wellNo), ['C-1']);
+    assert.equal((await buildInjectionPlanActualComparison(db, { planMonth: '2026-08' })).rows.find((item) => item.wellNo === 'D-1')?.wellNo, 'D-1');
   });
 });
 
@@ -107,10 +107,73 @@ test('normalizes Chinese well numbers, parses Excel date serials, prefers the gr
 
     const result = await buildInjectionPlanActualComparison(db);
 
-    assert.deepEqual(result.map((row) => [row.wellNo, row.actualStartDate, row.actualEndDate, row.actualSteam, row.actualProcess, row.comparisonStatus]), [
+    assert.deepEqual(result.rows.map((row) => [row.wellNo, row.actualStartDate, row.actualEndDate, row.actualSteam, row.actualProcess, row.comparisonStatus]), [
       ['高2-2-96', '2026-07-10', '2026-07-21', 101, '蒸汽吞吐', 'on_schedule'],
       ['EARLY-1', '2026-07-08', '2026-07-18', 100, '蒸汽吞吐', 'early'],
       ['LATE-1', '2026-07-12', '2026-07-22', 100, '蒸汽吞吐', 'delayed'],
     ]);
+  });
+});
+
+test('limits rows to the requested month and its previous natural month', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-06'), (2, '2026-07'), (3, '2026-08')`);
+    await insertProject(db, { id: 1, wellNo: 'JUNE-1', importId: 1 });
+    await insertProject(db, { id: 2, wellNo: 'JULY-1', importId: 2 });
+    await insertProject(db, { id: 3, wellNo: 'AUGUST-1', importId: 3 });
+
+    const result = await buildInjectionPlanActualComparison(db, { planMonth: '2026-07' });
+
+    assert.deepEqual(result.rows.map((row) => row.wellNo), ['JULY-1', 'JUNE-1']);
+  });
+});
+
+test('summarizes execution deviations and excludes suspected other cycles from variance buckets', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07')`);
+    await insertProject(db, { id: 1, wellNo: 'ON-1', boiler: '活6', process: 'monthly-import', steam: 1000 });
+    await insertProject(db, { id: 2, wellNo: 'EARLY-1', boiler: '活6', steam: 1500 });
+    await insertProject(db, { id: 3, wellNo: 'OTHER-1', boiler: '活6', steam: 500 });
+    await insertProject(db, { id: 4, wellNo: 'WAIT-1', boiler: '活7', steam: 100 });
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json) VALUES
+      (1, 'ON-1', ?),
+      (2, 'EARLY-1', ?),
+      (3, 'OTHER-1', ?)`, [
+      JSON.stringify({ 开注时间: '2026-07-10', 停注时间: '2026-07-20', 锅炉编号: '活6', 累注汽量: 1000, 措施类型: '吞吐' }),
+      JSON.stringify({ 开注时间: '2026-07-08', 停注时间: '2026-07-18', 锅炉编号: '活6', 累注汽量: 1000, 措施类型: '吞吐' }),
+      JSON.stringify({ 开注时间: '2026-09-10', 停注时间: '2026-09-20', 锅炉编号: '活6', 累注汽量: 500, 措施类型: '吞吐' }),
+    ]);
+
+    const result = await buildInjectionPlanActualComparison(db, { planMonth: '2026-07' });
+    const otherCycle = result.rows.find((row) => row.wellNo === 'OTHER-1')!;
+    const monthlyImport = result.rows.find((row) => row.wellNo === 'ON-1')!;
+
+    assert.equal(otherCycle.comparisonStatus, 'suspected_other_cycle');
+    assert.equal(monthlyImport.plannedProcess, '月度注汽计划');
+    assert.deepEqual(result.summary, {
+      planned: 4, executed: 3, onSchedule: 1, early: 1, delayed: 0, notStarted: 1, suspectedOtherCycle: 1,
+    });
+    assert.deepEqual(result.charts.startVarianceBuckets, [
+      { label: '提前', count: 1 }, { label: '按计划', count: 1 }, { label: '滞后', count: 0 }, { label: '严重滞后', count: 0 },
+    ]);
+    assert.deepEqual(result.charts.endVarianceBuckets, [
+      { label: '提前', count: 1 }, { label: '按计划', count: 1 }, { label: '滞后', count: 0 }, { label: '严重滞后', count: 0 },
+    ]);
+    assert.deepEqual(result.charts.boilerSteamTotals, [
+      { boiler: '活6', plannedSteam: 3000, actualSteam: 2500 },
+      { boiler: '活7', plannedSteam: 100, actualSteam: 0 },
+    ]);
+  });
+});
+
+test('uses -- for a missing actual process', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07')`);
+    await insertProject(db, { id: 1, wellNo: 'PROCESS-1' });
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json) VALUES (1, 'PROCESS-1', ?)`, [JSON.stringify({ 开注时间: '2026-07-10' })]);
+
+    const result = await buildInjectionPlanActualComparison(db, { planMonth: '2026-07' });
+
+    assert.equal(result.rows[0].actualProcess, '--');
   });
 });

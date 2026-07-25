@@ -1,4 +1,4 @@
-export type ComparisonStatus = 'not_started' | 'in_progress' | 'on_schedule' | 'early' | 'delayed' | 'incomplete';
+export type ComparisonStatus = 'not_started' | 'in_progress' | 'on_schedule' | 'early' | 'delayed' | 'incomplete' | 'suspected_other_cycle';
 
 export type InjectionPlanActualComparison = {
   projectId: number;
@@ -18,7 +18,7 @@ export type InjectionPlanActualComparison = {
   steamVariance: number | null;
   completionRate: number | null;
   plannedProcess: string | null;
-  actualProcess: string | null;
+  actualProcess: string;
   comparisonStatus: ComparisonStatus;
 };
 
@@ -31,6 +31,13 @@ export type InjectionPlanActualComparisonFilters = {
 
 type DatabaseLike = { all(sql: string, params?: unknown[]): Promise<any[]> };
 type Actual = { id: number; startDate: string | null; endDate: string | null; boiler: string | null; steam: number | null; process: string | null };
+type VarianceBucket = { label: string; count: number };
+
+export type InjectionPlanActualComparisonResult = {
+  rows: InjectionPlanActualComparison[];
+  summary: { planned: number; executed: number; onSchedule: number; early: number; delayed: number; notStarted: number; suspectedOtherCycle: number };
+  charts: { startVarianceBuckets: VarianceBucket[]; endVarianceBuckets: VarianceBucket[]; boilerSteamTotals: { boiler: string; plannedSteam: number; actualSteam: number }[] };
+};
 
 function normalizedText(value: unknown): string | null {
   const text = String(value ?? '').trim();
@@ -85,7 +92,7 @@ function actualFrom(row: any): Actual {
   const json = detail(row);
   return {
     id: Number(row.id) || 0,
-    startDate: dateValue(firstValue(row, json, ['current_round_start_time', 'current_round_injection_time', 'current_round_start_date', 'current_round_open_time', '\u5f00\u6ce8\u65f6\u95f4', '开注时间'])),
+    startDate: dateValue(firstValue(row, json, ['current_round_start_time', 'current_round_injection_time', 'current_round_start_date', 'current_round_open_time', '\u5f00\u6ce8\u65f6\u95f4'])),
     endDate: dateValue(firstValue(row, json, ['current_round_stop_time', 'current_round_end_time', 'current_round_end_date', '\u505c\u6ce8\u65f6\u95f4', '停注时间'])),
     boiler: normalizedText(firstValue(row, json, ['current_round_boiler', 'current_round_boiler_no', 'boiler', '\u9505\u7089\u7f16\u53f7', '锅炉编号'])),
     steam: numberValue(firstValue(row, json, ['current_round_steam', 'current_round_cumulative_steam', 'actual_steam', 'cumulative_steam', '\u7d2f\u6ce8\u6c7d\u91cf', '累注汽量'])),
@@ -101,8 +108,11 @@ function variance(actual: string | null, planned: string | null): number | null 
 }
 
 function statusFor(row: Omit<InjectionPlanActualComparison, 'comparisonStatus'>): ComparisonStatus {
+  const suspectedOtherCycle = (row.startVarianceDays != null && Math.abs(row.startVarianceDays) > 60)
+    || (row.endVarianceDays != null && Math.abs(row.endVarianceDays) > 60);
+  if (suspectedOtherCycle) return 'suspected_other_cycle';
   if (!row.actualStartDate) return 'not_started';
-  const missingCriticalData = !row.plannedStartDate || !row.plannedEndDate || row.plannedBoiler == null || row.actualBoiler == null || row.plannedSteam == null || row.actualSteam == null || row.plannedProcess == null || row.actualProcess == null;
+  const missingCriticalData = !row.plannedStartDate || !row.plannedEndDate || row.plannedBoiler == null || row.actualBoiler == null || row.plannedSteam == null || row.actualSteam == null || row.plannedProcess == null || row.actualProcess === '--';
   if (missingCriticalData) return 'incomplete';
   if (!row.actualEndDate) return 'in_progress';
   if ((row.startVarianceDays ?? 0) > 1 || (row.endVarianceDays ?? 0) > 1) return 'delayed';
@@ -110,7 +120,30 @@ function statusFor(row: Omit<InjectionPlanActualComparison, 'comparisonStatus'>)
   return 'on_schedule';
 }
 
-export async function buildInjectionPlanActualComparison(db: DatabaseLike, filters: InjectionPlanActualComparisonFilters = {}): Promise<InjectionPlanActualComparison[]> {
+function monthWindow(planMonth?: string): [string, string] {
+  const currentMonth = planMonth && /^\d{4}-\d{2}$/.test(planMonth) ? planMonth : new Date().toISOString().slice(0, 7);
+  const [year, month] = currentMonth.split('-').map(Number);
+  const previousMonth = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 7);
+  return [previousMonth, currentMonth];
+}
+
+function varianceBuckets(rows: InjectionPlanActualComparison[], key: 'startVarianceDays' | 'endVarianceDays'): VarianceBucket[] {
+  const buckets: VarianceBucket[] = [
+    { label: String.fromCodePoint(0x63d0, 0x524d) as '\u63d0\u524d', count: 0 }, { label: String.fromCodePoint(0x6309, 0x8ba1, 0x5212) as '\u6309\u8ba1\u5212', count: 0 }, { label: String.fromCodePoint(0x6ede, 0x540e) as '\u6ede\u540e', count: 0 }, { label: String.fromCodePoint(0x4e25, 0x91cd, 0x6ede, 0x540e) as '\u4e25\u91cd\u6ede\u540e', count: 0 },
+  ];
+  for (const row of rows) {
+    if (row.comparisonStatus === 'suspected_other_cycle') continue;
+    const value = row[key];
+    if (value == null) continue;
+    if (value <= -2) buckets[0].count++;
+    else if (value <= 1) buckets[1].count++;
+    else if (value <= 7) buckets[2].count++;
+    else buckets[3].count++;
+  }
+  return buckets;
+}
+
+export async function buildInjectionPlanActualComparison(db: DatabaseLike, filters: InjectionPlanActualComparisonFilters = {}): Promise<InjectionPlanActualComparisonResult> {
   const [projects, tracking] = await Promise.all([
     db.all(`SELECT p.*, i.plan_month FROM injection_projects p LEFT JOIN injection_plan_imports i ON i.id = p.source_import_id`),
     db.all(`SELECT * FROM measure_tracking WHERE TRIM(COALESCE(jh, '')) != ''`),
@@ -123,7 +156,12 @@ export async function buildInjectionPlanActualComparison(db: DatabaseLike, filte
     if (!current || (actual.startDate || '') > (current.startDate || '') || ((actual.startDate || '') === (current.startDate || '') && actual.id > current.id)) actualByWell.set(wellNo, actual);
   }
 
-  return projects
+  const [previousMonth, currentMonth] = monthWindow(filters.planMonth);
+  const rows = projects
+    .filter((project) => {
+      const planMonth = normalizedText(project.plan_month);
+      return planMonth != null && planMonth >= previousMonth && planMonth <= currentMonth;
+    })
     .map((project) => {
       const wellNo = normalizedWellNo(project.well_no);
       const actual = actualByWell.get(wellNo) ?? { id: 0, startDate: null, endDate: null, boiler: null, steam: null, process: null };
@@ -131,7 +169,7 @@ export async function buildInjectionPlanActualComparison(db: DatabaseLike, filte
       const plannedEndDate = dateValue(project.planned_end_date);
       const plannedBoiler = normalizedText(project.boiler);
       const plannedSteam = numberValue(project.planned_steam);
-      const plannedProcess = normalizedText(project.process_type);
+      const rawPlannedProcess = normalizedText(project.process_type);
       const result = {
         projectId: project.id,
         planMonth: normalizedText(project.plan_month),
@@ -149,14 +187,42 @@ export async function buildInjectionPlanActualComparison(db: DatabaseLike, filte
         actualSteam: actual.steam,
         steamVariance: plannedSteam != null && actual.steam != null ? actual.steam - plannedSteam : null,
         completionRate: plannedSteam != null && plannedSteam !== 0 && actual.steam != null ? actual.steam / plannedSteam : null,
-        plannedProcess,
-        actualProcess: actual.process,
+        plannedProcess: rawPlannedProcess === 'monthly-import' ? String.fromCodePoint(0x6708, 0x5ea6, 0x6ce8, 0x6c7d, 0x8ba1, 0x5212) : rawPlannedProcess,
+        actualProcess: actual.process ?? '--',
       };
-      return { ...result, comparisonStatus: statusFor(result) };
+      return { ...result, comparisonStatus: statusFor(result), unit: normalizedText(project.unit) };
     })
-    .filter((row) => (!filters.planMonth || row.planMonth === filters.planMonth)
-      && (!filters.unit || normalizedText(projects.find((project) => project.id === row.projectId)?.unit) === filters.unit)
+    .filter((row) => (!filters.unit || row.unit === filters.unit)
       && (!filters.boiler || row.plannedBoiler === filters.boiler)
       && (!filters.status || row.comparisonStatus === filters.status))
     .sort((a, b) => a.wellNo.localeCompare(b.wellNo));
+
+  const comparisonRows = rows.map(({ unit: _unit, ...row }) => row);
+  const summary = {
+    planned: comparisonRows.length,
+    executed: comparisonRows.filter((row) => row.actualStartDate != null).length,
+    onSchedule: comparisonRows.filter((row) => row.comparisonStatus === 'on_schedule').length,
+    early: comparisonRows.filter((row) => row.comparisonStatus === 'early').length,
+    delayed: comparisonRows.filter((row) => row.comparisonStatus === 'delayed').length,
+    notStarted: comparisonRows.filter((row) => row.comparisonStatus === 'not_started').length,
+    suspectedOtherCycle: comparisonRows.filter((row) => row.comparisonStatus === 'suspected_other_cycle').length,
+  };
+  const totals = new Map<string, { plannedSteam: number; actualSteam: number }>();
+  for (const row of comparisonRows) {
+    const boiler = row.plannedBoiler ?? '--';
+    const total = totals.get(boiler) ?? { plannedSteam: 0, actualSteam: 0 };
+    total.plannedSteam += row.plannedSteam ?? 0;
+    total.actualSteam += row.actualSteam ?? 0;
+    totals.set(boiler, total);
+  }
+
+  return {
+    rows: comparisonRows,
+    summary,
+    charts: {
+      startVarianceBuckets: varianceBuckets(comparisonRows, 'startVarianceDays'),
+      endVarianceBuckets: varianceBuckets(comparisonRows, 'endVarianceDays'),
+      boilerSteamTotals: [...totals.entries()].map(([boiler, total]) => ({ boiler, ...total })).sort((a, b) => a.boiler.localeCompare(b.boiler)),
+    },
+  };
 }
