@@ -20,6 +20,14 @@ export type PlanImport = {
 };
 
 const projectColumns = ['unit', 'boiler', 'planned_start_date', 'planned_end_date', 'gas_support', 'schedule_status', 'source_import_id'];
+const confirmationQueues = new WeakMap<DatabaseLike, Promise<void>>();
+
+function queuePlanImportConfirmation<T>(db: DatabaseLike, operation: () => Promise<T>): Promise<T> {
+  const previous = confirmationQueues.get(db) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  confirmationQueues.set(db, current.then(() => undefined, () => undefined));
+  return current;
+}
 
 function toImport(row: any): PlanImport {
   return {
@@ -95,9 +103,10 @@ export async function createPlanPreview(db: DatabaseLike, input: PlanImportPrevi
 }
 
 export async function confirmPlanImport(db: DatabaseLike, importId: number): Promise<PlanImport> {
-  await initMonthlyInjectionPlanImportTables(db);
-  await db.exec('BEGIN');
-  try {
+  return queuePlanImportConfirmation(db, async () => {
+    await initMonthlyInjectionPlanImportTables(db);
+    await db.exec('BEGIN');
+    try {
     const batch = await db.get('SELECT * FROM injection_plan_imports WHERE id = ?', [importId]);
     if (!batch) throw new Error('plan import not found');
     if (batch.status !== 'preview') throw new Error('only preview imports can be confirmed');
@@ -133,10 +142,11 @@ export async function confirmPlanImport(db: DatabaseLike, importId: number): Pro
     await db.run("UPDATE injection_plan_imports SET status = 'confirmed', confirmed_at = ? WHERE id = ?", [now, importId]);
     await db.exec('COMMIT');
     return toImport(await db.get('SELECT * FROM injection_plan_imports WHERE id = ?', [importId]));
-  } catch (error) {
-    await db.exec('ROLLBACK');
-    throw error;
-  }
+    } catch (error) {
+      await db.exec('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 export async function listPlanImports(db: DatabaseLike): Promise<PlanImport[]> {

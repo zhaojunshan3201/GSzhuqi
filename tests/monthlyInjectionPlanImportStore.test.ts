@@ -6,7 +6,7 @@ import test from 'node:test';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
-import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, transitionInjectionProject, updatePlanStatus } from '../src/lib/injectionProjectStore.ts';
+import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from '../src/lib/injectionProjectStore.ts';
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from '../src/lib/monthlyInjectionPlanImportStore.ts';
 
 const valid = (wellNo: string, steam = 100) => ({ unit: 'U1', boiler: 'B1', wellNo, plannedSteam: steam, gasSupport: 'N2', startDate: '2026-08-01', endDate: '2026-08-03', planStatus: null, remark: null, sourceCell: 'C2', rawWellText: `${wellNo} (${steam})`, rawScheduleText: '8.1-8.3' });
@@ -47,6 +47,7 @@ test('confirming a revision updates same-month imports, supersedes prior batch, 
     const removedExecuted = await db.get('SELECT * FROM injection_projects WHERE well_no = ?', ['W-2']);
     await updatePlanStatus(db, removedExecuted.id, 'issued');
     await transitionInjectionProject(db, removedExecuted.id, 'injecting', '2026-08-01');
+    await transitionInjectionProject(db, removedExecuted.id, 'soaking', '2026-08-02');
 
     const revision = await createPlanPreview(db, previewInput([{ ...valid('W-1', 150), unit: 'U2', boiler: 'B2', gasSupport: 'CO2', startDate: '2026-08-05', endDate: '2026-08-09', planStatus: 'revised', remark: 'revised remark' }, valid('W-3', 300)]));
     await confirmPlanImport(db, revision.id);
@@ -57,10 +58,26 @@ test('confirming a revision updates same-month imports, supersedes prior batch, 
     assert.deepEqual({ steam: w1.planned_steam, block: w1.block, unit: w1.unit, boiler: w1.boiler, gas: w1.gas_support, start: w1.planned_start_date, end: w1.planned_end_date, transfer: w1.planned_transfer_date, remark: w1.remark, plan: w1.plan_status, lifecycle: w1.lifecycle_status, source: w1.source_import_id }, { steam: 150, block: 'U2', unit: 'U2', boiler: 'B2', gas: 'CO2', start: '2026-08-05', end: '2026-08-09', transfer: '2026-08-09', remark: 'revised remark', plan: 'issued', lifecycle: 'injecting', source: revision.id });
     assert.equal(w2.source_import_id, null);
     assert.equal(w2.schedule_status, 'superseded');
-    assert.equal(w2.lifecycle_status, 'injecting');
-    assert.equal((await listInjectionProjects(db)).some((project) => project.id === w2.id), false);
+    assert.equal(w2.lifecycle_status, 'soaking');
+    assert.equal((await listInjectionProjects(db)).some((project) => project.id === w2.id), true);
     assert.equal((await listInjectionProjects(db, { includeSuperseded: true })).some((project) => project.id === w2.id), true);
+    assert.equal((await listProjectPendingItems(db, '2026-08-10')).some((project) => project.id === w2.id), true);
     assert.deepEqual({ plan: w3.plan_status, lifecycle: w3.lifecycle_status, source: w3.source_import_id }, { plan: 'draft', lifecycle: 'pending', source: revision.id });
+    assert.deepEqual((await listPlanImports(db)).map((item) => item.status).sort(), ['confirmed', 'superseded']);
+  });
+});
+
+test('serializes concurrent confirmations on the same database connection', async () => {
+  await withStore(async (db) => {
+    const first = await createPlanPreview(db, previewInput([valid('W-1', 100)]));
+    const second = await createPlanPreview(db, previewInput([valid('W-2', 200)]));
+
+    const results = await Promise.allSettled([
+      confirmPlanImport(db, first.id),
+      confirmPlanImport(db, second.id),
+    ]);
+
+    assert.deepEqual(results.map((result) => result.status), ['fulfilled', 'fulfilled']);
     assert.deepEqual((await listPlanImports(db)).map((item) => item.status).sort(), ['confirmed', 'superseded']);
   });
 });
