@@ -74,7 +74,7 @@ test('calculates production metrics and creates overdue and low-efficiency alert
 
     assert.equal(result.metrics.dailyOil, 2);
     assert.equal(result.metrics.cumulativeOilGain, 10);
-    assert.equal(result.metrics.oilSteamRatio, 0.275);
+    assert.equal(result.metrics.oilSteamRatio, 0.28);
     assert.deepEqual(result.alerts.map((alert) => alert.type).sort(), [
       'lowEfficiency', 'soakingOverdue', 'transferOverdue',
     ]);
@@ -154,7 +154,27 @@ test('keeps valid production values when another value or evaluation is missing'
     ]);
     assert.equal(result.metrics.dailyOil, 2);
     assert.equal(result.metrics.cumulativeOilGain, 5);
-    assert.equal(result.alerts.some((alert) => alert.type === 'needsData' && alert.wellNo === 'A-1'), true);
+    assert.equal(result.alerts.some((alert) => alert.type === 'notEvaluated' && alert.wellNo === 'A-1'), true);
+    assert.equal(result.alerts.some((alert) => alert.type === 'needsData' && alert.wellNo === 'A-2'), true);
+  });
+});
+
+test('uses valid paired cycles for consistently rounded global and trimmed-block ratios', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO measure_tracking VALUES (1, ' A-1 ', 'A', '生产', '2026-07-20', 2, 5, 'A')`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 100, 0)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES (' A-1 ', 100, 30)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 100, NULL)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', NULL, 40)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', '   ', 20)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 50, '   ')`);
+
+    const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
+
+    assert.equal(result.metrics.oilSteamRatio, 0.15);
+    assert.deepEqual(result.blockPerformanceSummary, [
+      { block: 'A', dailyOil: 2, cumulativeOilGain: 5, oilSteamRatio: 0.15 },
+    ]);
   });
 });
 
@@ -164,12 +184,13 @@ test('returns all alert distribution types in fixed order with counts from final
     await db.run(`INSERT INTO measure_tracking VALUES (2, 'B-1', 'B', '生产', '2026-07-20', 2, 10, 'D')`);
     await db.run(`INSERT INTO measure_tracking VALUES (3, 'C-1', 'C', '焖井', '2026-06-01', NULL, NULL, NULL)`);
     await db.run(`INSERT INTO measure_tracking VALUES (4, 'D-1', 'D', '转注', '2026-07-01', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (5, 'E-1', 'E', '生产', '2026-07-20', 3, 12, NULL)`);
 
     const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
 
     assert.deepEqual(result.alertDistribution, [
       { type: 'needsData', count: 1 },
-      { type: 'notEvaluated', count: 0 },
+      { type: 'notEvaluated', count: 1 },
       { type: 'lowEfficiency', count: 1 },
       { type: 'soakingOverdue', count: 1 },
       { type: 'transferOverdue', count: 1 },

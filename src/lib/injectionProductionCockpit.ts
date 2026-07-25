@@ -22,7 +22,7 @@ const emptyDistribution = (): Record<InjectionLifecycleStatus, number> => ({ inj
 const alertTypes: CockpitAlertType[] = ['needsData', 'notEvaluated', 'lowEfficiency', 'soakingOverdue', 'transferOverdue'];
 
 function finiteNumber(value: unknown): number | null {
-  if (value == null || value === '') return null;
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -60,20 +60,21 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
     const blockStatus = blockStatusByName.get(block) || { block, ...emptyDistribution() };
     blockStatus[status] += 1;
     blockStatusByName.set(block, blockStatus);
-    blockByWell.set(String(row.jh), block);
+    blockByWell.set(String(row.jh).trim(), block);
     const blockPerformance = blockPerformanceByName.get(block) || {
       block, dailyOil: 0, hasDailyOil: false, cumulativeOilGain: 0, hasCumulativeOilGain: false, steam: 0, cycleOil: 0,
     };
+    const currentOil = finiteNumber(row.current_oil);
+    const cumulativeGain = finiteNumber(row.cumulative_oil_gain);
     const needsData = !row.current_status || !row.current_round_transfer_time ||
-      (status === 'producing' && (row.current_oil == null || !row.evaluation));
+      (status === 'producing' && currentOil == null);
     if (needsData) {
       alerts.push({ id: `needs-data:${row.jh}`, type: 'needsData', wellNo: row.jh, block: row.block || '', message: '注汽跟踪数据待补全', target: 'measures' });
     } else if (status === 'producing') {
-      if (row.evaluation === 'D') alerts.push({ id: `low-efficiency:${row.jh}`, type: 'lowEfficiency', wellNo: row.jh, block: row.block || '', message: '注汽效果评价为 D 类', target: 'measures' });
+      if (!String(row.evaluation ?? '').trim()) alerts.push({ id: `not-evaluated:${row.jh}`, type: 'notEvaluated', wellNo: row.jh, block: row.block || '', message: '注汽效果待评价', target: 'measures' });
+      else if (row.evaluation === 'D') alerts.push({ id: `low-efficiency:${row.jh}`, type: 'lowEfficiency', wellNo: row.jh, block: row.block || '', message: '注汽效果评价为 D 类', target: 'measures' });
     }
     if (status === 'producing') {
-      const currentOil = finiteNumber(row.current_oil);
-      const cumulativeGain = finiteNumber(row.cumulative_oil_gain);
       if (currentOil != null) {
         dailyOil += currentOil; hasDailyOil = true;
         blockPerformance.dailyOil += currentOil; blockPerformance.hasDailyOil = true;
@@ -89,19 +90,23 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
     if (!needsData && status === 'pendingTransfer' && days > 7) alerts.push({ id: `transfer-overdue:${row.jh}`, type: 'transferOverdue', wellNo: row.jh, block: row.block || '', message: '待转抽超过 7 天', target: 'measures' });
     return { wellNo: row.jh, block: row.block || '', status, evaluation: row.evaluation || null };
   });
-  const steamRows = await db.all(`SELECT SUM(actual_steam) AS steam, SUM(cycle_oil) AS oil FROM measure_well_cycles`);
   const blockCycleRows = await db.all(`SELECT well_name, actual_steam, cycle_oil FROM measure_well_cycles`);
+  let steam = 0;
+  let cycleOil = 0;
+  let hasValidCycle = false;
   for (const row of blockCycleRows) {
-    const block = blockByWell.get(String(row.well_name));
     const actualSteam = finiteNumber(row.actual_steam);
     const cycleOilValue = finiteNumber(row.cycle_oil);
-    if (!block || actualSteam == null || actualSteam <= 0 || cycleOilValue == null) continue;
+    if (actualSteam == null || actualSteam <= 0 || cycleOilValue == null) continue;
+    steam += actualSteam;
+    cycleOil += cycleOilValue;
+    hasValidCycle = true;
+    const block = blockByWell.get(String(row.well_name).trim());
+    if (!block) continue;
     const blockPerformance = blockPerformanceByName.get(block)!;
     blockPerformance.steam += actualSteam;
     blockPerformance.cycleOil += cycleOilValue;
   }
-  const steam = Number(steamRows[0]?.steam || 0);
-  const cycleOil = Number(steamRows[0]?.oil || 0);
   const productionDate = (await db.all(`SELECT MAX(rq) AS updated_at FROM production`))[0]?.updated_at || null;
   const trackingDate = (await db.all(`SELECT MAX(current_round_transfer_time) AS updated_at FROM measure_tracking`))[0]?.updated_at || null;
   const selectionDate = (await db.all(`SELECT MAX(imported_at) AS updated_at FROM measure_well_imports`))[0]?.updated_at || null;
@@ -113,7 +118,7 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
       { source: 'injectionTracking', status: trackingDate ? 'normal' : 'missing', updatedAt: trackingDate, message: trackingDate ? '注汽跟踪数据可用' : '注汽跟踪数据待导入' },
       { source: 'selection', status: selectionDate ? 'normal' : 'missing', updatedAt: selectionDate, message: selectionDate ? '选井数据可用' : '选井数据待导入' },
     ],
-    metrics: { producingWells: statusDistribution.producing, injectingWells: statusDistribution.injecting, soakingWells: statusDistribution.soaking, pendingTransferWells: statusDistribution.pendingTransfer, dailyOil: hasDailyOil ? dailyOil : null, cumulativeOilGain: hasCumulativeOilGain ? cumulativeOilGain : null, oilSteamRatio: steam > 0 && cycleOil > 0 ? cycleOil / steam : null },
+    metrics: { producingWells: statusDistribution.producing, injectingWells: statusDistribution.injecting, soakingWells: statusDistribution.soaking, pendingTransferWells: statusDistribution.pendingTransfer, dailyOil: hasDailyOil ? dailyOil : null, cumulativeOilGain: hasCumulativeOilGain ? cumulativeOilGain : null, oilSteamRatio: hasValidCycle ? Math.round((cycleOil / steam) * 100) / 100 : null },
     statusDistribution,
     blockStatusSummary: [...blockStatusByName.values()].sort((left, right) => left.block.localeCompare(right.block, 'zh-CN')),
     blockPerformanceSummary: [...blockPerformanceByName.values()]
