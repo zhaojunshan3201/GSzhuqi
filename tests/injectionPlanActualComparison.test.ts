@@ -1,0 +1,93 @@
+﻿import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
+
+import { buildInjectionPlanActualComparison } from '../src/lib/injectionPlanActualComparison.ts';
+
+async function withDatabase(run: (db: any) => Promise<void>) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'injection-plan-actual-comparison-'));
+  const db = await open({ filename: path.join(directory, 'test.db'), driver: sqlite3.Database });
+  try {
+    await db.exec(`
+      CREATE TABLE injection_plan_imports (id INTEGER PRIMARY KEY, plan_month TEXT);
+      CREATE TABLE injection_projects (
+        id INTEGER PRIMARY KEY, well_no TEXT, unit TEXT, boiler TEXT, process_type TEXT,
+        planned_start_date TEXT, planned_end_date TEXT, planned_steam REAL, source_import_id INTEGER
+      );
+      CREATE TABLE measure_tracking (
+        id INTEGER PRIMARY KEY, jh TEXT, detail_json TEXT,
+        current_round_start_time TEXT, current_round_stop_time TEXT,
+        current_round_boiler TEXT, current_round_steam REAL, current_round_process TEXT
+      );
+    `);
+    await run(db);
+  } finally {
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function insertProject(db: any, values: { id: number; wellNo: string; unit?: string; boiler?: string; process?: string; start?: string | null; end?: string | null; steam?: number | null; importId?: number | null }) {
+  await db.run(
+    `INSERT INTO injection_projects VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [values.id, values.wellNo, values.unit ?? '一队', values.boiler ?? '锅炉-A', values.process ?? '吞吐', values.start ?? '2026-07-10', values.end ?? '2026-07-20', values.steam ?? 100, values.importId ?? 1],
+  );
+}
+
+test('uses the latest actual injection start for normalized well numbers and calculates early and delayed variances', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07')`);
+    await insertProject(db, { id: 1, wellNo: ' a-1 ', start: '2026-07-10', end: '2026-07-20' });
+    await insertProject(db, { id: 2, wellNo: 'B-1', start: '2026-07-10', end: '2026-07-20' });
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json) VALUES (1, 'A-1', ?)`, [JSON.stringify({ 开注时间: '2026-07-09', 停注时间: '2026-07-19', 锅炉编号: '锅炉-A', 累注汽量: 80, 措施类型: '吞吐' })]);
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json) VALUES (2, ' A-1 ', ?)`, [JSON.stringify({ 开注时间: '2026-07-11', 停注时间: '2026-07-22', 锅炉编号: '锅炉-A', 累注汽量: 100, 措施类型: '吞吐' })]);
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json) VALUES (3, 'B-1', ?)`, [JSON.stringify({ 开注时间: '2026-07-08', 停注时间: '2026-07-18', 锅炉编号: '锅炉-A', 累注汽量: 50, 措施类型: '吞吐' })]);
+
+    const result = await buildInjectionPlanActualComparison(db);
+
+    assert.equal(result.length, 2);
+    assert.deepEqual(result.map((row) => [row.wellNo, row.actualStartDate, row.startVarianceDays, row.endVarianceDays, row.comparisonStatus]), [
+      ['A-1', '2026-07-11', 1, 2, 'delayed'],
+      ['B-1', '2026-07-08', -2, -2, 'early'],
+    ]);
+  });
+});
+
+test('classifies running, unstarted, and incomplete rows', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07')`);
+    await insertProject(db, { id: 1, wellNo: 'RUN-1' });
+    await insertProject(db, { id: 2, wellNo: 'WAIT-1' });
+    await insertProject(db, { id: 3, wellNo: 'BAD-1', boiler: '', steam: null });
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json) VALUES (1, 'RUN-1', ?)`, [JSON.stringify({ 开注时间: '2026-07-10', 锅炉编号: '锅炉-A', 累注汽量: 10, 措施类型: '吞吐' })]);
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json) VALUES (2, 'BAD-1', ?)`, [JSON.stringify({ 开注时间: '2026-07-10' })]);
+
+    const result = await buildInjectionPlanActualComparison(db);
+
+    assert.equal(result.find((row) => row.wellNo === 'RUN-1')?.comparisonStatus, 'in_progress');
+    assert.equal(result.find((row) => row.wellNo === 'WAIT-1')?.comparisonStatus, 'not_started');
+    assert.equal(result.find((row) => row.wellNo === 'BAD-1')?.comparisonStatus, 'incomplete');
+  });
+});
+
+test('reads current-round columns, exposes boiler and steam comparisons, and filters by plan month, unit, boiler, and status', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07'), (2, '2026-08')`);
+    await insertProject(db, { id: 1, wellNo: 'C-1', unit: '一队', boiler: '锅炉-A', steam: 100, importId: 1 });
+    await insertProject(db, { id: 2, wellNo: 'D-1', unit: '二队', boiler: '锅炉-B', importId: 2 });
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'C-1', NULL, '2026-07-10', '2026-07-20', '锅炉-X', 120, '蒸汽吞吐')`);
+
+    const all = await buildInjectionPlanActualComparison(db);
+    const row = all.find((item) => item.wellNo === 'C-1')!;
+    assert.deepEqual([row.actualBoiler, row.boilerMatches, row.actualSteam, row.steamVariance, row.completionRate, row.actualProcess, row.comparisonStatus], ['锅炉-X', false, 120, 20, 1.2, '蒸汽吞吐', 'on_schedule']);
+
+    const filtered = await buildInjectionPlanActualComparison(db, { planMonth: '2026-07', unit: '一队', boiler: '锅炉-A', status: 'on_schedule' });
+    assert.deepEqual(filtered.map((item) => item.wellNo), ['C-1']);
+    assert.equal((await buildInjectionPlanActualComparison(db, { planMonth: '2026-08' }))[0]?.wellNo, 'D-1');
+  });
+});
+
