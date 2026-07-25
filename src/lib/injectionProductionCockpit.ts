@@ -1,10 +1,13 @@
 export type InjectionLifecycleStatus = 'injecting' | 'soaking' | 'pendingTransfer' | 'producing' | 'needsData';
 
+export type BlockStatusSummary = { block: string } & Record<InjectionLifecycleStatus, number>;
+
 export type InjectionProductionCockpit = {
   generatedAt: string;
   dataFreshness: Array<{ source: 'production' | 'injectionTracking' | 'selection'; status: 'normal' | 'stale' | 'failed' | 'missing'; updatedAt: string | null; message: string }>;
   metrics: { producingWells: number; injectingWells: number; soakingWells: number; pendingTransferWells: number; dailyOil: number | null; cumulativeOilGain: number | null; oilSteamRatio: number | null };
   statusDistribution: Record<InjectionLifecycleStatus, number>;
+  blockStatusSummary: BlockStatusSummary[];
   alerts: Array<{ id: string; type: 'needsData' | 'notEvaluated' | 'lowEfficiency' | 'soakingOverdue' | 'transferOverdue'; wellNo: string; block: string; message: string; target: 'measures' | 'oilWellMap' }>;
   mapWells: Array<{ wellNo: string; block: string; status: InjectionLifecycleStatus; evaluation: string | null }>;
 };
@@ -32,6 +35,7 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
     ) WHERE row_number = 1 ORDER BY jh
   `);
   const statusDistribution = emptyDistribution();
+  const blockStatusByName = new Map<string, BlockStatusSummary>();
   const alerts: InjectionProductionCockpit['alerts'] = [];
   let dailyOil = 0;
   let hasDailyOil = false;
@@ -40,6 +44,10 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
   const mapWells = rows.map((row) => {
     const status = getStatus(row.current_status);
     statusDistribution[status] += 1;
+    const block = String(row.block ?? '').trim() || '未标注区块';
+    const blockStatus = blockStatusByName.get(block) || { block, ...emptyDistribution() };
+    blockStatus[status] += 1;
+    blockStatusByName.set(block, blockStatus);
     const needsData = !row.current_status || !row.current_round_transfer_time ||
       (status === 'producing' && (row.current_oil == null || !row.evaluation));
     if (needsData) {
@@ -70,6 +78,7 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
     ],
     metrics: { producingWells: statusDistribution.producing, injectingWells: statusDistribution.injecting, soakingWells: statusDistribution.soaking, pendingTransferWells: statusDistribution.pendingTransfer, dailyOil: hasDailyOil ? dailyOil : null, cumulativeOilGain: hasCumulativeOilGain ? cumulativeOilGain : null, oilSteamRatio: steam > 0 && cycleOil > 0 ? cycleOil / steam : null },
     statusDistribution,
+    blockStatusSummary: [...blockStatusByName.values()].sort((left, right) => left.block.localeCompare(right.block, 'zh-CN')),
     alerts,
     mapWells,
   };

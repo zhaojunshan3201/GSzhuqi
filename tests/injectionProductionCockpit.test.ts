@@ -96,3 +96,21 @@ test('reports a failed production source without also marking it normal', async 
     });
   });
 });
+
+test('aggregates latest lifecycle statuses by zh-CN-sorted block without duplicates', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'B-1', 'B区', '焖井', '2026-07-01', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (2, 'B-1', 'B区', '生产', '2026-07-20', 3, 8, 'A')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (3, 'A-1', 'A区', '正注', '2026-07-20', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (4, 'A-2', 'A区', '转注', '2026-07-21', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (5, 'U-1', '', NULL, '2026-07-22', NULL, NULL, NULL)`);
+
+    const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
+
+    assert.deepEqual(result.blockStatusSummary, [
+      { block: '未标注区块', producing: 0, injecting: 0, soaking: 0, pendingTransfer: 0, needsData: 1 },
+      { block: 'A区', producing: 0, injecting: 1, soaking: 0, pendingTransfer: 1, needsData: 0 },
+      { block: 'B区', producing: 1, injecting: 0, soaking: 0, pendingTransfer: 0, needsData: 0 },
+    ]);
+  });
+});
