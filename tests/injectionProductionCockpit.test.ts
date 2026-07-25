@@ -24,7 +24,7 @@ async function withDatabase(run: (db: any) => Promise<void>) {
         cumulative_oil_gain REAL,
         evaluation TEXT
       );
-      CREATE TABLE measure_well_cycles (actual_steam REAL, cycle_oil REAL);
+      CREATE TABLE measure_well_cycles (well_name TEXT, actual_steam REAL, cycle_oil REAL);
       CREATE TABLE measure_well_imports (imported_at TEXT);
     `);
     await run(db);
@@ -67,8 +67,8 @@ test('calculates production metrics and creates overdue and low-efficiency alert
     await db.run(`INSERT INTO measure_tracking VALUES (1, 'A-1', 'A', '生产', '2026-07-01', 2, 10, 'D')`);
     await db.run(`INSERT INTO measure_tracking VALUES (2, 'B-1', 'B', '焖井', '2026-06-01', NULL, NULL, NULL)`);
     await db.run(`INSERT INTO measure_tracking VALUES (3, 'C-1', 'C', '转注', '2026-07-10', NULL, NULL, NULL)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES (100, 20)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES (300, 90)`);
+    await db.run(`INSERT INTO measure_well_cycles (actual_steam, cycle_oil) VALUES (100, 20)`);
+    await db.run(`INSERT INTO measure_well_cycles (actual_steam, cycle_oil) VALUES (300, 90)`);
 
     const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
 
@@ -112,5 +112,50 @@ test('aggregates latest lifecycle statuses by zh-CN-sorted block without duplica
       { block: 'A区', producing: 0, injecting: 1, soaking: 0, pendingTransfer: 1, needsData: 0 },
       { block: 'B区', producing: 1, injecting: 0, soaking: 0, pendingTransfer: 0, needsData: 0 },
     ]);
+  });
+});
+
+test('aggregates finite production performance and valid cycle ratios by block', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'A-1', 'A', '生产', '2026-07-20', 2, 10, 'A')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (2, 'A-1', 'old', '生产', '2026-01-01', 99, 99, 'A')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (3, 'A-2', 'A', '生产', '2026-07-21', 'bad', 5, 'B')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (4, 'B-1', 'B', '生产', '2026-07-22', 'bad', 'bad', 'A')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (5, 'C-1', 'C', '正注', '2026-07-23', 7, 20, 'A')`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 100, 20)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-2', 50, 10)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('B-1', 0, 10)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('C-1', 100, 50)`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('missing', 100, 100)`);
+
+    const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
+
+    assert.deepEqual(result.blockPerformanceSummary, [
+      { block: 'A', dailyOil: 2, cumulativeOilGain: 15, oilSteamRatio: 0.2 },
+      { block: 'B', dailyOil: null, cumulativeOilGain: null, oilSteamRatio: null },
+      { block: 'C', dailyOil: null, cumulativeOilGain: null, oilSteamRatio: 0.5 },
+    ]);
+    assert.equal(Number.isFinite(result.metrics.dailyOil), true);
+    assert.equal(Number.isFinite(result.metrics.cumulativeOilGain), true);
+  });
+});
+
+test('returns all alert distribution types in fixed order with counts from final alerts', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'A-1', 'A', '生产', '2026-07-20', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (2, 'B-1', 'B', '生产', '2026-07-20', 2, 10, 'D')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (3, 'C-1', 'C', '焖井', '2026-06-01', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (4, 'D-1', 'D', '转注', '2026-07-01', NULL, NULL, NULL)`);
+
+    const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
+
+    assert.deepEqual(result.alertDistribution, [
+      { type: 'needsData', count: 1 },
+      { type: 'notEvaluated', count: 0 },
+      { type: 'lowEfficiency', count: 1 },
+      { type: 'soakingOverdue', count: 1 },
+      { type: 'transferOverdue', count: 1 },
+    ]);
+    assert.equal(result.alertDistribution.reduce((sum, item) => sum + item.count, 0), result.alerts.length);
   });
 });
