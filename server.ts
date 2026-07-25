@@ -31,6 +31,7 @@ import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelec
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
+import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
 
 dotenv.config();
 
@@ -996,6 +997,7 @@ async function initLocalDb() {
 
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
+  await initInjectionProjectTables(localDb);
   await initExternalTransferTables(localDb);
 
   // Bootstrap default admin if no users exist
@@ -3415,6 +3417,25 @@ app.post("/api/register", async (req, res) => {
     } catch (err: any) {
       res.status(500).json({ success: false, message: err?.message || "注采状态地图数据加载失败" });
     }
+  });
+
+  app.get("/api/injection-projects", async (_req, res) => {
+    res.json({ success: true, data: await listInjectionProjects(localDb) });
+  });
+  app.post("/api/injection-projects", async (req, res) => {
+    try { res.status(201).json({ success: true, data: await createInjectionProject(localDb, req.body) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/injection-projects/:id/plan-status", async (req, res) => {
+    try { res.json({ success: true, data: await updatePlanStatus(localDb, Number(req.params.id), req.body.status) }); }
+    catch (error: any) { res.status(error.message === '项目不存在' ? 404 : 409).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/injection-projects/:id/transitions", async (req, res) => {
+    try { res.json({ success: true, data: await transitionInjectionProject(localDb, Number(req.params.id), req.body.status, req.body.actualDate, req.body.remark) }); }
+    catch (error: any) { res.status(error.message === '项目不存在' ? 404 : 409).json({ success: false, message: error.message }); }
+  });
+  app.get("/api/injection-projects/pending", async (req, res) => {
+    res.json({ success: true, data: await listProjectPendingItems(localDb, typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10)) });
   });
 
   app.get("/api/dashboard/bootstrap", async (req, res) => {

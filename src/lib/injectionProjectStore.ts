@@ -50,3 +50,15 @@ export async function transitionInjectionProject(db: DatabaseLike, id: number, t
   await db.run('INSERT INTO injection_project_transitions (project_id, from_status, to_status, actual_date, remark, created_at) VALUES (?, ?, ?, ?, ?, ?)', [id, project.lifecycle_status, target, actualDate, remark, now]);
   return toProject(await db.get('SELECT * FROM injection_projects WHERE id = ?', [id]));
 }
+
+export async function listInjectionProjects(db: DatabaseLike): Promise<InjectionProject[]> {
+  return (await (db as any).all('SELECT * FROM injection_projects ORDER BY updated_at DESC, id DESC')).map(toProject);
+}
+
+export async function listProjectPendingItems(db: DatabaseLike, today: string) {
+  const projects = await listInjectionProjects(db);
+  return projects
+    .filter((project) => project.lifecycleStatus === 'soaking' || project.lifecycleStatus === 'pendingTransfer')
+    .map((project) => ({ ...project, overdueDays: Math.max(0, Math.floor((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${project.plannedTransferDate}T00:00:00Z`)) / 86400000)) }))
+    .filter((project) => project.overdueDays > 0);
+}
