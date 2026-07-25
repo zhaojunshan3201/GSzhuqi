@@ -33,7 +33,7 @@ function text(value: unknown): string {
 function planMonth(title: string): string | null {
   const monthMatch = title.match(/(?:(20\d{2})\u5e74)?\s*(1[0-2]|[1-9])\s*\u6708\u4efd?/);
   if (!monthMatch) return null;
-  const year = monthMatch[1] ?? '2026';
+  const year = monthMatch[1] ?? String(new Date().getFullYear());
   return `${year}-${monthMatch[2].padStart(2, '0')}`;
 }
 
@@ -82,7 +82,7 @@ export function parseMonthlyInjectionPlan(workbook: XLSX.WorkBook): MonthlyInjec
   if (!selected) return empty;
 
   const month = planMonth(selected.title);
-  const year = Number(month?.slice(0, 4) ?? 2026);
+  const year = Number(month?.slice(0, 4) ?? new Date().getFullYear());
   const result: MonthlyInjectionPlanResult = { ...empty, sheetName: selected.name, planMonth: month };
   let unit: string | null = null;
   let boiler: string | null = null;

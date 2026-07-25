@@ -110,16 +110,17 @@ test('marks a stopped schedule as pending and preserves its text', () => {
   });
 });
 
-test('uses 2026 by default and retains each month in a cross-month range', () => {
+test('uses the current year by default and retains each month in a cross-month range', () => {
+  const currentYear = new Date().getFullYear();
   const result = parseMonthlyInjectionPlan(workbookFromRows([
     ['7月份注汽运行计划表'],
     ['一区', '活6', '高1（100）'],
     ['', '', '7.30-8.02'],
   ]));
 
-  assert.equal(result.planMonth, '2026-07');
+  assert.equal(result.planMonth, `${currentYear}-07`);
   assert.deepEqual(result.rows[0] && { startDate: result.rows[0].startDate, endDate: result.rows[0].endDate }, {
-    startDate: '2026-07-30', endDate: '2026-08-02',
+    startDate: `${currentYear}-07-30`, endDate: `${currentYear}-08-02`,
   });
 });
 
