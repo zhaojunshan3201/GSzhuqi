@@ -13,6 +13,10 @@ export function buildInjectionStatusMapQuery(filters: Record<string, string | bo
   return params.toString();
 }
 
+export function filterProjectsByInitialId<T extends { id: number | string }>(projects: T[], initialProjectId?: string) {
+  return initialProjectId ? projects.filter((project) => String(project.id) === initialProjectId) : projects;
+}
+
 export function getStatusMapNavigation(action: StatusMapNavigationAction, well: StatusMapNavigationWell) {
   if (action === 'project') {
     return well.projectId == null ? null : { tab: 'injectionPlan' as const, filters: { projectId: well.projectId } };

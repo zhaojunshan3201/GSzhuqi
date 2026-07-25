@@ -40,6 +40,7 @@ export function OilWellMap({ isAdmin, onNavigate }: OilWellMapProps) {
   const [selectedBlock, setSelectedBlock] = useState<string>(BLOCKS[3].name);
   const [filters, setFilters] = useState<MapFilters>({ lifecycleStatus: '', planMonth: '', alertType: '', overdue: false, keyword: '' });
   const [mapData, setMapData] = useState<InjectionStatusMapResponse | null>(null);
+  const [producingWells, setProducingWells] = useState<string[]>([]);
   const [mapError, setMapError] = useState('');
   const [loading, setLoading] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -82,6 +83,11 @@ export function OilWellMap({ isAdmin, onNavigate }: OilWellMapProps) {
 
   useEffect(() => { void loadCategories().catch(() => setMessage('分类读取失败')); }, []);
   useEffect(() => {
+    void fetch('/api/oil-well-map/production-wells').then((response) => response.json()).then((payload) => {
+      if (payload.success) setProducingWells(payload.data.wells);
+    }).catch(() => setMessage('生产井数据读取失败'));
+  }, []);
+  useEffect(() => {
     setScale(1); setOffset({ x: 0, y: 0 }); setSelectedWell(null); setSelectedWellNo(''); setMapSize(null);
     void loadMarkers(selectedBlock).catch(() => setMessage('井位标定读取失败'));
   }, [selectedBlock]);
@@ -108,6 +114,7 @@ export function OilWellMap({ isAdmin, onNavigate }: OilWellMapProps) {
   const summary = mapData?.summary ?? { total: 0, injecting: 0, soaking: 0, pendingTransfer: 0, producing: 0, alerts: 0, unlocated: 0 };
   const selectedCategoryWells = categoryWells.filter((relation) => relation.categoryId === selectedCategoryId).map((relation) => relation.wellNo);
   const calibrationWells = unlocatedWells.filter((well) => well.block === selectedBlock);
+  const calibrationMarkers = markers.filter((marker) => marker.block === selectedBlock && producingWells.includes(marker.wellNo));
   const planMonths = [...new Set([...mapWells, ...unlocatedWells].map((well) => well.planMonth).filter(Boolean))].sort().reverse();
 
   const fitMap = (image: HTMLImageElement) => {
@@ -193,6 +200,7 @@ export function OilWellMap({ isAdmin, onNavigate }: OilWellMapProps) {
         <div ref={mapRef} className={`absolute left-1/2 top-1/2 select-none ${calibrationMode && selectedWellNo ? 'cursor-crosshair' : 'cursor-grab'}`} style={{ width: mapSize?.width, height: mapSize?.height, opacity: mapSize ? 1 : 0, transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onMouseDown={(event) => { if (!calibrationMode) setDragStart({ x: event.clientX - offset.x, y: event.clientY - offset.y }); }} onClick={saveMarker}>
           <img src={selected.image} alt={`${selectedBlock}井位图`} draggable={false} className="block h-full w-full" onLoad={(event) => fitMap(event.currentTarget)} />
           {mapWells.map((well) => { const categoryColor = resolveMarkerColor(well.wellNo, categories, categoryWells); const statusColor = resolveInjectionLifecycleColor(well.lifecycleStatus); return <button type="button" key={well.wellNo} className="absolute h-5 w-5 rounded-full border-2 border-white shadow-lg" style={{ ...getMarkerAnchorStyle(well.xPercent!, well.yPercent!), backgroundColor: statusColor, boxShadow: categoryColor !== '#dc2626' ? `0 0 0 3px ${categoryColor}` : undefined }} title={`${well.wellNo} · ${lifecycleLabels[well.lifecycleStatus]}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSelectedWell(well); }}>{showLabels && <span className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: statusColor }}>{well.wellNo}</span>}{calibrationMode && showDeleteButtons && <span role="button" tabIndex={0} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void removeMarker(well.wellNo); }} className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 rounded bg-white p-1 text-red-600 shadow"><Trash2 size={12} /></span>}</button>; })}
+          {calibrationMode && showDeleteButtons && calibrationMarkers.map((marker) => <button type="button" key={`delete-${marker.wellNo}`} className="absolute rounded bg-white p-1 text-red-600 shadow" style={getMarkerAnchorStyle(marker.xPercent, marker.yPercent)} title={`删除 ${marker.wellNo} 标定`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }}><Trash2 size={12} /></button>)}
         </div>
       </div>}
       <div className="border-t border-slate-100 p-3"><button className="flex items-center gap-2 text-sm font-bold text-slate-700" onClick={() => setShowUnlocated((value) => !value)}>无坐标井（{unlocatedWells.length}）{showUnlocated ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>{showUnlocated && <div className="mt-3 rounded bg-slate-50 p-3 text-sm"><p className="mb-2 text-amber-800">无坐标井不会被绘制；管理员可使用上方标定模式补充位置。</p><div className="flex flex-wrap gap-2">{unlocatedWells.map((well) => <button key={well.wellNo} className="rounded border border-slate-200 bg-white px-2 py-1 hover:border-red-300" onClick={() => setSelectedWell(well)}>{well.wellNo}</button>)}</div></div>}</div>
