@@ -127,7 +127,7 @@ export function parseMonthlyInjectionPlan(workbook: XLSX.WorkBook): MonthlyInjec
         continue;
       }
       if (!range.startDate || !range.endDate) {
-        result.invalidRows.push({ ...parsed, planStatus: 'invalid', remark: '无法解析\u65e5期' });
+        result.invalidRows.push({ ...parsed, planStatus: 'invalid', remark: '\u65e0\u6cd5\u89e3\u6790\u65e5\u671f' });
         continue;
       }
       result.rows.push(parsed);
