@@ -36,8 +36,18 @@ function tooltipParams(params: unknown): AxisTooltipParam[] {
   return (Array.isArray(params) ? params : [params]) as AxisTooltipParam[];
 }
 
+function escapeHtml(text: unknown): string {
+  return String(text ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]!);
+}
+
 function tooltipHeader(params: AxisTooltipParam[]): string {
-  return String(params[0]?.axisValueLabel ?? params[0]?.name ?? '');
+  return escapeHtml(params[0]?.axisValueLabel ?? params[0]?.name);
 }
 
 function tooltipMarker(param: AxisTooltipParam): string {
@@ -75,7 +85,8 @@ export function buildBlockStatusOption(rows: BlockStatusSummary[]): EChartsOptio
         const params = tooltipParams(rawParams);
         return [
           tooltipHeader(params),
-          ...params.map((param) => `${tooltipMarker(param)}${param.seriesName ?? ''}: ${String(param.value)} 口`),
+          ...params.map((param) =>
+            `${tooltipMarker(param)}${escapeHtml(param.seriesName)}: ${escapeHtml(param.value)} 口`),
         ].join('<br/>');
       },
     },
@@ -108,7 +119,7 @@ export function buildBlockPerformanceOption(
             const value = param.value;
             const valid = typeof value === 'number' && Number.isFinite(value);
             const seriesName = String(param.seriesName ?? '');
-            return `${tooltipMarker(param)}${seriesName}: ${valid ? `${value}${units[seriesName] ?? ''}` : '--'}`;
+            return `${tooltipMarker(param)}${escapeHtml(seriesName)}: ${valid ? `${value}${units[seriesName] ?? ''}` : '--'}`;
           }),
         ].join('<br/>');
       },

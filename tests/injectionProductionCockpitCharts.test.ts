@@ -98,3 +98,34 @@ test('block performance tooltip formats missing and valid metrics without dangli
   ]);
   assert.equal(valid, 'B<br/>●日产油: 3 吨/日<br/>●累计增油: 12 吨<br/>●油汽比: 0.42');
 });
+
+test('axis tooltip callbacks escape dynamic labels while preserving ECharts markers', () => {
+  const maliciousBlock = '<img src=x onerror=alert(1)> & "A"';
+  const maliciousSeries = "<script>alert('x')</script>";
+  const statusOption = asAny(buildBlockStatusOption([]));
+  const statusText = statusOption.tooltip.formatter([{
+    axisValueLabel: maliciousBlock,
+    marker: '<span class="marker"></span>',
+    seriesName: maliciousSeries,
+    value: 5,
+  }]);
+
+  assert.ok(statusText.includes('<span class="marker"></span>'));
+  assert.ok(statusText.includes('&lt;img src=x onerror=alert(1)&gt; &amp; &quot;A&quot;'));
+  assert.ok(statusText.includes('&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;'));
+  assert.ok(!statusText.includes('<img'));
+  assert.ok(!statusText.includes('<script>'));
+  assert.ok(!statusText.includes('onerror=alert(1)>'));
+
+  const performanceOption = asAny(buildBlockPerformanceOption([]));
+  const performanceText = performanceOption.tooltip.formatter([{
+    name: maliciousBlock,
+    marker: '<span class="marker"></span>',
+    seriesName: maliciousSeries,
+    value: 3,
+  }]);
+  assert.ok(performanceText.includes('&lt;img src=x onerror=alert(1)&gt; &amp; &quot;A&quot;'));
+  assert.ok(performanceText.includes('&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;'));
+  assert.ok(!performanceText.includes('<img'));
+  assert.ok(!performanceText.includes('<script>'));
+});
