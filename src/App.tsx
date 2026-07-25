@@ -2170,9 +2170,17 @@ export default function App() {
   const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   const mobileSidebarButtonRef = useRef<HTMLButtonElement>(null);
   const mobileSidebarRef = useRef<HTMLElement>(null);
+  const appMainRef = useRef<HTMLDivElement>(null);
+  const closeMobileSidebar = ({ restoreFocus = true }: { restoreFocus?: boolean } = {}) => {
+    setMobileSidebarOpen(false);
+    requestAnimationFrame(() => {
+      if (restoreFocus) mobileSidebarButtonRef.current?.focus();
+      else appMainRef.current?.focus();
+    });
+  };
   const setActiveTab = (tab: SidebarTab) => {
     _setActiveTab(tab);
-    setMobileSidebarOpen(false);
+    closeMobileSidebar({ restoreFocus: false });
   };
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
@@ -2186,8 +2194,7 @@ export default function App() {
     mobileSidebarRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setMobileSidebarOpen(false);
-        mobileSidebarButtonRef.current?.focus();
+        closeMobileSidebar();
       }
     };
     window.addEventListener('keydown', closeOnEscape);
@@ -5960,7 +5967,7 @@ export default function App() {
       }}
     >
       {/* Sidebar */}
-      {mobileSidebarOpen && <button type="button" aria-label="关闭导航" className="fixed inset-0 z-10 bg-slate-950/40 md:hidden" onClick={() => setMobileSidebarOpen(false)} />}
+      {mobileSidebarOpen && <button type="button" aria-label="关闭导航" className="fixed inset-0 z-10 bg-slate-950/40 md:hidden" onClick={() => closeMobileSidebar()} />}
       <aside
         id="app-sidebar"
         ref={mobileSidebarRef}
@@ -6036,7 +6043,14 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <div className="app-main">
+      <div
+        id="app-main"
+        ref={appMainRef}
+        tabIndex={-1}
+        inert={isMobileViewport && mobileSidebarOpen ? true : undefined}
+        aria-hidden={isMobileViewport && mobileSidebarOpen ? true : undefined}
+        className="app-main"
+      >
         {/* Header */}
         <header className="app-header">
           <div className="flex items-center gap-3">
@@ -6047,7 +6061,7 @@ export default function App() {
             aria-expanded={mobileSidebarOpen}
             aria-controls="app-sidebar"
             className="rounded-md p-1 text-gray-500 hover:bg-slate-100 md:hidden"
-            onClick={() => setMobileSidebarOpen((open) => !open)}
+            onClick={() => mobileSidebarOpen ? closeMobileSidebar() : setMobileSidebarOpen(true)}
           >
             <Menu size={20} />
           </button>
