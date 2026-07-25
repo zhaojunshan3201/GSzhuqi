@@ -166,6 +166,25 @@ test('summarizes execution deviations and excludes suspected other cycles from v
   });
 });
 
+test('marks a 61-day variance as another cycle but keeps an exactly 60-day variance', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07')`);
+    await insertProject(db, { id: 1, wellNo: 'SIXTY-ONE-1', boiler: '锅炉-A', process: '吞吐', steam: 100 });
+    await insertProject(db, { id: 2, wellNo: 'SIXTY-1', boiler: '锅炉-A', process: '吞吐', steam: 100 });
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json) VALUES
+      (1, 'SIXTY-ONE-1', ?),
+      (2, 'SIXTY-1', ?)`, [
+      JSON.stringify({ 开注时间: '2026-09-09', 停注时间: '2026-09-19', 锅炉编号: '锅炉-A', 累注汽量: 100, 措施类型: '吞吐' }),
+      JSON.stringify({ 开注时间: '2026-09-08', 停注时间: '2026-09-18', 锅炉编号: '锅炉-A', 累注汽量: 100, 措施类型: '吞吐' }),
+    ]);
+
+    const result = await buildInjectionPlanActualComparison(db, { planMonth: '2026-07' });
+
+    assert.equal(result.rows.find((row) => row.wellNo === 'SIXTY-ONE-1')?.comparisonStatus, 'suspected_other_cycle');
+    assert.equal(result.rows.find((row) => row.wellNo === 'SIXTY-1')?.comparisonStatus, 'delayed');
+  });
+});
+
 test('uses -- for a missing actual process', async () => {
   await withDatabase(async (db) => {
     await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07')`);
