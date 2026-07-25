@@ -38,6 +38,8 @@ import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
+import { filterMeasuresByCockpitAlerts, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
+import type { InjectionProductionCockpit as InjectionProductionCockpitData } from './lib/injectionProductionCockpit';
 import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -2433,6 +2435,7 @@ export default function App() {
     year: ''
   });
   const [measureAvailableYears, setMeasureAvailableYears] = useState<string[]>([]);
+  const [measureCockpitAlertFilter, setMeasureCockpitAlertFilter] = useState<{ type: CockpitMeasureFilters['alertType']; alerts: InjectionProductionCockpitData['alerts'] } | null>(null);
   const [measureMetricMode, setMeasureMetricMode] = useState<MeasureMetricMode>('cumulative_oil');
   const [measureEvaluationSorted, setMeasureEvaluationSorted] = useState(true);
 
@@ -4343,12 +4346,15 @@ export default function App() {
   }, [activeTab, measureAnalysisExpanded.custom, measureCustomFilters, measures.length, syncStatus?.lastLocalDataDate]);
 
   const displayedMeasures = React.useMemo(() => {
+    const cockpitFilteredMeasures = measureCockpitAlertFilter
+      ? filterMeasuresByCockpitAlerts(measures, measureCockpitAlertFilter.alerts, measureCockpitAlertFilter.type)
+      : measures;
     if (!measureEvaluationSorted) {
-      return measures;
+      return cockpitFilteredMeasures;
     }
 
     const evaluationOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
-    return measures
+    return cockpitFilteredMeasures
       .map((row, index) => ({ row, index }))
       .sort((left, right) => {
         const leftOrder = evaluationOrder[getMeasureEvaluationValue(left.row)] ?? 99;
@@ -4359,7 +4365,7 @@ export default function App() {
         return left.index - right.index;
       })
       .map(({ row }) => row);
-  }, [measures, measureEvaluationSorted, measureMetricMode]);
+  }, [measures, measureEvaluationSorted, measureMetricMode, measureCockpitAlertFilter]);
 
   const exportMeasuresToExcel = () => {
     if (displayedMeasures.length === 0) return;
@@ -6047,7 +6053,21 @@ export default function App() {
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
               {activeTab === 'injectionProjectManagement' && <InjectionProjectManagement />}
-              {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, wellNo) => { if (wellNo) setMeasureQuery((current) => ({ ...current, keyword: wellNo })); setActiveTab(tab); }} />}
+              {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={async (tab, filters = {}) => {
+                setMeasureQuery((current) => ({ ...current, keyword: filters.keyword || '', block: filters.block || '' }));
+                if (filters.alertType) {
+                  try {
+                    const result = await fetchJson('/api/injection-production/cockpit');
+                    const cockpit = result.data as InjectionProductionCockpitData;
+                    setMeasureCockpitAlertFilter({ type: filters.alertType, alerts: cockpit.alerts || [] });
+                  } catch {
+                    setMeasureCockpitAlertFilter({ type: filters.alertType, alerts: [] });
+                  }
+                } else {
+                  setMeasureCockpitAlertFilter(null);
+                }
+                setActiveTab(tab);
+              }} />}
               {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} />}
               {activeTab === 'externalTransferTracking' && <ExternalTransferTracking />}
               {activeTab === 'runtimeLogs' && (
@@ -9397,6 +9417,13 @@ export default function App() {
                       />
                     </div>
                   </div>
+
+                  {measureCockpitAlertFilter && (
+                    <div className="status-banner status-banner-info flex items-center justify-between gap-3">
+                      <span>????????{measureCockpitAlertFilter.type}?{displayedMeasures.length} ???</span>
+                      <button type="button" className="action-button action-outline" onClick={() => setMeasureCockpitAlertFilter(null)}>??????</button>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap gap-3">
                     <button
