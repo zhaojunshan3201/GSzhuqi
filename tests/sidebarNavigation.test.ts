@@ -4,22 +4,22 @@ import test from 'node:test';
 import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from '../src/lib/sidebarNavigation.ts';
 import type { SidebarGroupKey, SidebarTab } from '../src/lib/sidebarNavigation.ts';
 
-test('defines the five sidebar groups and sixteen grouped navigation entries', () => {
+test('defines the five sidebar groups and seventeen grouped navigation entries', () => {
   const tabs: SidebarTab[] = sidebarNavigationGroups.flatMap((group) => group.items.map((item) => item.tab));
 
   assert.deepEqual(sidebarNavigationGroups.map((group) => group.key), ['overview', 'analysis', 'focus', 'measures', 'production']);
-  assert.equal(tabs.length, 16);
-  assert.equal(new Set(tabs).size, 16);
+  assert.equal(tabs.length, 18);
+  assert.equal(new Set(tabs).size, 18);
   assert.equal(runtimeLogNavigationItem.tab, 'runtimeLogs');
   assert.equal(tabs.includes(runtimeLogNavigationItem.tab), false);
 });
 
 test('assigns grouped tabs to their sidebar group', () => {
   const expectedGroups: Partial<Record<SidebarTab, SidebarGroupKey>> = {
-    dashboard: 'overview', oilWellMap: 'overview', wellTemperature: 'overview',
+    dashboard: 'overview', injectionProductionCockpit: 'overview', oilWellMap: 'overview', wellTemperature: 'overview',
     well: 'analysis', block: 'analysis', comparison: 'analysis', pumpDeepAnalysis: 'analysis', occupancyAnalysis: 'analysis',
     analysis: 'focus', waterLab: 'focus', pumpAnalysis: 'focus',
-    measureWellSelection: 'measures', measures: 'measures', measureAnalysis: 'measures',
+    injectionProjectManagement: 'measures', measureWellSelection: 'measures', measures: 'measures', measureAnalysis: 'measures',
     productionForecast: 'production', externalTransferTracking: 'production',
   };
 
@@ -27,10 +27,15 @@ test('assigns grouped tabs to their sidebar group', () => {
   assert.equal(getSidebarGroupKey('runtimeLogs'), undefined);
 });
 
+test('places 注汽项目管理 first in the 注汽项目 group', () => {
+  const group = sidebarNavigationGroups.find((item) => item.key === 'measures');
+  assert.equal(group?.items[0].label, '注汽项目管理');
+});
+
 test('keeps runtime logs out of the overview group', () => {
   assert.deepEqual(
     sidebarNavigationGroups.find((group) => group.key === 'overview')?.items.map((item) => item.tab),
-    ['dashboard', 'oilWellMap', 'wellTemperature'],
+    ['dashboard', 'injectionProductionCockpit', 'oilWellMap', 'wellTemperature'],
   );
 });
 

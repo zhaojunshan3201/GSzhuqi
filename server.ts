@@ -31,6 +31,12 @@ import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts"
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
+import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
+import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
+import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
+import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
+import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
+import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
 
 dotenv.config();
 
@@ -996,6 +1002,8 @@ async function initLocalDb() {
 
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
+  await initInjectionProjectTables(localDb);
+  await initMonthlyInjectionPlanImportTables(localDb);
   await initExternalTransferTables(localDb);
 
   // Bootstrap default admin if no users exist
@@ -3068,6 +3076,11 @@ async function startServer() {
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES }
   });
   const measureImportUploadMiddleware = handleMeasureImportUpload(measureImportUpload);
+  const monthlyInjectionPlanUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
+  });
+  const monthlyInjectionPlanUploadMiddleware = handleMeasureImportUpload(monthlyInjectionPlanUpload);
   const wellMapDailyUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
@@ -3407,6 +3420,109 @@ app.post("/api/register", async (req, res) => {
     } catch (err: any) {
       res.status(500).json({ success: false, message: "同步状态查询失败: " + err.message });
     }
+  });
+
+  app.get("/api/injection-production/cockpit", async (_req, res) => {
+    try {
+      const data = await buildInjectionProductionCockpit(localDb, {
+        now: new Date().toISOString().slice(0, 10),
+        syncStatus: await getSyncStatus(),
+      });
+      res.json({ success: true, data });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "注采驾驶舱数据加载失败" });
+    }
+  });
+
+  app.get("/api/injection-production/cockpit/map-wells", async (req, res) => {
+    try {
+      const data = await buildInjectionProductionCockpit(localDb, {
+        now: new Date().toISOString().slice(0, 10),
+        syncStatus: await getSyncStatus(),
+      });
+      const block = typeof req.query.block === "string" ? req.query.block : "";
+      res.json({ success: true, data: data.mapWells.filter((well) => !block || well.block === block) });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "注采状态地图数据加载失败" });
+    }
+  });
+
+  app.post("/api/injection-project-imports/preview", monthlyInjectionPlanUploadMiddleware, async (req, res) => {
+    try {
+      const file = (req as express.Request & { file?: { originalname: string; buffer: Buffer } }).file;
+      if (!file) {
+        res.status(400).json({ success: false, message: "\u8bf7\u9009\u62e9\u4e3b\u8ba1\u5212\u8868\u6587\u4ef6" });
+        return;
+      }
+
+      const preview = parseMonthlyInjectionPlan(XLSX.read(file.buffer, { type: "buffer" }));
+      if (!preview.sheetName) throw new Error("\u672a\u627e\u5230\u4e3b\u8ba1\u5212\u8868");
+      if (!preview.planMonth) throw new Error("\u6807\u9898\u672a\u5305\u542b\u6708\u4efd");
+
+      const data = await createPlanPreview(localDb, { ...preview, fileName: decodeUploadedFileName(file.originalname) });
+      res.status(201).json({ success: true, data });
+    } catch (error: any) {
+      const message = error?.message || "\u4e3b\u8ba1\u5212\u8868\u89e3\u6790\u5931\u8d25";
+      const status = /\u672a\u627e\u5230\u4e3b\u8ba1\u5212\u8868|\u6807\u9898\u672a\u5305\u542b\u6708\u4efd/.test(message) ? 400 : 500;
+      res.status(status).json({ success: false, message });
+    }
+  });
+
+  app.post("/api/injection-project-imports/:id/confirm", async (req, res) => {
+    try {
+      res.json({ success: true, data: await confirmPlanImport(localDb, Number(req.params.id)) });
+    } catch (error: any) {
+      const message = error?.message || "\u4e3b\u8ba1\u5212\u8868\u786e\u8ba4\u5931\u8d25";
+      const status = message === "plan import not found" ? 404 : message === "only preview imports can be confirmed" ? 409 : 500;
+      res.status(status).json({ success: false, message });
+    }
+  });
+
+  app.get("/api/injection-project-imports", async (_req, res) => {
+    try {
+      res.json({ success: true, data: await listPlanImports(localDb) });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "\u5bfc\u5165\u5386\u53f2\u52a0\u8f7d\u5931\u8d25" });
+    }
+  });
+
+  app.get("/api/injection-projects/plan-actual-comparison", async (req, res) => {
+    try {
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const comparisonStatuses: readonly ComparisonStatus[] = ['not_started', 'in_progress', 'on_schedule', 'early', 'delayed', 'incomplete', 'suspected_other_cycle'];
+      if (status && !comparisonStatuses.includes(status as ComparisonStatus)) {
+        res.status(400).json({ success: false, message: "\u65e0\u6548\u7684\u5bf9\u6bd4\u72b6\u6001" });
+        return;
+      }
+      const data = await buildInjectionPlanActualComparison(localDb, {
+        planMonth: typeof req.query.planMonth === "string" ? req.query.planMonth : undefined,
+        unit: typeof req.query.unit === "string" ? req.query.unit : undefined,
+        boiler: typeof req.query.boiler === "string" ? req.query.boiler : undefined,
+        status: status as ComparisonStatus | undefined,
+      });
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "注汽计划实际对比加载失败" });
+    }
+  });
+
+  app.get("/api/injection-projects", async (_req, res) => {
+    res.json({ success: true, data: await listInjectionProjects(localDb) });
+  });
+  app.post("/api/injection-projects", async (req, res) => {
+    try { res.status(201).json({ success: true, data: await createInjectionProject(localDb, req.body) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/injection-projects/:id/plan-status", async (req, res) => {
+    try { res.json({ success: true, data: await updatePlanStatus(localDb, Number(req.params.id), req.body.status) }); }
+    catch (error: any) { res.status(error.message === '项目不存在' ? 404 : 409).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/injection-projects/:id/transitions", async (req, res) => {
+    try { res.json({ success: true, data: await transitionInjectionProject(localDb, Number(req.params.id), req.body.status, req.body.actualDate, req.body.remark) }); }
+    catch (error: any) { res.status(error.message === '项目不存在' ? 404 : 409).json({ success: false, message: error.message }); }
+  });
+  app.get("/api/injection-projects/pending", async (req, res) => {
+    res.json({ success: true, data: await listProjectPendingItems(localDb, typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10)) });
   });
 
   app.get("/api/dashboard/bootstrap", async (req, res) => {

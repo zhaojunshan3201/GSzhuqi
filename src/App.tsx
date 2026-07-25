@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { 
   LayoutDashboard, 
@@ -36,6 +36,9 @@ import { getWellTemperatureChartOption } from './wellTemperatureChart';
 import { MeasureWellSelection } from './components/MeasureWellSelection';
 import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
+import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
+import { InjectionProjectManagement } from './components/InjectionProjectManagement';
+import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -2162,7 +2165,43 @@ export default function App() {
   const [showDatacoreLogin, setShowDatacoreLogin] = useState(false);
   const [showAccessLogin, setShowAccessLogin] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [activeTab, setActiveTab] = useState<SidebarTab>('dashboard');
+  const [activeTab, _setActiveTab] = useState<SidebarTab>('dashboard');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  const mobileSidebarButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileSidebarRef = useRef<HTMLElement>(null);
+  const appMainRef = useRef<HTMLDivElement>(null);
+  const closeMobileSidebar = ({ restoreFocus = true }: { restoreFocus?: boolean } = {}) => {
+    setMobileSidebarOpen(false);
+    requestAnimationFrame(() => {
+      if (restoreFocus) mobileSidebarButtonRef.current?.focus();
+      else appMainRef.current?.focus();
+    });
+  };
+  const setActiveTab = (tab: SidebarTab) => {
+    _setActiveTab(tab);
+    if (shouldCloseMobileDrawer(isMobileViewport, mobileSidebarOpen)) {
+      closeMobileSidebar({ restoreFocus: false });
+    }
+  };
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const updateViewport = () => setIsMobileViewport(media.matches);
+    updateViewport();
+    media.addEventListener('change', updateViewport);
+    return () => media.removeEventListener('change', updateViewport);
+  }, []);
+  useEffect(() => {
+    if (!isMobileViewport || !mobileSidebarOpen) return;
+    mobileSidebarRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMobileSidebar();
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isMobileViewport, mobileSidebarOpen]);
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<SidebarGroupKey | null>(getSidebarGroupKey('dashboard') ?? 'overview');
   const [dailyCompare, setDailyCompare] = useState<any>(null);
 
@@ -2431,6 +2470,7 @@ export default function App() {
     year: ''
   });
   const [measureAvailableYears, setMeasureAvailableYears] = useState<string[]>([]);
+  const [measureCockpitAlertFilter, setMeasureCockpitAlertFilter] = useState<{ type: NonNullable<CockpitMeasureFilters['alertType']>; wellNos: string[] } | null>(null);
   const [measureMetricMode, setMeasureMetricMode] = useState<MeasureMetricMode>('cumulative_oil');
   const [measureEvaluationSorted, setMeasureEvaluationSorted] = useState(true);
 
@@ -4341,12 +4381,15 @@ export default function App() {
   }, [activeTab, measureAnalysisExpanded.custom, measureCustomFilters, measures.length, syncStatus?.lastLocalDataDate]);
 
   const displayedMeasures = React.useMemo(() => {
+    const cockpitFilteredMeasures = measureCockpitAlertFilter
+      ? filterMeasuresByCockpitWellNos(measures, measureCockpitAlertFilter.wellNos)
+      : measures;
     if (!measureEvaluationSorted) {
-      return measures;
+      return cockpitFilteredMeasures;
     }
 
     const evaluationOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
-    return measures
+    return cockpitFilteredMeasures
       .map((row, index) => ({ row, index }))
       .sort((left, right) => {
         const leftOrder = evaluationOrder[getMeasureEvaluationValue(left.row)] ?? 99;
@@ -4357,7 +4400,7 @@ export default function App() {
         return left.index - right.index;
       })
       .map(({ row }) => row);
-  }, [measures, measureEvaluationSorted, measureMetricMode]);
+  }, [measures, measureEvaluationSorted, measureMetricMode, measureCockpitAlertFilter]);
 
   const exportMeasuresToExcel = () => {
     if (displayedMeasures.length === 0) return;
@@ -5926,7 +5969,14 @@ export default function App() {
       }}
     >
       {/* Sidebar */}
-      <aside className="app-sidebar">
+      {mobileSidebarOpen && <button type="button" aria-label="关闭导航" className="fixed inset-0 z-10 bg-slate-950/40 md:hidden" onClick={() => closeMobileSidebar()} />}
+      <aside
+        id="app-sidebar"
+        ref={mobileSidebarRef}
+        inert={isMobileViewport && !mobileSidebarOpen ? true : undefined}
+        aria-hidden={isMobileViewport && !mobileSidebarOpen ? true : undefined}
+        className={cn('app-sidebar fixed inset-y-0 left-0 transition-transform duration-200 md:static md:translate-x-0', mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full')}
+      >
         <div className="app-sidebar-brand flex items-center gap-3 px-5 py-5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white shadow-sm">
             <Droplets size={19} />
@@ -5995,20 +6045,39 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <div className="app-main">
+      <div
+        id="app-main"
+        ref={appMainRef}
+        tabIndex={-1}
+        inert={isMobileViewport && mobileSidebarOpen ? true : undefined}
+        aria-hidden={isMobileViewport && mobileSidebarOpen ? true : undefined}
+        className="app-main"
+      >
         {/* Header */}
         <header className="app-header">
           <div className="flex items-center gap-3">
-          <Menu className="text-gray-400" size={20} />
+          <button
+            ref={mobileSidebarButtonRef}
+            type="button"
+            aria-label={mobileSidebarOpen ? '关闭导航菜单' : '打开导航菜单'}
+            aria-expanded={mobileSidebarOpen}
+            aria-controls="app-sidebar"
+            className="rounded-md p-1 text-gray-500 hover:bg-slate-100 md:hidden"
+            onClick={() => mobileSidebarOpen ? closeMobileSidebar() : setMobileSidebarOpen(true)}
+          >
+            <Menu size={20} />
+          </button>
           <h2 className="text-gray-700 font-bold text-lg">
           {activeTab === 'externalTransferTracking' && '外输跟踪'}
           {activeTab === 'dashboard' && '系统概览'}
+          {activeTab === 'injectionProductionCockpit' && '注采驾驶舱'}
           {activeTab === 'oilWellMap' && '油井位图'}
           {activeTab === 'block' && '区块生产动态生成器'}
           {activeTab === 'well' && '单井精细化动态分析'}
           {activeTab === 'analysis' && '重点情况分析与建议'}
           {activeTab === 'comparison' && '对比分析'}
           {activeTab === 'measureWellSelection' && '措施选井'}
+          {activeTab === 'injectionProjectManagement' && '注汽项目管理'}
           {activeTab === 'measures' && '措施跟踪'}
           {activeTab === 'measureAnalysis' && '措施分析'}
           {activeTab === 'wellTemperature' && '井温监控'}
@@ -6042,6 +6111,18 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
+              {activeTab === 'injectionProjectManagement' && <InjectionProjectManagement />}
+              {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
+                if (shouldApplyCockpitMeasureFilters(tab)) {
+                  setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
+                  if (filters.alertType) {
+                    setMeasureCockpitAlertFilter({ type: filters.alertType, wellNos: filters.alertWellNos || [] });
+                  } else {
+                    setMeasureCockpitAlertFilter(null);
+                  }
+                }
+                setActiveTab(tab);
+              }} />}
               {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} />}
               {activeTab === 'externalTransferTracking' && <ExternalTransferTracking />}
               {activeTab === 'runtimeLogs' && (
@@ -9391,6 +9472,13 @@ export default function App() {
                       />
                     </div>
                   </div>
+
+                  {measureCockpitAlertFilter && (
+                    <div className="status-banner status-banner-info flex items-center justify-between gap-3">
+                      <span>驾驶舱异常筛选：{cockpitAlertLabels[measureCockpitAlertFilter.type]}（{measureCockpitAlertFilter.wellNos.length} 口井）</span>
+                      <button type="button" className="action-button action-outline" onClick={() => setMeasureCockpitAlertFilter(null)}>清除异常筛选</button>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap gap-3">
                     <button

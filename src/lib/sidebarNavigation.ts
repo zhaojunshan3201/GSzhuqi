@@ -2,6 +2,7 @@ export type SidebarGroupKey = 'overview' | 'analysis' | 'focus' | 'measures' | '
 
 export type SidebarTab =
   | 'dashboard'
+  | 'injectionProductionCockpit'
   | 'oilWellMap'
   | 'wellTemperature'
   | 'runtimeLogs'
@@ -13,6 +14,7 @@ export type SidebarTab =
   | 'analysis'
   | 'waterLab'
   | 'pumpAnalysis'
+  | 'injectionProjectManagement'
   | 'measureWellSelection'
   | 'measures'
   | 'measureAnalysis'
@@ -52,6 +54,7 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     label: '基本情况',
     items: [
       { tab: 'dashboard', label: '系统概览', icon: 'LayoutDashboard' },
+      { tab: 'injectionProductionCockpit', label: '注采驾驶舱', icon: 'LayoutDashboard' },
       { tab: 'oilWellMap', label: '油井位图', icon: 'MapPinned' },
       { tab: 'wellTemperature', label: '井温监控', icon: 'Thermometer' },
     ],
@@ -80,6 +83,7 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     key: 'measures',
     label: '措施项目',
     items: [
+      { tab: 'injectionProjectManagement', label: '注汽项目管理', icon: 'ClipboardList' },
       { tab: 'measureWellSelection', label: '措施选井', icon: 'Target' },
       { tab: 'measures', label: '措施跟踪', icon: 'ClipboardList' },
       { tab: 'measureAnalysis', label: '措施分析', icon: 'MessageSquare' },
