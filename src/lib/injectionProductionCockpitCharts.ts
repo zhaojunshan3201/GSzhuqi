@@ -59,18 +59,22 @@ export function hasChartValues(values: readonly unknown[]): boolean {
 }
 
 export function hasPerformanceData(
-  rows: readonly { dailyOil: number | null; cumulativeOilGain: number | null; oilSteamRatio: number | null }[],
+  rows: ReadonlyArray<InjectionProductionCockpit['blockPerformanceSummary'][number]>,
 ): boolean {
   return rows.some((row) =>
     [row.dailyOil, row.cumulativeOilGain, row.oilSteamRatio]
       .some((value) => typeof value === 'number' && Number.isFinite(value)));
 }
 
-export function hasAlertDistributionData(rows: readonly { count: number }[]): boolean {
+export function hasAlertDistributionData(
+  rows: ReadonlyArray<InjectionProductionCockpit['alertDistribution'][number]>,
+): boolean {
   return rows.length > 0;
 }
 
-export function hasBlockStatusData(rows: readonly { block: string }[]): boolean {
+export function hasBlockStatusData(
+  rows: ReadonlyArray<InjectionProductionCockpit['blockStatusSummary'][number]>,
+): boolean {
   return rows.length > 0;
 }
 
