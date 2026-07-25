@@ -44,12 +44,14 @@ export function resolveMarkerColor(wellNo: string, categories: WellMapCategory[]
     .sort((left, right) => left.priority - right.priority)[0]?.color || '#dc2626';
 }
 
-export function resolveInjectionLifecycleColor(status: 'injecting' | 'soaking' | 'pendingTransfer' | 'producing' | 'needsData') {
+export function resolveInjectionLifecycleColor(status: 'pending' | 'injecting' | 'soaking' | 'pendingTransfer' | 'producing' | 'closed' | 'needsData') {
   return {
+    pending: '#64748b',
     injecting: '#2563eb',
     soaking: '#f59e0b',
     pendingTransfer: '#8b5cf6',
     producing: '#16a34a',
+    closed: '#475569',
     needsData: '#94a3b8',
   }[status];
 }
