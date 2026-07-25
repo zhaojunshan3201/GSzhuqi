@@ -31,7 +31,7 @@ import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelec
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
-import { buildInjectionPlanActualComparison } from "./src/lib/injectionPlanActualComparison.ts";
+import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
@@ -3470,11 +3470,17 @@ app.post("/api/register", async (req, res) => {
 
   app.get("/api/injection-projects/plan-actual-comparison", async (req, res) => {
     try {
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const comparisonStatuses: readonly ComparisonStatus[] = ['not_started', 'in_progress', 'on_schedule', 'early', 'delayed', 'incomplete', 'suspected_other_cycle'];
+      if (status && !comparisonStatuses.includes(status as ComparisonStatus)) {
+        res.status(400).json({ success: false, message: "\u65e0\u6548\u7684\u5bf9\u6bd4\u72b6\u6001" });
+        return;
+      }
       const data = await buildInjectionPlanActualComparison(localDb, {
         planMonth: typeof req.query.planMonth === "string" ? req.query.planMonth : undefined,
         unit: typeof req.query.unit === "string" ? req.query.unit : undefined,
         boiler: typeof req.query.boiler === "string" ? req.query.boiler : undefined,
-        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        status: status as ComparisonStatus | undefined,
       });
       res.json({ success: true, data });
     } catch (error: any) {
