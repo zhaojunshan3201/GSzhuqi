@@ -122,3 +122,21 @@ test('uses 2026 by default and retains each month in a cross-month range', () =>
     startDate: '2026-07-30', endDate: '2026-08-02',
   });
 });
+
+test('rejects calendar-invalid dates even when the range syntax is valid', () => {
+  const result = parseMonthlyInjectionPlan(workbookFromRows([
+    ['7月份注汽运行计划表'],
+    ['一区', '活6', '高1（100）'],
+    ['', '', '2.30-3.02'],
+  ]));
+
+  assert.equal(result.rows.length, 0);
+  assert.deepEqual(result.invalidRows[0] && {
+    wellNo: result.invalidRows[0].wellNo,
+    startDate: result.invalidRows[0].startDate,
+    endDate: result.invalidRows[0].endDate,
+    remark: result.invalidRows[0].remark,
+  }, {
+    wellNo: '高1', startDate: null, endDate: null, remark: '无法解析日期',
+  });
+});

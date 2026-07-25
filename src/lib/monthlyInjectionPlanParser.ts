@@ -40,6 +40,13 @@ function planMonth(title: string): string | null {
 function parseDateRange(raw: string, year: number): { startDate: string | null; endDate: string | null } {
   const dates = [...raw.matchAll(/(\d{1,2})\s*(?:\.|\u6708)\s*(\d{1,2})(?:\u65e5)?/g)];
   if (dates.length < 2) return { startDate: null, endDate: null };
+  const isCalendarDate = (match: RegExpMatchArray) => {
+    const month = Number(match[1]);
+    const day = Number(match[2]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  };
+  if (!isCalendarDate(dates[0]) || !isCalendarDate(dates[1])) return { startDate: null, endDate: null };
   const toDate = (match: RegExpMatchArray) => `${year}-${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}`;
   return { startDate: toDate(dates[0]), endDate: toDate(dates[1]) };
 }
