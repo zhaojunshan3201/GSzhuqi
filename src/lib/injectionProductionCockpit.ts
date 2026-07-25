@@ -70,6 +70,8 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
       alerts.push({ id: `needs-data:${row.jh}`, type: 'needsData', wellNo: row.jh, block: row.block || '', message: '注汽跟踪数据待补全', target: 'measures' });
     } else if (status === 'producing') {
       if (row.evaluation === 'D') alerts.push({ id: `low-efficiency:${row.jh}`, type: 'lowEfficiency', wellNo: row.jh, block: row.block || '', message: '注汽效果评价为 D 类', target: 'measures' });
+    }
+    if (status === 'producing') {
       const currentOil = finiteNumber(row.current_oil);
       const cumulativeGain = finiteNumber(row.cumulative_oil_gain);
       if (currentOil != null) {

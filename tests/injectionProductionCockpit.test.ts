@@ -140,6 +140,24 @@ test('aggregates finite production performance and valid cycle ratios by block',
   });
 });
 
+test('keeps valid production values when another value or evaluation is missing', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'A-1', 'A', '生产', '2026-07-20', 2, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (2, 'A-2', 'A', '生产', '2026-07-21', NULL, 5, 'A')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (3, 'B-1', 'B', '生产', '2026-07-22', NULL, NULL, 'A')`);
+
+    const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
+
+    assert.deepEqual(result.blockPerformanceSummary, [
+      { block: 'A', dailyOil: 2, cumulativeOilGain: 5, oilSteamRatio: null },
+      { block: 'B', dailyOil: null, cumulativeOilGain: null, oilSteamRatio: null },
+    ]);
+    assert.equal(result.metrics.dailyOil, 2);
+    assert.equal(result.metrics.cumulativeOilGain, 5);
+    assert.equal(result.alerts.some((alert) => alert.type === 'needsData' && alert.wellNo === 'A-1'), true);
+  });
+});
+
 test('returns all alert distribution types in fixed order with counts from final alerts', async () => {
   await withDatabase(async (db) => {
     await db.run(`INSERT INTO measure_tracking VALUES (1, 'A-1', 'A', '生产', '2026-07-20', NULL, NULL, NULL)`);
