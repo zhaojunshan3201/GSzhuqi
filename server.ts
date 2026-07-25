@@ -10,6 +10,7 @@ import multer from "multer";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import * as XLSX from "xlsx";
+import { MEASURE_IMPORT_FILE_TYPE_MESSAGE, isHtmlMeasureImportFile, isMeasureImportWorkbookFile } from "./src/lib/measureImportUpload.ts";
 import { parseWellTemperatureWorkbook } from "./src/lib/wellTemperature.ts";
 import { isWellTemperatureClientError } from "./src/lib/wellTemperatureApi.ts";
 import {
@@ -2339,26 +2340,43 @@ function parseMeasureImportRows(rawRows: Record<string, unknown>[]): MeasureImpo
   };
 }
 
+class MeasureImportParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MeasureImportParseError";
+  }
+}
+
 function parseMeasureImportFile(fileName: string, buffer: Buffer) {
-  const workbook = readMeasureImportWorkbook(fileName, buffer);
-  const firstSheetName = workbook.SheetNames[0];
-  const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
-  if (!worksheet) {
-    throw new Error("Excel ________________________________________________?");
-  }
+  try {
+    if (isHtmlMeasureImportFile(buffer)) {
+      throw new MeasureImportParseError("Excel 文件格式错误或内容无法解析");
+    }
+    const workbook = readMeasureImportWorkbook(fileName, buffer);
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+    if (!worksheet) {
+      throw new MeasureImportParseError("Excel 文件中未找到有效工作表");
+    }
 
-  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
-  const parsed = parseMeasureImportRows(rawRows);
-  if (parsed.rows.length === 0) {
-    throw new Error("未从Excel文件中解析到有效的措施记录");
-  }
+    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
+    const parsed = parseMeasureImportRows(rawRows);
+    if (parsed.rows.length === 0) {
+      throw new MeasureImportParseError("未从Excel文件中解析到有效的措施记录");
+    }
 
-  return {
-    ...parsed,
-    sheetName: firstSheetName,
-    totalRows: rawRows.length,
-    validRows: parsed.rows.length
-  };
+    return {
+      ...parsed,
+      sheetName: firstSheetName,
+      totalRows: rawRows.length,
+      validRows: parsed.rows.length
+    };
+  } catch (error) {
+    if (error instanceof MeasureImportParseError) {
+      throw error;
+    }
+    throw new MeasureImportParseError("Excel 文件格式错误或内容无法解析");
+  }
 }
 
 function handleMeasureImportUpload(upload: ReturnType<typeof multer>) {
@@ -3631,6 +3649,10 @@ app.post("/api/register", async (req, res) => {
         res.status(400).json({ success: false, message: "未接收到待预检的 Excel 文件" });
         return;
       }
+      if (!isMeasureImportWorkbookFile(uploadedFile.originalname)) {
+        res.status(400).json({ success: false, message: MEASURE_IMPORT_FILE_TYPE_MESSAGE });
+        return;
+      }
       const parsedImport = parseMeasureImportFile(uploadedFile.originalname, uploadedFile.buffer);
 
       // Detect year from parsed rows
@@ -3660,7 +3682,7 @@ app.post("/api/register", async (req, res) => {
       });
     } catch (err: any) {
       const message = err?.message || "导入处理异常";
-      const statusCode = /Excel ________________________________________________________________________________________________|____________________________________ Excel _________/.test(message) ? 400 : 500;
+      const statusCode = err instanceof MeasureImportParseError ? 400 : 500;
       res.status(statusCode).json({ success: false, message: "措施数据导入预览失败: " + message });
     }
   });
@@ -3694,7 +3716,7 @@ app.post("/api/register", async (req, res) => {
       });
     } catch (err: any) {
       const message = err?.message || "导入处理异常";
-      const statusCode = /Excel ________________________________________________________________________________________________|____________________________________ Excel _________/.test(message) ? 400 : 500;
+      const statusCode = err instanceof MeasureImportParseError ? 400 : 500;
       res.status(statusCode).json({ success: false, message: "措施数据导入失败: " + message });
     }
   });
