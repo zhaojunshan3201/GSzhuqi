@@ -93,14 +93,12 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
   const blockCycleRows = await db.all(`SELECT well_name, actual_steam, cycle_oil FROM measure_well_cycles`);
   let steam = 0;
   let cycleOil = 0;
-  let hasValidCycle = false;
   for (const row of blockCycleRows) {
     const actualSteam = finiteNumber(row.actual_steam);
     const cycleOilValue = finiteNumber(row.cycle_oil);
     if (actualSteam == null || actualSteam <= 0 || cycleOilValue == null) continue;
     steam += actualSteam;
     cycleOil += cycleOilValue;
-    hasValidCycle = true;
     const block = blockByWell.get(String(row.well_name).trim());
     if (!block) continue;
     const blockPerformance = blockPerformanceByName.get(block)!;
@@ -118,7 +116,7 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
       { source: 'injectionTracking', status: trackingDate ? 'normal' : 'missing', updatedAt: trackingDate, message: trackingDate ? '注汽跟踪数据可用' : '注汽跟踪数据待导入' },
       { source: 'selection', status: selectionDate ? 'normal' : 'missing', updatedAt: selectionDate, message: selectionDate ? '选井数据可用' : '选井数据待导入' },
     ],
-    metrics: { producingWells: statusDistribution.producing, injectingWells: statusDistribution.injecting, soakingWells: statusDistribution.soaking, pendingTransferWells: statusDistribution.pendingTransfer, dailyOil: hasDailyOil ? dailyOil : null, cumulativeOilGain: hasCumulativeOilGain ? cumulativeOilGain : null, oilSteamRatio: hasValidCycle ? Math.round((cycleOil / steam) * 100) / 100 : null },
+    metrics: { producingWells: statusDistribution.producing, injectingWells: statusDistribution.injecting, soakingWells: statusDistribution.soaking, pendingTransferWells: statusDistribution.pendingTransfer, dailyOil: hasDailyOil ? dailyOil : null, cumulativeOilGain: hasCumulativeOilGain ? cumulativeOilGain : null, oilSteamRatio: steam > 0 && cycleOil > 0 ? cycleOil / steam : null },
     statusDistribution,
     blockStatusSummary: [...blockStatusByName.values()].sort((left, right) => left.block.localeCompare(right.block, 'zh-CN')),
     blockPerformanceSummary: [...blockPerformanceByName.values()]

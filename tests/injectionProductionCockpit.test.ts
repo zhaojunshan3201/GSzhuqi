@@ -74,7 +74,7 @@ test('calculates production metrics and creates overdue and low-efficiency alert
 
     assert.equal(result.metrics.dailyOil, 2);
     assert.equal(result.metrics.cumulativeOilGain, 10);
-    assert.equal(result.metrics.oilSteamRatio, 0.28);
+    assert.equal(result.metrics.oilSteamRatio, 0.275);
     assert.deepEqual(result.alerts.map((alert) => alert.type).sort(), [
       'lowEfficiency', 'soakingOverdue', 'transferOverdue',
     ]);
@@ -175,6 +175,18 @@ test('uses valid paired cycles for consistently rounded global and trimmed-block
     assert.deepEqual(result.blockPerformanceSummary, [
       { block: 'A', dailyOil: 2, cumulativeOilGain: 5, oilSteamRatio: 0.15 },
     ]);
+  });
+});
+
+test('keeps zero cycle oil for block ratio while preserving the global null convention', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'A-1', 'A', '生产', '2026-07-20', 2, 5, 'A')`);
+    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 100, 0)`);
+
+    const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
+
+    assert.equal(result.metrics.oilSteamRatio, null);
+    assert.equal(result.blockPerformanceSummary[0].oilSteamRatio, 0);
   });
 });
 
