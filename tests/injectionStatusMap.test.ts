@@ -6,7 +6,7 @@ import test from 'node:test';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
-import { buildInjectionStatusMap, filterInjectionMapWells, summarizeInjectionMap, type InjectionMapWell } from '../src/lib/injectionStatusMap.ts';
+import { buildInjectionStatusMap, buildInjectionStatusMapResponse, filterInjectionMapWells, summarizeInjectionMap, type InjectionMapWell } from '../src/lib/injectionStatusMap.ts';
 
 async function withDatabase(run: (db: any) => Promise<void>) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'injection-status-map-'));
@@ -185,4 +185,66 @@ test('merges nested object detail JSON before extracting actual steam', async ()
 
   const well = (await buildInjectionStatusMap(db, { today: '2026-07-26' })).wells[0];
   assert.equal(well.actualSteam, 66);
+});
+
+function injectionMapWell(overrides: Partial<InjectionMapWell>): InjectionMapWell {
+  return {
+    wellNo: 'WELL-1', block: 'A', station: null, xPercent: 10, yPercent: 20,
+    lifecycleStatus: 'soaking', statusSource: 'project', planMonth: '2026-07',
+    projectId: 1, owner: null, plannedStartDate: null, plannedEndDate: null,
+    actualStartDate: null, actualEndDate: null, plannedTransferDate: '2026-07-01',
+    overdueDays: 1, plannedSteam: null, actualSteam: null, currentOil: null,
+    cumulativeOilGain: null, oilSteamRatio: null, evaluation: null,
+    alertTypes: ['soakingOverdue'],
+    ...overrides,
+  };
+}
+
+test('builds a normalized injection status map response for valid query filters', () => {
+  const result = { wells: [
+    injectionMapWell({ wellNo: 'WELL-MAP' }),
+    injectionMapWell({ wellNo: 'WELL-UNLOCATED', xPercent: null, yPercent: null }),
+    injectionMapWell({ wellNo: 'OTHER', block: 'B' }),
+  ] };
+
+  const response = buildInjectionStatusMapResponse(result, {
+    block: 'A', lifecycleStatus: 'soaking', planMonth: '2026-07',
+    alertType: 'soakingOverdue', overdue: 'true', keyword: 'well',
+  });
+
+  assert.deepEqual(Object.keys(response).sort(), ['filters', 'mapWells', 'summary', 'unlocatedWells']);
+  assert.deepEqual(response.filters, {
+    block: 'A', lifecycleStatus: 'soaking', planMonth: '2026-07',
+    alertType: 'soakingOverdue', overdue: true, keyword: 'well',
+  });
+  assert.deepEqual(response.mapWells.map((well) => well.wellNo), ['WELL-MAP']);
+  assert.deepEqual(response.unlocatedWells.map((well) => well.wellNo), ['WELL-UNLOCATED']);
+  assert.deepEqual(response.summary, {
+    total: 1, injecting: 0, soaking: 1, pendingTransfer: 0, producing: 0, alerts: 1, unlocated: 1,
+  });
+});
+
+test('safely ignores invalid lifecycle status and treats only string true as overdue', () => {
+  const result = { wells: [
+    injectionMapWell({ wellNo: 'OVERDUE', overdueDays: 2 }),
+    injectionMapWell({ wellNo: 'ON-TIME', overdueDays: 0 }),
+  ] };
+
+  const invalidLifecycle = buildInjectionStatusMapResponse(result, { lifecycleStatus: 'unknown-status' });
+  const booleanOverdue = buildInjectionStatusMapResponse(result, { overdue: true });
+  const uppercaseOverdue = buildInjectionStatusMapResponse(result, { overdue: 'TRUE' });
+  const stringOverdue = buildInjectionStatusMapResponse(result, { overdue: 'true' });
+
+  assert.deepEqual(invalidLifecycle.filters, {});
+  assert.equal(invalidLifecycle.mapWells.length, 2);
+  assert.equal(booleanOverdue.mapWells.length, 2);
+  assert.equal(uppercaseOverdue.mapWells.length, 2);
+  assert.deepEqual(stringOverdue.mapWells.map((well) => well.wellNo), ['OVERDUE']);
+});
+
+test('server declares the injection status map route and response builder import', async () => {
+  const serverSource = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../server.ts', import.meta.url), 'utf8'));
+
+  assert.match(serverSource, /import\s+\{[^}]*buildInjectionStatusMapResponse[^}]*\}\s+from\s+["']\.\/src\/lib\/injectionStatusMap\.ts["'];/);
+  assert.match(serverSource, /app\.get\("\/api\/injection-status-map"/);
 });

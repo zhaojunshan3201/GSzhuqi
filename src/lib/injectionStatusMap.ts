@@ -253,6 +253,62 @@ export function filterInjectionMapWells(wells: InjectionMapWell[], filters: Inje
   return { mapWells: filtered.filter(hasMapCoordinates), unlocatedWells: filtered.filter((well) => !hasMapCoordinates(well)) };
 }
 
+export type InjectionStatusMapResponse = {
+  filters: InjectionStatusMapFilters;
+  mapWells: InjectionMapWell[];
+  unlocatedWells: InjectionMapWell[];
+  summary: ReturnType<typeof summarizeInjectionMap>;
+};
+
+const queryLifecycleStatuses = new Set<InjectionMapLifecycleStatus>([
+  'pending', 'injecting', 'soaking', 'pendingTransfer', 'producing', 'closed', 'needsData',
+]);
+const queryAlertTypes = new Set<InjectionMapAlertType>([
+  'needsData', 'notEvaluated', 'lowEfficiency', 'soakingOverdue', 'transferOverdue',
+]);
+
+function queryText(query: unknown, key: string): string | null {
+  const value = record(query)[key];
+  return typeof value === 'string' ? text(value) : null;
+}
+
+function parseInjectionStatusMapFilters(query: unknown): InjectionStatusMapFilters {
+  const filters: InjectionStatusMapFilters = {};
+  const block = queryText(query, 'block');
+  const lifecycleStatus = queryText(query, 'lifecycleStatus');
+  const planMonth = queryText(query, 'planMonth');
+  const alertType = queryText(query, 'alertType');
+  const keyword = queryText(query, 'keyword');
+
+  if (block) filters.block = block;
+  if (lifecycleStatus && queryLifecycleStatuses.has(lifecycleStatus as InjectionMapLifecycleStatus)) {
+    filters.lifecycleStatus = lifecycleStatus as InjectionMapLifecycleStatus;
+  }
+  if (planMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(planMonth)) filters.planMonth = planMonth;
+  if (alertType && queryAlertTypes.has(alertType as InjectionMapAlertType)) {
+    filters.alertType = alertType as InjectionMapAlertType;
+  }
+  if (record(query).overdue === 'true') filters.overdue = true;
+  if (keyword) filters.keyword = keyword;
+
+  return filters;
+}
+
+export function buildInjectionStatusMapResponse(
+  result: { wells: InjectionMapWell[] },
+  query: unknown,
+): InjectionStatusMapResponse {
+  const filters = parseInjectionStatusMapFilters(query);
+  const { mapWells, unlocatedWells } = filterInjectionMapWells(result.wells, filters);
+
+  return {
+    filters,
+    mapWells,
+    unlocatedWells,
+    summary: summarizeInjectionMap(mapWells, unlocatedWells),
+  };
+}
+
 export function summarizeInjectionMap(mapWells: InjectionMapWell[], unlocatedWells: InjectionMapWell[]) {
   return {
     total: mapWells.length,
