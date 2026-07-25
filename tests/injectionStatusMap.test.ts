@@ -47,7 +47,7 @@ test('uses the latest open project lifecycle before tracking status', async () =
       projectId: 2, owner: '张工', plannedStartDate: '2026-07-01', plannedEndDate: '2026-07-03',
       actualStartDate: null, actualEndDate: null, plannedTransferDate: '2026-07-10',
       overdueDays: 16, plannedSteam: 1800, actualSteam: null, currentOil: 4.2,
-      cumulativeOilGain: 30, oilSteamRatio: 0.25, evaluation: 'B', alertTypes: ['soakingOverdue'],
+      cumulativeOilGain: 30, oilSteamRatio: 0.25, evaluation: 'B', alertTypes: [],
     });
   });
 });
@@ -96,5 +96,44 @@ test('filters first and only maps finite coordinates in the 0-100 range', () => 
   assert.deepEqual(result.unlocatedWells.map((well) => well.wellNo), ['A-2', 'A-3']);
   assert.deepEqual(summarizeInjectionMap(result.mapWells, result.unlocatedWells), {
     total: 1, injecting: 0, soaking: 1, pendingTransfer: 0, producing: 0, alerts: 1, unlocated: 2,
+  });
+});
+
+
+test('derives alerts solely from the latest tracking row even when a project controls lifecycle', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_projects VALUES (1, 'PROJECT-S', 'A', 'soaking', '2026-07-25', NULL, NULL, '2026-01-01', NULL, 'owner')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'PROJECT-S', 'A', NULL, '\u7116\u4e95', '2026-07-20', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (2, 'MISSING', 'A', NULL, NULL, '2026-07-20', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (3, 'PROD-MISSING-OIL', 'A', NULL, '\u751f\u4ea7', '2026-07-20', NULL, NULL, 'A')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (4, 'NOT-EVALUATED', 'A', NULL, '\u751f\u4ea7', '2026-07-20', 1, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (5, 'LOW', 'A', NULL, '\u751f\u4ea7', '2026-07-20', 1, NULL, 'D')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (6, 'SOAK', 'A', NULL, '\u7116\u4e95', '2026-06-01', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (7, 'TRANSFER', 'A', NULL, '\u8f6c\u6ce8', '2026-07-01', NULL, NULL, NULL)`);
+
+    const byWell = new Map((await buildInjectionStatusMap(db, { today: '2026-07-26' })).wells.map((well) => [well.wellNo, well]));
+
+    assert.deepEqual(byWell.get('PROJECT-S')?.alertTypes, []);
+    assert.deepEqual(byWell.get('MISSING')?.alertTypes, ['needsData']);
+    assert.deepEqual(byWell.get('PROD-MISSING-OIL')?.alertTypes, ['needsData']);
+    assert.deepEqual(byWell.get('NOT-EVALUATED')?.alertTypes, ['notEvaluated']);
+    assert.deepEqual(byWell.get('LOW')?.alertTypes, ['lowEfficiency']);
+    assert.deepEqual(byWell.get('SOAK')?.alertTypes, ['soakingOverdue']);
+    assert.deepEqual(byWell.get('TRANSFER')?.alertTypes, ['transferOverdue']);
+  });
+});
+
+test('reads actual steam from supported tracking columns and detail JSON', async () => {
+  await withDatabase(async (db) => {
+    await db.exec(`ALTER TABLE measure_tracking ADD COLUMN current_round_steam REAL; ALTER TABLE measure_tracking ADD COLUMN current_steam REAL; ALTER TABLE measure_tracking ADD COLUMN detail_json TEXT;`);
+    await db.run(`INSERT INTO measure_tracking (id, jh, block, current_status, current_round_transfer_time, current_oil, evaluation, current_round_steam) VALUES (1, 'STEAM-1', 'A', '\u751f\u4ea7', '2026-07-20', 1, 'A', 120)`);
+    await db.run(`INSERT INTO measure_tracking (id, jh, block, current_status, current_round_transfer_time, current_oil, evaluation, current_steam) VALUES (2, 'STEAM-2', 'A', '\u751f\u4ea7', '2026-07-20', 1, 'A', 80)`);
+    await db.run(`INSERT INTO measure_tracking (id, jh, block, current_status, current_round_transfer_time, current_oil, evaluation, detail_json) VALUES (3, 'STEAM-3', 'A', '\u751f\u4ea7', '2026-07-20', 1, 'A', '{"\\u5b9e\\u9645\\u6ce8\\u6c7d\\u91cf":75}')`);
+
+    const byWell = new Map((await buildInjectionStatusMap(db, { today: '2026-07-26' })).wells.map((well) => [well.wellNo, well]));
+
+    assert.equal(byWell.get('STEAM-1')?.actualSteam, 120);
+    assert.equal(byWell.get('STEAM-2')?.actualSteam, 80);
+    assert.equal(byWell.get('STEAM-3')?.actualSteam, 75);
   });
 });

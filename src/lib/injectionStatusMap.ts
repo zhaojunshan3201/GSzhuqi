@@ -87,12 +87,39 @@ function projectStatus(value: unknown): InjectionMapLifecycleStatus {
   return status && lifecycleStatuses.has(status) ? status : 'needsData';
 }
 
-function actualDates(row: TrackingRow | undefined) {
-  const detail = typeof row?.detail_json === 'string' ? JSON.parse(row.detail_json || '{}') : {};
+function detail(row: TrackingRow | undefined): Record<string, unknown> {
+  if (!row) return {};
+  if (row.detail_json && typeof row.detail_json === 'object') return row.detail_json as Record<string, unknown>;
+  if (typeof row.detail_json !== 'string') return {};
+  try {
+    const parsed = JSON.parse(row.detail_json);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return { ...(parsed.rawExtras || {}), ...(parsed.currentRound || {}), ...parsed };
+  } catch {
+    return {};
+  }
+}
+
+function firstValue(row: TrackingRow | undefined, values: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = row?.[key] ?? values[key];
+    if (value != null && (typeof value !== 'string' || value.trim())) return value;
+  }
+  return null;
+}
+
+function actualDates(row: TrackingRow | undefined, values: Record<string, unknown>) {
   return {
-    actualStartDate: datePart(row?.actual_start_date ?? detail['\u5f00\u6ce8\u65f6\u95f4']),
-    actualEndDate: datePart(row?.actual_end_date ?? detail['\u505c\u6ce8\u65f6\u95f4']),
+    actualStartDate: datePart(firstValue(row, values, ['actual_start_date', '\u5f00\u6ce8\u65f6\u95f4'])),
+    actualEndDate: datePart(firstValue(row, values, ['actual_end_date', '\u505c\u6ce8\u65f6\u95f4'])),
   };
+}
+
+function actualSteam(row: TrackingRow | undefined, values: Record<string, unknown>) {
+  return number(firstValue(row, values, [
+    'current_round_steam', 'current_steam', 'current_round_cumulative_steam', 'cumulative_steam',
+    '\u7d2f\u6ce8\u6c7d\u91cf', '\u5b9e\u9645\u6ce8\u6c7d\u91cf',
+  ]));
 }
 
 function addAlert(alertTypes: InjectionMapAlertType[], alert: InjectionMapAlertType) {
@@ -145,23 +172,26 @@ export async function buildInjectionStatusMap(db: DatabaseLike, options: { today
     const source = project ? 'project' : 'tracking';
     const lifecycleStatus = project ? projectStatus(project.lifecycle_status) : trackingStatus(tracking?.current_status);
     const plannedTransferDate = datePart(project?.planned_transfer_date);
-    const statusDate = plannedTransferDate || datePart(tracking?.current_round_transfer_time);
+    const trackingDate = datePart(tracking?.current_round_transfer_time);
     const overdueDays = project ? daysSince(options.today, plannedTransferDate) : null;
     const currentOil = number(tracking?.current_oil);
     const evaluation = text(tracking?.evaluation);
     const cyclesForWell = cycleByWell.get(wellNo);
     const alertTypes: InjectionMapAlertType[] = [];
+    const trackingComplete = Boolean(text(tracking?.current_status) && trackingDate);
+    const needsData = !trackingComplete || (lifecycleStatus === 'producing' && currentOil == null);
 
-    if (lifecycleStatus === 'needsData' || (lifecycleStatus === 'producing' && currentOil == null)) addAlert(alertTypes, 'needsData');
-    if (lifecycleStatus === 'producing' && currentOil != null) {
+    if (needsData) addAlert(alertTypes, 'needsData');
+    else if (lifecycleStatus === 'producing') {
       if (!evaluation) addAlert(alertTypes, 'notEvaluated');
       else if (evaluation === 'D') addAlert(alertTypes, 'lowEfficiency');
     }
-    const elapsedDays = daysSince(options.today, statusDate);
-    if (lifecycleStatus === 'soaking' && elapsedDays != null && elapsedDays > (project ? 0 : 30)) addAlert(alertTypes, 'soakingOverdue');
-    if (lifecycleStatus === 'pendingTransfer' && elapsedDays != null && elapsedDays > (project ? 0 : 7)) addAlert(alertTypes, 'transferOverdue');
+    const elapsedDays = daysSince(options.today, trackingDate);
+    if (!needsData && lifecycleStatus === 'soaking' && elapsedDays != null && elapsedDays > 30) addAlert(alertTypes, 'soakingOverdue');
+    if (!needsData && lifecycleStatus === 'pendingTransfer' && elapsedDays != null && elapsedDays > 7) addAlert(alertTypes, 'transferOverdue');
 
-    const dates = actualDates(tracking);
+    const trackingDetail = detail(tracking);
+    const dates = actualDates(tracking, trackingDetail);
     return {
       wellNo,
       block: text(project?.block) || text(tracking?.block) || text(marker?.block) || '',
@@ -180,7 +210,7 @@ export async function buildInjectionStatusMap(db: DatabaseLike, options: { today
       plannedTransferDate,
       overdueDays,
       plannedSteam: number(project?.planned_steam),
-      actualSteam: number(tracking?.actual_steam),
+      actualSteam: actualSteam(tracking, trackingDetail),
       currentOil,
       cumulativeOilGain: number(tracking?.cumulative_oil_gain),
       oilSteamRatio: cyclesForWell ? cyclesForWell.oil / cyclesForWell.steam : null,
