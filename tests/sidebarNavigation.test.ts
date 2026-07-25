@@ -8,8 +8,8 @@ test('defines the five sidebar groups and seventeen grouped navigation entries',
   const tabs: SidebarTab[] = sidebarNavigationGroups.flatMap((group) => group.items.map((item) => item.tab));
 
   assert.deepEqual(sidebarNavigationGroups.map((group) => group.key), ['overview', 'analysis', 'focus', 'measures', 'production']);
-  assert.equal(tabs.length, 17);
-  assert.equal(new Set(tabs).size, 17);
+  assert.equal(tabs.length, 18);
+  assert.equal(new Set(tabs).size, 18);
   assert.equal(runtimeLogNavigationItem.tab, 'runtimeLogs');
   assert.equal(tabs.includes(runtimeLogNavigationItem.tab), false);
 });
@@ -19,12 +19,17 @@ test('assigns grouped tabs to their sidebar group', () => {
     dashboard: 'overview', injectionProductionCockpit: 'overview', oilWellMap: 'overview', wellTemperature: 'overview',
     well: 'analysis', block: 'analysis', comparison: 'analysis', pumpDeepAnalysis: 'analysis', occupancyAnalysis: 'analysis',
     analysis: 'focus', waterLab: 'focus', pumpAnalysis: 'focus',
-    measureWellSelection: 'measures', measures: 'measures', measureAnalysis: 'measures',
+    injectionProjectManagement: 'measures', measureWellSelection: 'measures', measures: 'measures', measureAnalysis: 'measures',
     productionForecast: 'production', externalTransferTracking: 'production',
   };
 
   for (const [tab, group] of Object.entries(expectedGroups)) assert.equal(getSidebarGroupKey(tab), group);
   assert.equal(getSidebarGroupKey('runtimeLogs'), undefined);
+});
+
+test('places 注汽项目管理 first in the 注汽项目 group', () => {
+  const group = sidebarNavigationGroups.find((item) => item.key === 'measures');
+  assert.equal(group?.items[0].label, '注汽项目管理');
 });
 
 test('keeps runtime logs out of the overview group', () => {

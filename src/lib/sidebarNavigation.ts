@@ -14,6 +14,7 @@ export type SidebarTab =
   | 'analysis'
   | 'waterLab'
   | 'pumpAnalysis'
+  | 'injectionProjectManagement'
   | 'measureWellSelection'
   | 'measures'
   | 'measureAnalysis'
@@ -82,6 +83,7 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     key: 'measures',
     label: '措施项目',
     items: [
+      { tab: 'injectionProjectManagement', label: '注汽项目管理', icon: 'ClipboardList' },
       { tab: 'measureWellSelection', label: '措施选井', icon: 'Target' },
       { tab: 'measures', label: '措施跟踪', icon: 'ClipboardList' },
       { tab: 'measureAnalysis', label: '措施分析', icon: 'MessageSquare' },
