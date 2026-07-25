@@ -38,7 +38,7 @@ import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
-import { filterMeasuresByCockpitAlerts, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
+import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitAlerts, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import type { InjectionProductionCockpit as InjectionProductionCockpitData } from './lib/injectionProductionCockpit';
 import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
@@ -6054,7 +6054,7 @@ export default function App() {
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
               {activeTab === 'injectionProjectManagement' && <InjectionProjectManagement />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={async (tab, filters = {}) => {
-                setMeasureQuery((current) => ({ ...current, keyword: filters.keyword || '', block: filters.block || '' }));
+                setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
                 if (filters.alertType) {
                   try {
                     const result = await fetchJson('/api/injection-production/cockpit');
@@ -9420,8 +9420,8 @@ export default function App() {
 
                   {measureCockpitAlertFilter && (
                     <div className="status-banner status-banner-info flex items-center justify-between gap-3">
-                      <span>????????{measureCockpitAlertFilter.type}?{displayedMeasures.length} ???</span>
-                      <button type="button" className="action-button action-outline" onClick={() => setMeasureCockpitAlertFilter(null)}>??????</button>
+                      <span>驾驶舱异常筛选：{cockpitAlertLabels[measureCockpitAlertFilter.type!]}（{displayedMeasures.length} 口井）</span>
+                      <button type="button" className="action-button action-outline" onClick={() => setMeasureCockpitAlertFilter(null)}>清除异常筛选</button>
                     </div>
                   )}
 

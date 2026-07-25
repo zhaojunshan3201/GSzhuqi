@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState, type ReactNode } from 'react';
 import ReactECharts from 'echarts-for-react';
-import type { CockpitAlertType, InjectionProductionCockpit as Cockpit } from '../lib/injectionProductionCockpit';
+import type { InjectionProductionCockpit as Cockpit } from '../lib/injectionProductionCockpit';
 import {
   buildAlertDistributionOption,
   buildBlockPerformanceOption,
@@ -8,17 +8,13 @@ import {
   buildStatusDistributionOption,
   hasChartValues,
 } from '../lib/injectionProductionCockpitCharts';
-import type { CockpitMeasureFilters } from '../lib/injectionProductionCockpitDrilldown';
+import { getCockpitAlertDrilldown, getCockpitBlockDrilldown, type CockpitMeasureFilters } from '../lib/injectionProductionCockpitDrilldown';
 
 const labels: Array<[keyof Cockpit['metrics'], string, string]> = [
   ['producingWells', '生产井', '口'], ['injectingWells', '正注井', '口'], ['soakingWells', '焖井', '口'],
   ['pendingTransferWells', '待转抽井', '口'], ['dailyOil', '日产油', 't'], ['cumulativeOilGain', '累计增油', 't'],
   ['oilSteamRatio', '油汽比', ''],
 ];
-
-const alertTypeByLabel: Record<string, CockpitAlertType> = {
-  数据待补全: 'needsData', 未评价: 'notEvaluated', 低效井: 'lowEfficiency', 焖井逾期: 'soakingOverdue', 待转抽逾期: 'transferOverdue',
-};
 
 function ChartCard({ title, hasData, children, className = '' }: { title: string; hasData: boolean; children: ReactNode; className?: string }) {
   return <section className={`app-card p-4 ${className}`}>
@@ -45,7 +41,7 @@ export function InjectionProductionCockpit({ onNavigate }: {
   const blockStatusValues = data.blockStatusSummary.flatMap(({ block: _block, ...counts }) => Object.values(counts));
   const performanceValues = data.blockPerformanceSummary.flatMap((row) => [row.dailyOil, row.cumulativeOilGain, row.oilSteamRatio]);
   const alertValues = data.alertDistribution.map((item) => item.count);
-  const blockEvents = { click: (params: { name?: string }) => params.name && onNavigate('measures', { block: params.name }) };
+  const blockEvents = { click: (params: unknown) => { const filters = getCockpitBlockDrilldown(params); if (filters) onNavigate('measures', filters); } };
 
   return <div className="page-stack">
     <section className="app-card p-5"><h3 className="text-lg font-bold text-slate-900">注采驾驶舱</h3><div className="mt-3 grid gap-3 md:grid-cols-3">{data.dataFreshness.map((item) => <div key={item.source} className="rounded-lg border border-slate-200 p-3"><p className="font-semibold">{item.source}</p><p className="text-sm text-slate-500">{item.message}</p><p className="text-xs text-slate-400">{item.updatedAt || '暂无更新时间'}</p></div>)}</div></section>
@@ -58,7 +54,7 @@ export function InjectionProductionCockpit({ onNavigate }: {
         <ReactECharts option={buildBlockPerformanceOption(data.blockPerformanceSummary)} style={{ height: '100%' }} onEvents={blockEvents} />
       </ChartCard>
       <ChartCard title="异常分布" hasData={hasChartValues(alertValues)} className="xl:col-span-2">
-        <ReactECharts option={buildAlertDistributionOption(data.alertDistribution)} style={{ height: '100%' }} onEvents={{ click: (params: { name?: string }) => { const alertType = alertTypeByLabel[params.name || '']; if (alertType) onNavigate('measures', { alertType }); } }} />
+        <ReactECharts option={buildAlertDistributionOption(data.alertDistribution)} style={{ height: '100%' }} onEvents={{ click: (params: unknown) => { const filters = getCockpitAlertDrilldown(params); if (filters) onNavigate('measures', filters); } }} />
       </ChartCard>
       <ChartCard title="区块生命周期状态" hasData={hasChartValues(blockStatusValues)} className="md:col-span-2 xl:col-span-7">
         <ReactECharts option={buildBlockStatusOption(data.blockStatusSummary)} style={{ height: '100%' }} onEvents={blockEvents} />
