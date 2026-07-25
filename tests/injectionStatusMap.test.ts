@@ -125,15 +125,64 @@ test('derives alerts solely from the latest tracking row even when a project con
 
 test('reads actual steam from supported tracking columns and detail JSON', async () => {
   await withDatabase(async (db) => {
-    await db.exec(`ALTER TABLE measure_tracking ADD COLUMN current_round_steam REAL; ALTER TABLE measure_tracking ADD COLUMN current_steam REAL; ALTER TABLE measure_tracking ADD COLUMN detail_json TEXT;`);
-    await db.run(`INSERT INTO measure_tracking (id, jh, block, current_status, current_round_transfer_time, current_oil, evaluation, current_round_steam) VALUES (1, 'STEAM-1', 'A', '\u751f\u4ea7', '2026-07-20', 1, 'A', 120)`);
+    await db.exec(`ALTER TABLE measure_tracking ADD COLUMN actual_steam REAL; ALTER TABLE measure_tracking ADD COLUMN current_round_steam REAL; ALTER TABLE measure_tracking ADD COLUMN current_steam REAL; ALTER TABLE measure_tracking ADD COLUMN detail_json TEXT;`);
+    await db.run(`INSERT INTO measure_tracking (id, jh, block, current_status, current_round_transfer_time, current_oil, evaluation, actual_steam, current_round_steam) VALUES (1, 'STEAM-1', 'A', '\u751f\u4ea7', '2026-07-20', 1, 'A', 180, 120)`);
     await db.run(`INSERT INTO measure_tracking (id, jh, block, current_status, current_round_transfer_time, current_oil, evaluation, current_steam) VALUES (2, 'STEAM-2', 'A', '\u751f\u4ea7', '2026-07-20', 1, 'A', 80)`);
-    await db.run(`INSERT INTO measure_tracking (id, jh, block, current_status, current_round_transfer_time, current_oil, evaluation, detail_json) VALUES (3, 'STEAM-3', 'A', '\u751f\u4ea7', '2026-07-20', 1, 'A', '{"\\u5b9e\\u9645\\u6ce8\\u6c7d\\u91cf":75}')`);
+    await db.run(`INSERT INTO measure_tracking (id, jh, block, current_status, current_round_transfer_time, current_oil, evaluation, detail_json) VALUES (3, 'STEAM-3', 'A', '\u751f\u4ea7', '2026-07-20', 1, 'A', '{"currentRound":{"\\u5b9e\\u9645\\u6ce8\\u6c7d\\u91cf":75}}')`);
 
     const byWell = new Map((await buildInjectionStatusMap(db, { today: '2026-07-26' })).wells.map((well) => [well.wellNo, well]));
 
-    assert.equal(byWell.get('STEAM-1')?.actualSteam, 120);
+    assert.equal(byWell.get('STEAM-1')?.actualSteam, 180);
     assert.equal(byWell.get('STEAM-2')?.actualSteam, 80);
     assert.equal(byWell.get('STEAM-3')?.actualSteam, 75);
   });
+});
+
+
+test('uses mapped tracking status for alerts when a project lifecycle conflicts', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_projects VALUES (1, 'TRACK-SOAK', 'A', 'producing', '2026-07-25', NULL, NULL, NULL, NULL, 'owner')`);
+    await db.run(`INSERT INTO injection_projects VALUES (2, 'TRACK-PROD', 'A', 'soaking', '2026-07-25', NULL, NULL, NULL, NULL, 'owner')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'TRACK-SOAK', 'A', NULL, '\u7116\u4e95', '2026-06-01', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (2, 'TRACK-PROD', 'A', NULL, '\u751f\u4ea7', '2026-07-20', 1, NULL, 'D')`);
+
+    const byWell = new Map((await buildInjectionStatusMap(db, { today: '2026-07-26' })).wells.map((well) => [well.wellNo, well]));
+
+    assert.equal(byWell.get('TRACK-SOAK')?.lifecycleStatus, 'producing');
+    assert.deepEqual(byWell.get('TRACK-SOAK')?.alertTypes, ['soakingOverdue']);
+    assert.equal(byWell.get('TRACK-PROD')?.lifecycleStatus, 'soaking');
+    assert.deepEqual(byWell.get('TRACK-PROD')?.alertTypes, ['lowEfficiency']);
+  });
+});
+
+test('marks unknown tracking statuses and invalid calendar dates as needs-data without overdue alerts', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'UNKNOWN', 'A', NULL, 'unknown', '2026-07-20', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (2, 'BAD-SOAK', 'A', NULL, '\u7116\u4e95', '2026-02-31', NULL, NULL, NULL)`);
+    await db.run(`INSERT INTO measure_tracking VALUES (3, 'BAD-TRANSFER', 'A', NULL, '\u8f6c\u6ce8', '2026-99-99', NULL, NULL, NULL)`);
+
+    const byWell = new Map((await buildInjectionStatusMap(db, { today: '2026-07-26' })).wells.map((well) => [well.wellNo, well]));
+
+    assert.equal(byWell.get('UNKNOWN')?.lifecycleStatus, 'needsData');
+    assert.deepEqual(byWell.get('UNKNOWN')?.alertTypes, ['needsData']);
+    assert.deepEqual(byWell.get('BAD-SOAK')?.alertTypes, ['needsData']);
+    assert.deepEqual(byWell.get('BAD-TRANSFER')?.alertTypes, ['needsData']);
+  });
+});
+
+test('merges nested object detail JSON before extracting actual steam', async () => {
+  const tracking = {
+    id: 1, jh: 'OBJECT-DETAIL', block: 'A', current_status: '\u751f\u4ea7', current_round_transfer_time: '2026-07-20',
+    current_oil: 1, evaluation: 'A', detail_json: { rawExtras: { '\u7d2f\u6ce8\u6c7d\u91cf': 66 } },
+  };
+  const db = {
+    all: async (sql: string) => {
+      if (sql.includes('injection_projects')) return [];
+      if (sql.includes('measure_tracking')) return [tracking];
+      return [];
+    },
+  };
+
+  const well = (await buildInjectionStatusMap(db, { today: '2026-07-26' })).wells[0];
+  assert.equal(well.actualSteam, 66);
 });

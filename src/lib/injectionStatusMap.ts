@@ -62,13 +62,17 @@ function number(value: unknown): number | null {
 }
 
 function datePart(value: unknown): string | null {
-  const result = text(value);
-  return result && /^\d{4}-\d{2}-\d{2}/.test(result) ? result.slice(0, 10) : null;
+  const match = text(value)?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? match[0] : null;
 }
 
 function daysSince(today: string, date: string | null): number | null {
-  if (!date) return null;
-  const elapsed = Date.parse(`${today}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`);
+  const currentDate = datePart(today);
+  if (!currentDate || !date) return null;
+  const elapsed = Date.parse(`${currentDate}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`);
   return Number.isFinite(elapsed) ? Math.max(0, Math.floor(elapsed / 86_400_000)) : null;
 }
 
@@ -87,17 +91,22 @@ function projectStatus(value: unknown): InjectionMapLifecycleStatus {
   return status && lifecycleStatuses.has(status) ? status : 'needsData';
 }
 
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function detail(row: TrackingRow | undefined): Record<string, unknown> {
   if (!row) return {};
-  if (row.detail_json && typeof row.detail_json === 'object') return row.detail_json as Record<string, unknown>;
-  if (typeof row.detail_json !== 'string') return {};
-  try {
-    const parsed = JSON.parse(row.detail_json);
-    if (!parsed || typeof parsed !== 'object') return {};
-    return { ...(parsed.rawExtras || {}), ...(parsed.currentRound || {}), ...parsed };
-  } catch {
-    return {};
+  let parsed: unknown = row.detail_json;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return {};
+    }
   }
+  const values = record(parsed);
+  return { ...record(values.rawExtras), ...record(values.currentRound), ...values };
 }
 
 function firstValue(row: TrackingRow | undefined, values: Record<string, unknown>, keys: string[]) {
@@ -117,7 +126,7 @@ function actualDates(row: TrackingRow | undefined, values: Record<string, unknow
 
 function actualSteam(row: TrackingRow | undefined, values: Record<string, unknown>) {
   return number(firstValue(row, values, [
-    'current_round_steam', 'current_steam', 'current_round_cumulative_steam', 'cumulative_steam',
+    'actual_steam', 'current_round_steam', 'current_steam', 'current_round_cumulative_steam', 'cumulative_steam',
     '\u7d2f\u6ce8\u6c7d\u91cf', '\u5b9e\u9645\u6ce8\u6c7d\u91cf',
   ]));
 }
@@ -178,17 +187,18 @@ export async function buildInjectionStatusMap(db: DatabaseLike, options: { today
     const evaluation = text(tracking?.evaluation);
     const cyclesForWell = cycleByWell.get(wellNo);
     const alertTypes: InjectionMapAlertType[] = [];
-    const trackingComplete = Boolean(text(tracking?.current_status) && trackingDate);
-    const needsData = !trackingComplete || (lifecycleStatus === 'producing' && currentOil == null);
+    const alertStatus = trackingStatus(tracking?.current_status);
+    const trackingComplete = Boolean(text(tracking?.current_status) && trackingDate && alertStatus !== 'needsData');
+    const needsData = !trackingComplete || (alertStatus === 'producing' && currentOil == null);
 
     if (needsData) addAlert(alertTypes, 'needsData');
-    else if (lifecycleStatus === 'producing') {
+    else if (alertStatus === 'producing') {
       if (!evaluation) addAlert(alertTypes, 'notEvaluated');
       else if (evaluation === 'D') addAlert(alertTypes, 'lowEfficiency');
     }
     const elapsedDays = daysSince(options.today, trackingDate);
-    if (!needsData && lifecycleStatus === 'soaking' && elapsedDays != null && elapsedDays > 30) addAlert(alertTypes, 'soakingOverdue');
-    if (!needsData && lifecycleStatus === 'pendingTransfer' && elapsedDays != null && elapsedDays > 7) addAlert(alertTypes, 'transferOverdue');
+    if (!needsData && alertStatus === 'soaking' && elapsedDays != null && elapsedDays > 30) addAlert(alertTypes, 'soakingOverdue');
+    if (!needsData && alertStatus === 'pendingTransfer' && elapsedDays != null && elapsedDays > 7) addAlert(alertTypes, 'transferOverdue');
 
     const trackingDetail = detail(tracking);
     const dates = actualDates(tracking, trackingDetail);
