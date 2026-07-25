@@ -61,8 +61,11 @@ export async function transitionInjectionProject(db: DatabaseLike, id: number, t
   return toProject(await db.get('SELECT * FROM injection_projects WHERE id = ?', [id]));
 }
 
-export async function listInjectionProjects(db: DatabaseLike): Promise<InjectionProject[]> {
-  return (await (db as any).all('SELECT * FROM injection_projects ORDER BY updated_at DESC, id DESC')).map(toProject);
+export async function listInjectionProjects(db: DatabaseLike, options: { includeSuperseded?: boolean } = {}): Promise<InjectionProject[]> {
+  const sql = options.includeSuperseded
+    ? 'SELECT * FROM injection_projects ORDER BY updated_at DESC, id DESC'
+    : "SELECT * FROM injection_projects WHERE schedule_status IS NULL OR schedule_status != 'superseded' ORDER BY updated_at DESC, id DESC";
+  return (await db.all(sql)).map(toProject);
 }
 
 export async function listProjectPendingItems(db: DatabaseLike, today: string) {

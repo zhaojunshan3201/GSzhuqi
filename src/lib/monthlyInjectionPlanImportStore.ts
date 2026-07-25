@@ -118,8 +118,8 @@ export async function confirmPlanImport(db: DatabaseLike, importId: number): Pro
       const scheduleStatus = row.schedule_status || 'scheduled';
       if (existing) {
         await db.run(
-          `UPDATE injection_projects SET unit = ?, boiler = ?, planned_steam = ?, planned_start_date = ?, planned_end_date = ?, gas_support = ?, schedule_status = ?, planned_transfer_date = ?, source_import_id = ?, updated_at = ? WHERE id = ?`,
-          [row.unit, row.boiler, row.planned_steam, row.planned_start_date, row.planned_end_date, row.gas_support, scheduleStatus, row.planned_end_date, importId, now, existing.id],
+          `UPDATE injection_projects SET block = ?, remark = ?, unit = ?, boiler = ?, planned_steam = ?, planned_start_date = ?, planned_end_date = ?, gas_support = ?, schedule_status = ?, planned_transfer_date = ?, source_import_id = ?, updated_at = ? WHERE id = ?`,
+          [row.unit || '', row.remark || '', row.unit, row.boiler, row.planned_steam, row.planned_start_date, row.planned_end_date, row.gas_support, scheduleStatus, row.planned_end_date, importId, now, existing.id],
         );
       } else {
         const projectNo = `ZQ-${Date.now()}-${row.id}`;
