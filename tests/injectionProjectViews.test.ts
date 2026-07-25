@@ -30,3 +30,31 @@ test('wires a single workflow project view from the active tab', () => {
   assert.match(source, /getInjectionProjectView\(activeTab\)/);
   assert.match(source, /<InjectionProjectManagement view=\{injectionProjectView\}/);
 });
+
+test('filters and summarizes plan-actual comparisons for the construction view only', async () => {
+  const { filterComparisonForView, summarizeComparisonForView } = await import('../src/lib/injectionProjectViews.ts');
+  const projects = [
+    { id: 1, lifecycleStatus: 'pending' },
+    { id: 2, lifecycleStatus: 'injecting' },
+    { id: 3, lifecycleStatus: 'soaking' },
+    { id: 4, lifecycleStatus: 'pendingTransfer' },
+    { id: 5, lifecycleStatus: 'producing' },
+  ];
+  const comparisons = [
+    { projectId: 1, comparisonStatus: 'on_schedule', actualStartDate: '2026-07-01', startVarianceDays: 0, endVarianceDays: 0, plannedBoiler: 'B-1', plannedSteam: 10, actualSteam: 9 },
+    { projectId: 2, comparisonStatus: 'delayed', actualStartDate: '2026-07-02', startVarianceDays: 3, endVarianceDays: 8, plannedBoiler: 'B-1', plannedSteam: 20, actualSteam: 18 },
+    { projectId: 3, comparisonStatus: 'early', actualStartDate: '2026-07-03', startVarianceDays: -3, endVarianceDays: -2, plannedBoiler: 'B-2', plannedSteam: 30, actualSteam: 28 },
+    { projectId: 4, comparisonStatus: 'not_started', actualStartDate: null, startVarianceDays: null, endVarianceDays: null, plannedBoiler: 'B-3', plannedSteam: 40, actualSteam: null },
+    { projectId: 5, comparisonStatus: 'suspected_other_cycle', actualStartDate: '2026-07-04', startVarianceDays: 80, endVarianceDays: 80, plannedBoiler: 'B-4', plannedSteam: 50, actualSteam: 45 },
+  ];
+
+  const constructionRows = filterComparisonForView(comparisons, filterProjectsForView(projects, 'construction'));
+  assert.deepEqual(constructionRows.map((row) => row.projectId), [1, 2]);
+
+  const result = summarizeComparisonForView(constructionRows);
+  assert.deepEqual(result.summary, { planned: 2, executed: 2, onSchedule: 1, early: 0, delayed: 1, notStarted: 0, suspectedOtherCycle: 0 });
+  assert.deepEqual(result.charts.startVarianceBuckets, [
+    { label: '\u63d0\u524d', count: 0 }, { label: '\u6309\u8ba1\u5212', count: 1 }, { label: '\u6ede\u540e', count: 1 }, { label: '\u4e25\u91cd\u6ede\u540e', count: 0 },
+  ]);
+  assert.deepEqual(result.charts.boilerSteamTotals, [{ boiler: 'B-1', plannedSteam: 30, actualSteam: 27 }]);
+});
