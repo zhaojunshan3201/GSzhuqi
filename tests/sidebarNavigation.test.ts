@@ -26,7 +26,7 @@ const expectedNavigation: Array<{
     key: 'analysis',
     label: '生产分析',
     tabs: ['well', 'block', 'comparison', 'productionForecast', 'externalTransferTracking'],
-    labels: ['单井', '区块', '对比', '产量预测', '外输'],
+    labels: ['单井分析', '区块分析', '对比分析', '产量预测', '外输跟踪'],
   },
   {
     key: 'monitoring',

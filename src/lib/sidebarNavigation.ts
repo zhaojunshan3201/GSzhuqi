@@ -78,11 +78,11 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     key: 'analysis',
     label: '生产分析',
     items: [
-      { tab: 'well', label: '单井', icon: 'Database' },
-      { tab: 'block', label: '区块', icon: 'Activity' },
-      { tab: 'comparison', label: '对比', icon: 'TrendingUp' },
+      { tab: 'well', label: '单井分析', icon: 'Database' },
+      { tab: 'block', label: '区块分析', icon: 'Activity' },
+      { tab: 'comparison', label: '对比分析', icon: 'TrendingUp' },
       { tab: 'productionForecast', label: '产量预测', icon: 'TrendingUp' },
-      { tab: 'externalTransferTracking', label: '外输', icon: 'TrendingUp' },
+      { tab: 'externalTransferTracking', label: '外输跟踪', icon: 'TrendingUp' },
     ],
   },
   {

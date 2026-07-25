@@ -6071,6 +6071,9 @@ export default function App() {
           {activeTab === 'comparison' && '对比分析'}
           {activeTab === 'measureWellSelection' && '措施选井'}
           {activeTab === 'injectionProjectManagement' && '注汽项目管理'}
+          {activeTab === 'injectionPlan' && '方案与计划'}
+          {activeTab === 'injectionConstruction' && '施工监控'}
+          {activeTab === 'injectionSoakTransfer' && '焖井转抽'}
           {activeTab === 'measures' && '措施跟踪'}
           {activeTab === 'measureAnalysis' && '措施分析'}
           {activeTab === 'wellTemperature' && '井温监控'}
@@ -6104,7 +6107,7 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
-              {activeTab === 'injectionProjectManagement' && <InjectionProjectManagement />}
+              {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 if (shouldApplyCockpitMeasureFilters(tab)) {
                   setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
