@@ -1,5 +1,6 @@
 import type { MonthlyInjectionPlanResult, MonthlyInjectionPlanRow } from './monthlyInjectionPlanParser.ts';
 import type { DatabaseLike } from './injectionProjectStore.ts';
+import { decodeUploadedFileName } from './uploadFileName.ts';
 
 export type ImportStatus = 'preview' | 'confirmed' | 'superseded';
 export type ImportRowClass = 'valid' | 'pending' | 'invalid';
@@ -41,7 +42,7 @@ function queuePlanImportConfirmation<T>(db: DatabaseLike, operation: () => Promi
 
 function toImport(row: any): PlanImport {
   return {
-    id: row.id, planMonth: row.plan_month, fileName: row.file_name, sheetName: row.sheet_name,
+    id: row.id, planMonth: row.plan_month, fileName: decodeUploadedFileName(row.file_name), sheetName: row.sheet_name,
     status: row.status, validCount: row.valid_count, pendingCount: row.pending_count,
     invalidCount: row.invalid_count, totalPlannedSteam: row.total_planned_steam,
     createdAt: row.created_at, confirmedAt: row.confirmed_at,
