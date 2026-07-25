@@ -32,22 +32,45 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
     ) WHERE row_number = 1 ORDER BY jh
   `);
   const statusDistribution = emptyDistribution();
+  const alerts: InjectionProductionCockpit['alerts'] = [];
+  let dailyOil = 0;
+  let hasDailyOil = false;
+  let cumulativeOilGain = 0;
+  let hasCumulativeOilGain = false;
   const mapWells = rows.map((row) => {
     const status = getStatus(row.current_status);
     statusDistribution[status] += 1;
+    const needsData = !row.current_status || !row.current_round_transfer_time ||
+      (status === 'producing' && (row.current_oil == null || !row.evaluation));
+    if (needsData) {
+      alerts.push({ id: `needs-data:${row.jh}`, type: 'needsData', wellNo: row.jh, block: row.block || '', message: '注汽跟踪数据待补全', target: 'measures' });
+    } else if (status === 'producing') {
+      if (row.evaluation === 'D') alerts.push({ id: `low-efficiency:${row.jh}`, type: 'lowEfficiency', wellNo: row.jh, block: row.block || '', message: '注汽效果评价为 D 类', target: 'measures' });
+      if (row.current_oil != null) { dailyOil += Number(row.current_oil); hasDailyOil = true; }
+      if (row.cumulative_oil_gain != null) { cumulativeOilGain += Number(row.cumulative_oil_gain); hasCumulativeOilGain = true; }
+    }
+    const days = Math.floor((Date.parse(`${options.now}T00:00:00Z`) - Date.parse(`${row.current_round_transfer_time}T00:00:00Z`)) / 86400000);
+    if (!needsData && status === 'soaking' && days > 30) alerts.push({ id: `soaking-overdue:${row.jh}`, type: 'soakingOverdue', wellNo: row.jh, block: row.block || '', message: '焖井超过 30 天', target: 'measures' });
+    if (!needsData && status === 'pendingTransfer' && days > 7) alerts.push({ id: `transfer-overdue:${row.jh}`, type: 'transferOverdue', wellNo: row.jh, block: row.block || '', message: '待转抽超过 7 天', target: 'measures' });
     return { wellNo: row.jh, block: row.block || '', status, evaluation: row.evaluation || null };
   });
-  const productionStatus = options.syncStatus?.lastSyncStatus === 'error' ? 'failed' : 'missing';
+  const steamRows = await db.all(`SELECT SUM(actual_steam) AS steam, SUM(cycle_oil) AS oil FROM measure_well_cycles`);
+  const steam = Number(steamRows[0]?.steam || 0);
+  const cycleOil = Number(steamRows[0]?.oil || 0);
+  const productionDate = (await db.all(`SELECT MAX(rq) AS updated_at FROM production`))[0]?.updated_at || null;
+  const trackingDate = (await db.all(`SELECT MAX(current_round_transfer_time) AS updated_at FROM measure_tracking`))[0]?.updated_at || null;
+  const selectionDate = (await db.all(`SELECT MAX(imported_at) AS updated_at FROM measure_well_imports`))[0]?.updated_at || null;
+  const productionStatus = options.syncStatus?.lastSyncStatus === 'error' ? 'failed' : productionDate ? 'normal' : 'missing';
   return {
     generatedAt: options.now,
     dataFreshness: [
-      { source: 'production', status: productionStatus, updatedAt: null, message: productionStatus === 'failed' ? '生产数据同步失败' : '生产数据待导入' },
-      { source: 'injectionTracking', status: rows.length ? 'normal' : 'missing', updatedAt: rows[0]?.current_round_transfer_time || null, message: rows.length ? '注汽跟踪数据可用' : '注汽跟踪数据待导入' },
-      { source: 'selection', status: 'missing', updatedAt: null, message: '选井数据待导入' },
+      { source: 'production', status: productionStatus, updatedAt: productionDate, message: productionStatus === 'failed' ? '生产数据同步失败' : '生产数据待导入' },
+      { source: 'injectionTracking', status: trackingDate ? 'normal' : 'missing', updatedAt: trackingDate, message: trackingDate ? '注汽跟踪数据可用' : '注汽跟踪数据待导入' },
+      { source: 'selection', status: selectionDate ? 'normal' : 'missing', updatedAt: selectionDate, message: selectionDate ? '选井数据可用' : '选井数据待导入' },
     ],
-    metrics: { producingWells: statusDistribution.producing, injectingWells: statusDistribution.injecting, soakingWells: statusDistribution.soaking, pendingTransferWells: statusDistribution.pendingTransfer, dailyOil: null, cumulativeOilGain: null, oilSteamRatio: null },
+    metrics: { producingWells: statusDistribution.producing, injectingWells: statusDistribution.injecting, soakingWells: statusDistribution.soaking, pendingTransferWells: statusDistribution.pendingTransfer, dailyOil: hasDailyOil ? dailyOil : null, cumulativeOilGain: hasCumulativeOilGain ? cumulativeOilGain : null, oilSteamRatio: steam > 0 && cycleOil > 0 ? cycleOil / steam : null },
     statusDistribution,
-    alerts: [],
+    alerts,
     mapWells,
   };
 }
