@@ -31,7 +31,7 @@ test('lifecycle charts keep the approved status order, labels, and colors', () =
   assert.deepEqual(blocks.series.map((item: any) => [item.name, item.stack, item.itemStyle.color]), [
     ['转抽生产', '井数', '#10b981'], ['正注', '井数', '#3b82f6'], ['焖井', '井数', '#f59e0b'], ['待转抽', '井数', '#8b5cf6'], ['数据待补全', '井数', '#94a3b8'],
   ]);
-  assert.match(blocks.tooltip.formatter, /口/);
+  assert.equal(typeof blocks.tooltip.formatter, 'function');
 });
 
 test('block performance keeps null values and uses oil/ratio axes with explicit units', () => {
@@ -43,9 +43,7 @@ test('block performance keeps null values and uses oil/ratio axes with explicit 
   assert.deepEqual(option.series.map((item: any) => [item.name, item.type, item.yAxisIndex]), [
     ['日产油', 'bar', 0], ['累计增油', 'bar', 0], ['油汽比', 'line', 1],
   ]);
-  assert.match(option.tooltip.formatter, /吨\/日/);
-  assert.match(option.tooltip.formatter, /吨/);
-  assert.match(option.tooltip.formatter, /油汽比/);
+  assert.equal(typeof option.tooltip.formatter, 'function');
 });
 
 test('alert distribution sorts descending, preserves zero, and breaks ties by fixed type order', () => {
@@ -67,3 +65,36 @@ test('hasChartValues accepts only finite positive numeric values', () => {
   assert.equal(hasChartValues([{ value: 3 }]), false);
 });
 
+
+ test('block status tooltip lists every stacked lifecycle series with well units', () => {
+  const option = asAny(buildBlockStatusOption([{ block: 'A', producing: 5, injecting: 4, soaking: 3, pendingTransfer: 2, needsData: 1 }]));
+  const text = option.tooltip.formatter([
+    { axisValueLabel: 'A', marker: '●', seriesName: '转抽生产', value: 5 },
+    { axisValueLabel: 'A', marker: '●', seriesName: '正注', value: 4 },
+    { axisValueLabel: 'A', marker: '●', seriesName: '焖井', value: 3 },
+    { axisValueLabel: 'A', marker: '●', seriesName: '待转抽', value: 2 },
+    { axisValueLabel: 'A', marker: '●', seriesName: '数据待补全', value: 1 },
+  ]);
+  assert.match(text, /^A<br\/>/);
+  for (const entry of ['●转抽生产: 5 口', '●正注: 4 口', '●焖井: 3 口', '●待转抽: 2 口', '●数据待补全: 1 口']) {
+    assert.ok(text.includes(entry), entry);
+  }
+});
+
+test('block performance tooltip formats missing and valid metrics without dangling units', () => {
+  const option = asAny(buildBlockPerformanceOption([]));
+  const missing = option.tooltip.formatter([
+    { axisValueLabel: 'A', marker: '●', seriesName: '日产油', value: null },
+    { axisValueLabel: 'A', marker: '●', seriesName: '累计增油', value: undefined },
+    { axisValueLabel: 'A', marker: '●', seriesName: '油汽比', value: Number.NaN },
+  ]);
+  assert.equal(missing, 'A<br/>●日产油: --<br/>●累计增油: --<br/>●油汽比: --');
+  assert.doesNotMatch(missing, /--\s*(吨|吨\/日)/);
+
+  const valid = option.tooltip.formatter([
+    { axisValueLabel: 'B', marker: '●', seriesName: '日产油', value: 3 },
+    { axisValueLabel: 'B', marker: '●', seriesName: '累计增油', value: 12 },
+    { axisValueLabel: 'B', marker: '●', seriesName: '油汽比', value: 0.42 },
+  ]);
+  assert.equal(valid, 'B<br/>●日产油: 3 吨/日<br/>●累计增油: 12 吨<br/>●油汽比: 0.42');
+});

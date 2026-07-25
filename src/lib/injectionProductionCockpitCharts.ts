@@ -24,6 +24,26 @@ const alertLabels: Record<CockpitAlertType, string> = {
   transferOverdue: '待转抽逾期',
 };
 
+type AxisTooltipParam = {
+  axisValueLabel?: unknown;
+  marker?: unknown;
+  name?: unknown;
+  seriesName?: unknown;
+  value?: unknown;
+};
+
+function tooltipParams(params: unknown): AxisTooltipParam[] {
+  return (Array.isArray(params) ? params : [params]) as AxisTooltipParam[];
+}
+
+function tooltipHeader(params: AxisTooltipParam[]): string {
+  return String(params[0]?.axisValueLabel ?? params[0]?.name ?? '');
+}
+
+function tooltipMarker(param: AxisTooltipParam): string {
+  return typeof param.marker === 'string' ? param.marker : '';
+}
+
 export function hasChartValues(values: readonly unknown[]): boolean {
   return values.some((value) => typeof value === 'number' && Number.isFinite(value) && value > 0);
 }
@@ -48,7 +68,17 @@ export function buildStatusDistributionOption(
 
 export function buildBlockStatusOption(rows: BlockStatusSummary[]): EChartsOption {
   return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}<br/>{a}: {c} 口' },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (rawParams) => {
+        const params = tooltipParams(rawParams);
+        return [
+          tooltipHeader(params),
+          ...params.map((param) => `${tooltipMarker(param)}${param.seriesName ?? ''}: ${String(param.value)} 口`),
+        ].join('<br/>');
+      },
+    },
     legend: { top: 0 },
     grid: { left: 42, right: 18, top: 42, bottom: 36, containLabel: true },
     xAxis: { type: 'category', data: rows.map((row) => row.block) },
@@ -66,10 +96,22 @@ export function buildBlockStatusOption(rows: BlockStatusSummary[]): EChartsOptio
 export function buildBlockPerformanceOption(
   rows: InjectionProductionCockpit['blockPerformanceSummary'],
 ): EChartsOption {
+  const units: Record<string, string> = { 日产油: ' 吨/日', 累计增油: ' 吨', 油汽比: '' };
   return {
     tooltip: {
       trigger: 'axis',
-      formatter: '{b}<br/>日产油: {c0} 吨/日<br/>累计增油: {c1} 吨<br/>油汽比: {c2}',
+      formatter: (rawParams) => {
+        const params = tooltipParams(rawParams);
+        return [
+          tooltipHeader(params),
+          ...params.map((param) => {
+            const value = param.value;
+            const valid = typeof value === 'number' && Number.isFinite(value);
+            const seriesName = String(param.seriesName ?? '');
+            return `${tooltipMarker(param)}${seriesName}: ${valid ? `${value}${units[seriesName] ?? ''}` : '--'}`;
+          }),
+        ].join('<br/>');
+      },
     },
     legend: { top: 0 },
     grid: { left: 48, right: 54, top: 42, bottom: 36, containLabel: true },
@@ -100,4 +142,6 @@ export function buildAlertDistributionOption(
     series: [{ type: 'bar', data: sorted.map((item) => item.count), itemStyle: { color: '#ef4444' } }],
   };
 }
+
+
 
