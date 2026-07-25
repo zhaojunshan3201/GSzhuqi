@@ -37,6 +37,10 @@ export function formatCockpitMetric(
   }).format(value);
 }
 
+export function shouldCloseMobileDrawer(isMobileViewport: boolean, mobileSidebarOpen: boolean): boolean {
+  return isMobileViewport && mobileSidebarOpen;
+}
+
 export function getCockpitAlertDrilldown(
   params: unknown,
   alerts: readonly Pick<InjectionProductionCockpit['alerts'][number], 'type' | 'wellNo'>[],

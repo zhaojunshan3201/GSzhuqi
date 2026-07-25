@@ -38,7 +38,7 @@ import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
-import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
+import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -2180,7 +2180,9 @@ export default function App() {
   };
   const setActiveTab = (tab: SidebarTab) => {
     _setActiveTab(tab);
-    closeMobileSidebar({ restoreFocus: false });
+    if (shouldCloseMobileDrawer(isMobileViewport, mobileSidebarOpen)) {
+      closeMobileSidebar({ restoreFocus: false });
+    }
   };
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');

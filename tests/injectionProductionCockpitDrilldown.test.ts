@@ -8,6 +8,7 @@ import {
   formatCockpitMetric,
   getCockpitAlertDrilldown,
   getCockpitBlockDrilldown,
+  shouldCloseMobileDrawer,
 } from '../src/lib/injectionProductionCockpitDrilldown';
 
 test('maps valid ECharts block clicks and ignores invalid params', () => {
@@ -90,7 +91,7 @@ test('App sidebar is an off-canvas drawer below md and navigation closes it', ()
   assert.match(source, /aria-controls="app-sidebar"/);
   assert.match(source, /id="app-sidebar"/);
   assert.match(source, /inert=\{isMobileViewport && !mobileSidebarOpen/);
-  assert.match(source, /_setActiveTab\(tab\);\s*closeMobileSidebar\(\{ restoreFocus: false \}\)/);
+  assert.match(source, /_setActiveTab\(tab\);\s*if \(shouldCloseMobileDrawer\(isMobileViewport, mobileSidebarOpen\)\)[\s\S]*?closeMobileSidebar\(\{ restoreFocus: false \}\)/);
   assert.match(source, /event\.key === 'Escape'/);
   assert.match(source, /id="app-main"/);
   assert.match(source, /inert=\{isMobileViewport && mobileSidebarOpen/);
@@ -98,4 +99,10 @@ test('App sidebar is an off-canvas drawer below md and navigation closes it', ()
   assert.match(source, /onClick=\{\(\) => closeMobileSidebar\(\)\}/);
   assert.match(source, /closeMobileSidebar\(\{ restoreFocus: false \}\)/);
   assert.match(source, /requestAnimationFrame\([\s\S]*?appMainRef\.current\?\.focus\(\)/);
+});
+
+test('moves focus only when navigation closes an open mobile drawer', () => {
+  assert.equal(shouldCloseMobileDrawer(true, true), true);
+  assert.equal(shouldCloseMobileDrawer(true, false), false);
+  assert.equal(shouldCloseMobileDrawer(false, true), false);
 });
