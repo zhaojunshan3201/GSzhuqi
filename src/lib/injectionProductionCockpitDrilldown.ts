@@ -23,8 +23,9 @@ export function getCockpitBlockDrilldown(params: unknown): Pick<CockpitMeasureFi
   const dataName = typeof event.data === 'object' && event.data !== null && 'name' in event.data
     ? (event.data as { name?: unknown }).name
     : null;
-  const name = event.name || dataName || event.axisValue;
-  return typeof name === 'string' && name.trim() ? { block: name } : null;
+  const name = [event.name, dataName, event.axisValue]
+    .find((candidate) => typeof candidate === 'string' && candidate.trim());
+  return typeof name === 'string' ? { block: name.trim() } : null;
 }
 
 export function formatCockpitMetric(

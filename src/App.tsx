@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { 
   LayoutDashboard, 
@@ -2165,11 +2165,34 @@ export default function App() {
   const [showDatacoreLogin, setShowDatacoreLogin] = useState(false);
   const [showAccessLogin, setShowAccessLogin] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [activeTab, setActiveTab] = useState<SidebarTab>('dashboard');
+  const [activeTab, _setActiveTab] = useState<SidebarTab>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  useEffect(() => {
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  const mobileSidebarButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileSidebarRef = useRef<HTMLElement>(null);
+  const setActiveTab = (tab: SidebarTab) => {
+    _setActiveTab(tab);
     setMobileSidebarOpen(false);
-  }, [activeTab]);
+  };
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const updateViewport = () => setIsMobileViewport(media.matches);
+    updateViewport();
+    media.addEventListener('change', updateViewport);
+    return () => media.removeEventListener('change', updateViewport);
+  }, []);
+  useEffect(() => {
+    if (!isMobileViewport || !mobileSidebarOpen) return;
+    mobileSidebarRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileSidebarOpen(false);
+        mobileSidebarButtonRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isMobileViewport, mobileSidebarOpen]);
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<SidebarGroupKey | null>(getSidebarGroupKey('dashboard') ?? 'overview');
   const [dailyCompare, setDailyCompare] = useState<any>(null);
 
@@ -5938,7 +5961,13 @@ export default function App() {
     >
       {/* Sidebar */}
       {mobileSidebarOpen && <button type="button" aria-label="关闭导航" className="fixed inset-0 z-10 bg-slate-950/40 md:hidden" onClick={() => setMobileSidebarOpen(false)} />}
-      <aside className={cn('app-sidebar fixed inset-y-0 left-0 transition-transform duration-200 md:static md:translate-x-0', mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full')}>
+      <aside
+        id="app-sidebar"
+        ref={mobileSidebarRef}
+        inert={isMobileViewport && !mobileSidebarOpen ? true : undefined}
+        aria-hidden={isMobileViewport && !mobileSidebarOpen ? true : undefined}
+        className={cn('app-sidebar fixed inset-y-0 left-0 transition-transform duration-200 md:static md:translate-x-0', mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full')}
+      >
         <div className="app-sidebar-brand flex items-center gap-3 px-5 py-5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white shadow-sm">
             <Droplets size={19} />
@@ -6011,7 +6040,15 @@ export default function App() {
         {/* Header */}
         <header className="app-header">
           <div className="flex items-center gap-3">
-          <button type="button" aria-label="切换导航" className="rounded-md p-1 text-gray-500 hover:bg-slate-100 md:hidden" onClick={() => setMobileSidebarOpen((open) => !open)}>
+          <button
+            ref={mobileSidebarButtonRef}
+            type="button"
+            aria-label={mobileSidebarOpen ? '关闭导航菜单' : '打开导航菜单'}
+            aria-expanded={mobileSidebarOpen}
+            aria-controls="app-sidebar"
+            className="rounded-md p-1 text-gray-500 hover:bg-slate-100 md:hidden"
+            onClick={() => setMobileSidebarOpen((open) => !open)}
+          >
             <Menu size={20} />
           </button>
           <h2 className="text-gray-700 font-bold text-lg">

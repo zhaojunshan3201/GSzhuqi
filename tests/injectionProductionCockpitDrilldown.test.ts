@@ -18,6 +18,11 @@ test('maps valid ECharts block clicks and ignores invalid params', () => {
     data: { name: '二区', value: 12 },
   }), { block: '二区' });
   assert.deepEqual(getCockpitBlockDrilldown({ axisValue: '三区' }), { block: '三区' });
+  assert.deepEqual(getCockpitBlockDrilldown({
+    name: '   ',
+    data: { name: '  四区  ' },
+    axisValue: '五区',
+  }), { block: '四区' });
   assert.equal(getCockpitBlockDrilldown({ name: '' }), null);
   assert.equal(getCockpitBlockDrilldown(null), null);
 });
@@ -81,4 +86,10 @@ test('App sidebar is an off-canvas drawer below md and navigation closes it', ()
   assert.match(source, /md:static md:translate-x-0/);
   assert.match(source, /setMobileSidebarOpen\(false\)/);
   assert.match(source, /setMobileSidebarOpen\(\(open\) => !open\)/);
+  assert.match(source, /aria-expanded=\{mobileSidebarOpen\}/);
+  assert.match(source, /aria-controls="app-sidebar"/);
+  assert.match(source, /id="app-sidebar"/);
+  assert.match(source, /inert=\{isMobileViewport && !mobileSidebarOpen/);
+  assert.match(source, /_setActiveTab\(tab\);\s*setMobileSidebarOpen\(false\)/);
+  assert.match(source, /event\.key === 'Escape'/);
 });
