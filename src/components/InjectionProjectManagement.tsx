@@ -1,5 +1,4 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
 
 type Project = {
   id: number; projectNo: string; wellNo: string; block: string; processType: string; plannedTransferDate: string; owner: string;
@@ -8,49 +7,13 @@ type Project = {
   planStatus: string; lifecycleStatus: string;
 };
 type ImportBatch = { id: number; planMonth: string; fileName: string; sheetName: string | null; status: string; validCount: number; pendingCount: number; invalidCount: number; totalPlannedSteam: number; createdAt: string; confirmedAt: string | null; previousComparison?: { added: number; modified: number; removed: number } | null };
-type PreviewRow = { unit: string; boiler: string; wellNo: string; plannedSteam: number | null; gasSupport: string; startDate: string | null; endDate: string | null; planStatus: string; remark: string; rowClass: '有效' | '待定' | '异常' };
+type PreviewRow = { unit: string | null; boiler: string | null; wellNo: string | null; plannedSteam: number | null; gasSupport: string | null; startDate: string | null; endDate: string | null; planStatus: string | null; remark: string | null; };
 
 const transitions: Record<string, string | undefined> = { pending: 'injecting', injecting: 'soaking', soaking: 'pendingTransfer', pendingTransfer: 'producing', producing: 'closed' };
 const planStatusText: Record<string, string> = { draft: '草拟', issued: '已下达', cancelled: '已取消', closed: '已关闭' };
 const lifecycleText: Record<string, string> = { pending: '待注汽', injecting: '注汽中', soaking: '焖井中', pendingTransfer: '待转抽', producing: '生产中', closed: '已关闭' };
 const scheduleText: Record<string, string> = { scheduled: '已排期', stopped: '停注', superseded: '已替换', invalid: '异常' };
 const importText: Record<string, string> = { preview: '待确认', confirmed: '已确认', superseded: '已替换' };
-const pendingStatuses = ['停注检修', '待定', '停注', '先搬家', '接大一站'];
-
-function cellText(value: unknown) { return value == null ? '' : String(value).trim(); }
-function parseClientPreview(file: File): Promise<PreviewRow[]> {
-  return file.arrayBuffer().then((buffer) => {
-    const workbook = XLSX.read(buffer, { type: 'array' });
-    const sheetName = workbook.SheetNames.find((name) => XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, defval: '' }).some((row) => row.some((value) => cellText(value).includes('注汽运行计划表'))));
-    if (!sheetName) return [];
-    const values = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, defval: '' });
-    const titleIndex = values.findIndex((row) => row.some((value) => cellText(value).includes('注汽运行计划表')));
-    const year = Number((values[titleIndex] || []).map(cellText).join(' ').match(/(20\d{2})年/)?.[1] || new Date().getFullYear());
-    let unit = ''; let boiler = ''; const rows: PreviewRow[] = [];
-    for (let row = Math.max(titleIndex + 1, 0); row < values.length; row += 2) {
-      const wells = values[row] || []; const schedules = values[row + 1] || [];
-      if (wells.some((value) => cellText(value).includes('单位')) && wells.some((value) => /注汽(站|炉|锅炉)|正注井/.test(cellText(value)))) continue;
-      if (cellText(wells[0])) unit = cellText(wells[0]);
-      if (cellText(wells[1])) boiler = cellText(wells[1]);
-      for (let col = 2; col < wells.length; col += 1) {
-        const rawWell = cellText(wells[col]); const rawSchedule = cellText(schedules[col]);
-        if (!rawWell) continue;
-        const pending = pendingStatuses.find((status) => rawWell.includes(status));
-        if (pending) { rows.push({ unit, boiler, wellNo: rawWell, plannedSteam: null, gasSupport: '', startDate: null, endDate: null, planStatus: pending, remark: rawSchedule, rowClass: '待定' }); continue; }
-        const matched = rawWell.match(/^\s*(.+?)\s*[（(]\s*(.*?)\s*[）)]\s*$/);
-        const parts = matched?.[2].split('+').map((part) => part.trim()).filter(Boolean) || [];
-        const steam = Number(parts.at(-1));
-        const dates = [...rawSchedule.matchAll(/(\d{1,2})\s*(?:\.|月)\s*(\d{1,2})(?:日)?/g)];
-        const date = (index: number) => dates[index] ? `${year}-${dates[index][1].padStart(2, '0')}-${dates[index][2].padStart(2, '0')}` : null;
-        const gas = parts.slice(0, -1).map((part) => part === 'N' ? 'N2' : part).join('+');
-        const invalid = !matched || !Number.isFinite(steam) || steam <= 0 || dates.length < 2;
-        rows.push({ unit, boiler, wellNo: matched?.[1].trim() || rawWell, plannedSteam: Number.isFinite(steam) && steam > 0 ? steam : null, gasSupport: gas, startDate: invalid ? null : date(0), endDate: invalid ? null : date(1), planStatus: rawSchedule.includes('停注') ? '停注' : invalid ? '异常' : '已排期', remark: invalid ? (matched ? '无法解析日期' : '无法解析井表达式') : rawSchedule, rowClass: rawSchedule.includes('停注') ? '待定' : invalid ? '异常' : '有效' });
-      }
-    }
-    return rows;
-  });
-}
-
 export function InjectionProjectManagement() {
   const [projects, setProjects] = useState<Project[]>([]); const [imports, setImports] = useState<ImportBatch[]>([]); const [error, setError] = useState('');
   const [form, setForm] = useState({ wellNo: '', block: '', processType: '', plannedTransferDate: '', owner: '' });
@@ -62,7 +25,7 @@ export function InjectionProjectManagement() {
   useEffect(() => { void load(); }, []);
   const create = async (event: React.FormEvent) => { event.preventDefault(); const response = await fetch('/api/injection-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }); const payload = await response.json(); if (!payload.success) { setError(payload.message); return; } setForm({ wellNo: '', block: '', processType: '', plannedTransferDate: '', owner: '' }); void load(); };
   const action = async (project: Project, endpoint: string, body: Record<string, string>) => { const response = await fetch(`/api/injection-projects/${project.id}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const payload = await response.json(); if (!payload.success) { setError(payload.message); return; } void load(); };
-  const upload = async (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; setError(''); setUploading(true); try { const rows = await parseClientPreview(file); const data = new FormData(); data.append('file', file); const response = await fetch('/api/injection-project-imports/preview', { method: 'POST', body: data }); const payload = await response.json(); if (!payload.success) throw new Error(payload.message); setPreview(payload.data); setPreviewRows(rows); void load(); } catch (cause: any) { setError(cause.message || '计划表解析失败'); } finally { setUploading(false); event.target.value = ''; } };
+  const upload = async (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; setError(''); setUploading(true); try { const data = new FormData(); data.append('file', file); const response = await fetch('/api/injection-project-imports/preview', { method: 'POST', body: data }); const payload = await response.json(); if (!payload.success) throw new Error(payload.message); setPreview(payload.data); setPreviewRows([...(payload.data.rows || []), ...(payload.data.pendingRows || []), ...(payload.data.invalidRows || [])]); void load(); } catch (cause: any) { setError(cause.message || '???????'); } finally { setUploading(false); event.target.value = ''; } };
   const confirmPreview = async () => { if (!preview || !window.confirm(`确认以 ${preview.fileName} 覆盖 ${preview.planMonth} 的月度计划？`)) return; const response = await fetch(`/api/injection-project-imports/${preview.id}/confirm`, { method: 'POST' }); const payload = await response.json(); if (!payload.success) { setError(payload.message); return; } setPreview({ ...preview, ...payload.data }); void load(); };
   const filteredProjects = useMemo(() => projects.filter((project) => (!filters.unit || project.unit === filters.unit) && (!filters.boiler || project.boiler === filters.boiler) && (!filters.planStatus || project.planStatus === filters.planStatus) && (!filters.lifecycleStatus || project.lifecycleStatus === filters.lifecycleStatus)), [projects, filters]);
   const timelineGroups = useMemo(() => Object.entries(filteredProjects.filter((project) => project.boiler && project.plannedStartDate && project.plannedEndDate).reduce<Record<string, Project[]>>((result, project) => { (result[project.boiler!] ||= []).push(project); return result; }, {})), [filteredProjects]);
@@ -71,7 +34,7 @@ export function InjectionProjectManagement() {
 
   return <div className="page-stack">
     <section className="app-card p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold">月度注汽计划导入</h3><p className="mt-1 text-sm text-slate-500">上传主计划表，解析预览后确认覆盖同月计划。</p></div><input ref={inputRef} className="hidden" type="file" accept=".xlsx,.xls" onChange={upload} /><button className="action-button action-primary" disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? '解析中…' : '选择 .xlsx / .xls 文件'}</button></div>
-      {preview && <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold">{preview.planMonth} · {preview.fileName}</p><p className="mt-1 text-sm text-slate-600">工作表：{preview.sheetName || '--'}　计划注汽总量：{preview.totalPlannedSteam}</p></div><button className="action-button action-primary" disabled={preview.status !== 'preview'} onClick={confirmPreview}>{preview.status === 'preview' ? '确认覆盖并生成项目' : importText[preview.status] || preview.status}</button></div><div className="mt-3 grid grid-cols-4 gap-2 text-center text-sm"><div className="rounded bg-white p-2">有效<br /><b>{preview.validCount}</b></div><div className="rounded bg-white p-2">待定<br /><b>{preview.pendingCount}</b></div><div className="rounded bg-white p-2">异常<br /><b>{preview.invalidCount}</b></div><div className="rounded bg-white p-2">计划注汽总量<br /><b>{preview.totalPlannedSteam}</b></div></div>
+      {preview && <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold">{preview.planMonth} · {preview.fileName}</p><p className="mt-1 text-sm text-slate-600">工作表：{preview.sheetName || '--'}　计划注汽总量：{preview.totalPlannedSteam}</p></div><button className="action-button action-primary" disabled={preview.status !== 'preview'} onClick={confirmPreview}>{preview.status === 'preview' ? '确认覆盖并生成项目' : importText[preview.status] || preview.status}</button></div><div className="mt-3 grid grid-cols-5 gap-2 text-center text-sm"><div className="rounded bg-white p-2">有效<br /><b>{preview.validCount}</b></div><div className="rounded bg-white p-2">待定<br /><b>{preview.pendingCount}</b></div><div className="rounded bg-white p-2">异常<br /><b>{preview.invalidCount}</b></div><div className="rounded bg-white p-2">计划注汽总量<br /><b>{preview.totalPlannedSteam}</b></div></div>
         {preview.previousComparison && <p className="mt-3 rounded bg-white px-3 py-2 text-sm text-slate-700">与同月上一确认版本对比：新增 {preview.previousComparison.added} 口，修改 {preview.previousComparison.modified} 口，移除 {preview.previousComparison.removed} 口。</p>}
         <div className="mt-3 max-h-64 overflow-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-white text-xs text-slate-500"><tr>{['单位', '锅炉', '井', '开/停计划', '量', '气体', '状态', '备注'].map((name) => <th key={name} className="px-2 py-2">{name}</th>)}</tr></thead><tbody className="divide-y divide-violet-100">{previewRows.map((row, index) => <tr key={`${row.wellNo}-${index}`}><td className="px-2 py-2">{row.unit || '--'}</td><td className="px-2 py-2">{row.boiler || '--'}</td><td className="px-2 py-2">{row.wellNo}</td><td className="px-2 py-2">{row.startDate && row.endDate ? `${row.startDate} 至 ${row.endDate}` : '无日期'}</td><td className="px-2 py-2">{row.plannedSteam ?? '--'}</td><td className="px-2 py-2">{row.gasSupport || '--'}</td><td className="px-2 py-2">{row.planStatus}</td><td className="px-2 py-2">{row.remark || '--'}</td></tr>)}{previewRows.length === 0 && <tr><td colSpan={8} className="px-2 py-4 text-slate-500">本地未读取到明细；服务端仍已完成导入预览。</td></tr>}</tbody></table></div></div>}
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}</section>

@@ -18,6 +18,9 @@ export type PlanImport = {
   createdAt: string;
   confirmedAt: string | null;
   previousComparison?: PlanImportComparison | null;
+  rows?: MonthlyInjectionPlanRow[];
+  pendingRows?: MonthlyInjectionPlanRow[];
+  invalidRows?: MonthlyInjectionPlanRow[];
 };
 
 export type PlanImportComparison = {
@@ -43,6 +46,17 @@ function toImport(row: any): PlanImport {
     invalidCount: row.invalid_count, totalPlannedSteam: row.total_planned_steam,
     createdAt: row.created_at, confirmedAt: row.confirmed_at,
   };
+}
+
+function storedRows(rows: any[]): { rows: MonthlyInjectionPlanRow[]; pendingRows: MonthlyInjectionPlanRow[]; invalidRows: MonthlyInjectionPlanRow[] } {
+  const result = { rows: [] as MonthlyInjectionPlanRow[], pendingRows: [] as MonthlyInjectionPlanRow[], invalidRows: [] as MonthlyInjectionPlanRow[] };
+  for (const row of rows) {
+    const snapshot = JSON.parse(row.snapshot_json) as MonthlyInjectionPlanRow;
+    if (row.row_class === 'valid') result.rows.push(snapshot);
+    else if (row.row_class === 'pending') result.pendingRows.push(snapshot);
+    else result.invalidRows.push(snapshot);
+  }
+  return result;
 }
 
 function rowValues(row: MonthlyInjectionPlanRow, rowClass: ImportRowClass): unknown[] {
@@ -138,7 +152,8 @@ export async function createPlanPreview(db: DatabaseLike, input: PlanImportPrevi
       );
     }
   }
-  return { ...toImport(await db.get('SELECT * FROM injection_plan_imports WHERE id = ?', [importId])), previousComparison: comparison };
+  const persistedRows = await db.all('SELECT row_class, snapshot_json FROM injection_plan_import_rows WHERE import_id = ? ORDER BY id', [importId]);
+  return { ...toImport(await db.get('SELECT * FROM injection_plan_imports WHERE id = ?', [importId])), previousComparison: comparison, ...storedRows(persistedRows) };
 }
 
 export async function confirmPlanImport(db: DatabaseLike, importId: number): Promise<PlanImport> {
@@ -171,11 +186,12 @@ export async function confirmPlanImport(db: DatabaseLike, importId: number): Pro
         );
       } else {
         const projectNo = `ZQ-${Date.now()}-${row.id}`;
-        await db.run(
+        const created = await db.run(
           `INSERT INTO injection_projects (project_no, well_no, block, process_type, planned_steam, planned_transfer_date, owner, remark, plan_status, lifecycle_status, unit, boiler, planned_start_date, planned_end_date, gas_support, schedule_status, source_import_id, created_at, updated_at)
            VALUES (?, ?, ?, 'monthly-import', ?, ?, 'monthly-import', ?, 'draft', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [projectNo, row.well_no, row.unit || '', row.planned_steam, row.planned_end_date, row.remark || '', row.unit, row.boiler, row.planned_start_date, row.planned_end_date, row.gas_support, scheduleStatus, importId, now, now],
         );
+        currentByWell.set(row.well_no, { id: created.lastID });
       }
     }
     await db.run("UPDATE injection_plan_imports SET status = 'confirmed', confirmed_at = ? WHERE id = ?", [now, importId]);

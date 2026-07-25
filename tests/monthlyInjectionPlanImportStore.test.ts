@@ -25,6 +25,9 @@ test('preview stores snapshots but creates no projects until confirmation', asyn
     const invalidRow = { ...valid('W-invalid'), rawScheduleText: 'raw invalid schedule', sourceCell: 'E2' };
     const preview = await createPlanPreview(db, { ...previewInput([validRow]), pendingRows: [pendingRow], invalidRows: [invalidRow] });
     assert.equal(preview.status, 'preview');
+    assert.deepEqual(preview.rows, [validRow]);
+    assert.deepEqual(preview.pendingRows, [pendingRow]);
+    assert.deepEqual(preview.invalidRows, [invalidRow]);
     assert.equal((await db.get('SELECT COUNT(*) AS count FROM injection_projects')).count, 0);
     const stored = await db.all('SELECT row_class, raw_well_text, raw_schedule_text, source_cell, snapshot_json FROM injection_plan_import_rows ORDER BY id');
     assert.deepEqual(stored.map((row: any) => row.row_class), ['valid', 'pending', 'invalid']);
@@ -118,5 +121,23 @@ test('manual projects are not affected by monthly plan confirmation', async () =
     const projects = await db.all('SELECT * FROM injection_projects WHERE well_no = ?', ['W-manual']);
     assert.equal(projects.length, 2);
     assert.equal((await db.get('SELECT * FROM injection_projects WHERE id = ?', [manual.id])).source_import_id, null);
+  });
+});
+
+
+test('confirmation keeps the last valid row for a duplicate well in one preview batch', async () => {
+  await withStore(async (db) => {
+    const preview = await createPlanPreview(db, previewInput([
+      valid('W-duplicate', 100),
+      { ...valid('W-duplicate', 250), unit: 'U2', boiler: 'B2', startDate: '2026-08-04', endDate: '2026-08-06' },
+    ]));
+
+    await confirmPlanImport(db, preview.id);
+
+    const projects = await db.all('SELECT * FROM injection_projects WHERE well_no = ?', ['W-duplicate']);
+    assert.equal(projects.length, 1);
+    assert.deepEqual({ steam: projects[0].planned_steam, unit: projects[0].unit, boiler: projects[0].boiler, start: projects[0].planned_start_date, end: projects[0].planned_end_date }, {
+      steam: 250, unit: 'U2', boiler: 'B2', start: '2026-08-04', end: '2026-08-06',
+    });
   });
 });
