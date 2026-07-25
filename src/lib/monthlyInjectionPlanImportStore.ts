@@ -17,6 +17,13 @@ export type PlanImport = {
   totalPlannedSteam: number;
   createdAt: string;
   confirmedAt: string | null;
+  previousComparison?: PlanImportComparison | null;
+};
+
+export type PlanImportComparison = {
+  added: number;
+  modified: number;
+  removed: number;
 };
 
 const projectColumns = ['unit', 'boiler', 'planned_start_date', 'planned_end_date', 'gas_support', 'schedule_status', 'source_import_id'];
@@ -44,6 +51,37 @@ function rowValues(row: MonthlyInjectionPlanRow, rowClass: ImportRowClass): unkn
     row.startDate, row.endDate, row.planStatus, row.remark, row.rawWellText,
     row.rawScheduleText, row.sourceCell, JSON.stringify(row),
   ];
+}
+
+function rowChanged(previous: any, next: MonthlyInjectionPlanRow): boolean {
+  return previous.unit !== next.unit
+    || previous.boiler !== next.boiler
+    || previous.planned_steam !== next.plannedSteam
+    || previous.gas_support !== next.gasSupport
+    || previous.planned_start_date !== next.startDate
+    || previous.planned_end_date !== next.endDate
+    || previous.schedule_status !== next.planStatus
+    || previous.remark !== next.remark;
+}
+
+async function previousComparison(db: DatabaseLike, input: PlanImportPreviewInput): Promise<PlanImportComparison | null> {
+  const previous = await db.get(
+    "SELECT id FROM injection_plan_imports WHERE plan_month = ? AND status = 'confirmed' ORDER BY confirmed_at DESC, id DESC LIMIT 1",
+    [input.planMonth],
+  );
+  if (!previous) return null;
+
+  const rows = await db.all('SELECT * FROM injection_plan_import_rows WHERE import_id = ? AND row_class = ?', [previous.id, 'valid']);
+  const previousByWell = new Map(rows.map((row) => [row.well_no, row]));
+  let added = 0;
+  let modified = 0;
+  for (const row of input.rows) {
+    const before = previousByWell.get(row.wellNo);
+    if (!before) added += 1;
+    else if (rowChanged(before, row)) modified += 1;
+    previousByWell.delete(row.wellNo);
+  }
+  return { added, modified, removed: previousByWell.size };
 }
 
 export async function initMonthlyInjectionPlanImportTables(db: DatabaseLike): Promise<void> {
@@ -83,6 +121,7 @@ export async function createPlanPreview(db: DatabaseLike, input: PlanImportPrevi
   if (!input.planMonth) throw new Error('planMonth is required');
   if (!input.fileName?.trim()) throw new Error('fileName is required');
   await initMonthlyInjectionPlanImportTables(db);
+  const comparison = await previousComparison(db, input);
   const now = new Date().toISOString();
   const result = await db.run(
     `INSERT INTO injection_plan_imports (plan_month, file_name, sheet_name, status, valid_count, pending_count, invalid_count, total_planned_steam, created_at)
@@ -99,7 +138,7 @@ export async function createPlanPreview(db: DatabaseLike, input: PlanImportPrevi
       );
     }
   }
-  return toImport(await db.get('SELECT * FROM injection_plan_imports WHERE id = ?', [importId]));
+  return { ...toImport(await db.get('SELECT * FROM injection_plan_imports WHERE id = ?', [importId])), previousComparison: comparison };
 }
 
 export async function confirmPlanImport(db: DatabaseLike, importId: number): Promise<PlanImport> {

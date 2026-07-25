@@ -37,6 +37,17 @@ test('preview stores snapshots but creates no projects until confirmation', asyn
   });
 });
 
+test('preview compares valid rows with the prior confirmed import for the same month', async () => {
+  await withStore(async (db) => {
+    const first = await createPlanPreview(db, previewInput([valid('W-1', 100), valid('W-2', 200)]));
+    await confirmPlanImport(db, first.id);
+
+    const revision = await createPlanPreview(db, previewInput([valid('W-1', 150), valid('W-3', 300)]));
+
+    assert.deepEqual(revision.previousComparison, { added: 1, modified: 1, removed: 1 });
+  });
+});
+
 test('confirming a revision updates same-month imports, supersedes prior batch, and preserves execution state', async () => {
   await withStore(async (db) => {
     const first = await createPlanPreview(db, previewInput([valid('W-1', 100), valid('W-2', 200)]));
