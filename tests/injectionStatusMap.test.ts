@@ -7,6 +7,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
 import { buildInjectionStatusMap, buildInjectionStatusMapResponse, filterInjectionMapWells, summarizeInjectionMap, type InjectionMapWell } from '../src/lib/injectionStatusMap.ts';
+import { createInjectionStatusMapHandler } from '../src/lib/injectionStatusMapHandler.ts';
 
 async function withDatabase(run: (db: any) => Promise<void>) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'injection-status-map-'));
@@ -242,9 +243,54 @@ test('safely ignores invalid lifecycle status and treats only string true as ove
   assert.deepEqual(stringOverdue.mapWells.map((well) => well.wellNo), ['OVERDUE']);
 });
 
-test('server declares the injection status map route and response builder import', async () => {
-  const serverSource = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../server.ts', import.meta.url), 'utf8'));
+test('injection status map handler forwards query and returns the response payload', async () => {
+  const result = { wells: [injectionMapWell({ wellNo: 'HANDLER-WELL' })] };
+  let receivedToday = '';
+  let payload: unknown;
+  const handler = createInjectionStatusMapHandler({
+    buildMap: async ({ today }) => {
+      receivedToday = today;
+      return result;
+    },
+    today: () => '2026-07-26',
+  });
 
-  assert.match(serverSource, /import\s+\{[^}]*buildInjectionStatusMapResponse[^}]*\}\s+from\s+["']\.\/src\/lib\/injectionStatusMap\.ts["'];/);
-  assert.match(serverSource, /app\.get\("\/api\/injection-status-map"/);
+  await handler(
+    { query: { block: 'A', overdue: 'true' } },
+    { json: (value) => { payload = value; }, status: () => ({ json: (value) => { payload = value; } }) },
+  );
+
+  assert.equal(receivedToday, '2026-07-26');
+  assert.deepEqual(payload, {
+    success: true,
+    data: {
+      filters: { block: 'A', overdue: true },
+      mapWells: result.wells,
+      unlocatedWells: [],
+      summary: { total: 1, injecting: 0, soaking: 1, pendingTransfer: 0, producing: 0, alerts: 1, unlocated: 0 },
+    },
+  });
+});
+
+test('injection status map handler returns a 500 error message when map building fails', async () => {
+  let statusCode: number | undefined;
+  let payload: unknown;
+  const handler = createInjectionStatusMapHandler({
+    buildMap: async () => { throw new Error('fixture failure'); },
+    today: () => '2026-07-26',
+  });
+
+  await handler(
+    { query: {} },
+    {
+      json: (value) => { payload = value; },
+      status: (code) => {
+        statusCode = code;
+        return { json: (value) => { payload = value; } };
+      },
+    },
+  );
+
+  assert.equal(statusCode, 500);
+  assert.deepEqual(payload, { success: false, message: 'fixture failure' });
 });

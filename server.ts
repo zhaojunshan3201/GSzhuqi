@@ -32,7 +32,8 @@ import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelec
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
-import { buildInjectionStatusMap, buildInjectionStatusMapResponse } from "./src/lib/injectionStatusMap.ts";
+import { buildInjectionStatusMap } from "./src/lib/injectionStatusMap.ts";
+import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHandler.ts";
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
@@ -3448,15 +3449,10 @@ app.post("/api/register", async (req, res) => {
     }
   });
 
-  app.get("/api/injection-status-map", async (req, res) => {
-    try {
-      const result = await buildInjectionStatusMap(localDb, { today: new Date().toISOString().slice(0, 10) });
-      const data = buildInjectionStatusMapResponse(result, req.query);
-      res.json({ success: true, data });
-    } catch {
-      res.status(500).json({ success: false, message: "\u6ce8\u91c7\u72b6\u6001\u5730\u56fe\u6570\u636e\u52a0\u8f7d\u5931\u8d25" });
-    }
-  });
+  app.get("/api/injection-status-map", createInjectionStatusMapHandler({
+    buildMap: (options) => buildInjectionStatusMap(localDb, options),
+    today: () => new Date().toISOString().slice(0, 10),
+  }));
 
   app.post("/api/injection-project-imports/preview", monthlyInjectionPlanUploadMiddleware, async (req, res) => {
     try {
