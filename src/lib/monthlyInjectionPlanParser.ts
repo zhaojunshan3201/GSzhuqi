@@ -60,6 +60,12 @@ function cell(row: number, column: number): string {
   return XLSX.utils.encode_cell({ r: row, c: column });
 }
 
+function isFieldHeader(row: unknown[]): boolean {
+  const values = row.map(text);
+  return values.some((value) => value.includes('\u5355\u4f4d'))
+    && values.some((value) => value.includes('\u6ce8\u6c7d\u7ad9') || value.includes('\u6ce8\u6c7d\u7089') || value.includes('\u6ce8\u6c7d\u9505\u7089') || value.includes('\u6b63\u6ce8\u4e95'));
+}
+
 function selectedSheet(workbook: XLSX.WorkBook): { name: string; values: unknown[][]; title: string; titleRow: number } | null {
   for (const name of workbook.SheetNames) {
     const values = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, defval: '' });
@@ -86,7 +92,8 @@ export function parseMonthlyInjectionPlan(workbook: XLSX.WorkBook): MonthlyInjec
   const result: MonthlyInjectionPlanResult = { ...empty, sheetName: selected.name, planMonth: month };
   let unit: string | null = null;
   let boiler: string | null = null;
-  const startRow = selected.titleRow >= 0 ? selected.titleRow + 1 : 0;
+  const titleEndRow = selected.titleRow >= 0 ? selected.titleRow + 1 : 0;
+  const startRow = isFieldHeader(selected.values[titleEndRow] ?? []) ? titleEndRow + 1 : titleEndRow;
 
   for (let row = startRow; row < selected.values.length; row += 2) {
     const wellRow = selected.values[row] ?? [];

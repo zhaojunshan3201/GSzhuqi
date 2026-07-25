@@ -141,3 +141,24 @@ test('rejects calendar-invalid dates even when the range syntax is valid', () =>
     wellNo: '高1', startDate: null, endDate: null, remark: '无法解析日期',
   });
 });
+
+test('skips field headers below the title before parsing two-row plan blocks', () => {
+  const result = parseMonthlyInjectionPlan(workbookFromRows([
+    ['2026年7月份注汽运行计划表'],
+    ['单位', '注汽炉', '正注井一', '正注井二'],
+    ['一区', '活6', '高1（CO2+100）', '高2（N+200）'],
+    ['', '', '8.08-8.09', '8.10-8.11'],
+    ['二区', '活7', '高3（300）'],
+    ['', '', '8.12-8.13'],
+  ]));
+
+  assert.deepEqual(result.rows.map((row) => ({
+    unit: row.unit, boiler: row.boiler, wellNo: row.wellNo, plannedSteam: row.plannedSteam,
+    gasSupport: row.gasSupport, sourceCell: row.sourceCell,
+  })), [
+    { unit: '一区', boiler: '活6', wellNo: '高1', plannedSteam: 100, gasSupport: 'CO2', sourceCell: 'C3' },
+    { unit: '一区', boiler: '活6', wellNo: '高2', plannedSteam: 200, gasSupport: 'N2', sourceCell: 'D3' },
+    { unit: '二区', boiler: '活7', wellNo: '高3', plannedSteam: 300, gasSupport: null, sourceCell: 'C5' },
+  ]);
+  assert.equal(result.invalidRows.some((row) => row.rawWellText.includes('正注井')), false);
+});
