@@ -3,7 +3,7 @@ import test from 'node:test';
 import XLSX from 'xlsx';
 
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from '../src/lib/oilWellMap.ts';
-import { fitWellMapToViewport, fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers, resolveMarkerColor } from '../src/lib/oilWellMapMarkers.ts';
+import { fitWellMapToViewport, fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers, resolveInjectionLifecycleColor, resolveMarkerColor } from '../src/lib/oilWellMapMarkers.ts';
 
 function workbookBuffer(rows: unknown[][]): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -72,4 +72,12 @@ test('falls back to the next visible category or default red', () => {
     { id: 1, name: '主窜井', color: '#7c3aed', priority: 10, visible: false },
     { id: 2, name: '高含水井', color: '#f59e0b', priority: 20, visible: true },
   ], [{ categoryId: 1, wellNo: '高246-1' }, { categoryId: 2, wellNo: '高246-1' }]), '#f59e0b');
+});
+
+test('maps each injection lifecycle to a stable color', () => {
+  assert.equal(resolveInjectionLifecycleColor('injecting'), '#2563eb');
+  assert.equal(resolveInjectionLifecycleColor('soaking'), '#f59e0b');
+  assert.equal(resolveInjectionLifecycleColor('pendingTransfer'), '#8b5cf6');
+  assert.equal(resolveInjectionLifecycleColor('producing'), '#16a34a');
+  assert.equal(resolveInjectionLifecycleColor('needsData'), '#94a3b8');
 });

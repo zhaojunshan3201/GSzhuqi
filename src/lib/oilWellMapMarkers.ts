@@ -43,3 +43,13 @@ export function resolveMarkerColor(wellNo: string, categories: WellMapCategory[]
     .filter((category) => category.visible && categoryIds.has(category.id))
     .sort((left, right) => left.priority - right.priority)[0]?.color || '#dc2626';
 }
+
+export function resolveInjectionLifecycleColor(status: 'injecting' | 'soaking' | 'pendingTransfer' | 'producing' | 'needsData') {
+  return {
+    injecting: '#2563eb',
+    soaking: '#f59e0b',
+    pendingTransfer: '#8b5cf6',
+    producing: '#16a34a',
+    needsData: '#94a3b8',
+  }[status];
+}

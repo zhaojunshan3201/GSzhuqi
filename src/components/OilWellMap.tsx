@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapPinned, Minus, Palette, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
-import { fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers, resolveMarkerColor, type WellMapCategory, type WellMapCategoryWell, type WellMapMarker } from '../lib/oilWellMapMarkers';
+import { fitWellMapToWidth, getMarkerAnchorStyle, getVisibleProductionMarkers, resolveInjectionLifecycleColor, resolveMarkerColor, type WellMapCategory, type WellMapCategoryWell, type WellMapMarker } from '../lib/oilWellMapMarkers';
 
 const BLOCKS = [
   { name: '高3块', image: '/oil-well-map-assets/高3块.bmp' },
@@ -16,6 +16,7 @@ interface OilWellMapProps { isAdmin: boolean }
 export function OilWellMap({ isAdmin }: OilWellMapProps) {
   const [selectedBlock, setSelectedBlock] = useState('高246块');
   const [producingWells, setProducingWells] = useState<string[]>([]);
+  const [injectionStatuses, setInjectionStatuses] = useState<Record<string, 'injecting' | 'soaking' | 'pendingTransfer' | 'producing' | 'needsData'>>({});
   const [sourceDate, setSourceDate] = useState('');
   const [markers, setMarkers] = useState<WellMapMarker[]>([]);
   const [scale, setScale] = useState(1);
@@ -68,6 +69,15 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
   useEffect(() => {
     setScale(1); setOffset({ x: 0, y: 0 }); setSelectedWellNo(''); setMapSize(null);
     void loadMarkers(selectedBlock).catch(() => setMessage('井位标定读取失败'));
+  }, [selectedBlock]);
+
+  useEffect(() => {
+    void fetch(`/api/injection-production/cockpit/map-wells?block=${encodeURIComponent(selectedBlock)}`)
+      .then((response) => response.json())
+      .then((payload) => {
+        if (payload.success) setInjectionStatuses(Object.fromEntries(payload.data.map((well: { wellNo: string; status: 'injecting' | 'soaking' | 'pendingTransfer' | 'producing' | 'needsData' }) => [well.wellNo, well.status])));
+      })
+      .catch(() => setInjectionStatuses({}));
   }, [selectedBlock]);
 
   const visibleMarkers = useMemo(() => getVisibleProductionMarkers(selectedBlock, producingWells, markers), [markers, producingWells, selectedBlock]);
@@ -153,7 +163,7 @@ export function OilWellMap({ isAdmin }: OilWellMapProps) {
       <div ref={mapViewportRef} className="relative min-h-[70vh] overflow-hidden bg-slate-100" style={{ height: mapSize?.height }} onMouseMove={(event) => dragStart && setOffset({ x: event.clientX - dragStart.x, y: event.clientY - dragStart.y })} onMouseUp={() => setDragStart(null)} onMouseLeave={() => setDragStart(null)}>
         <div ref={mapRef} className={`absolute left-1/2 top-1/2 select-none ${calibrationMode && selectedWellNo ? 'cursor-crosshair' : 'cursor-grab'}`} style={{ width: mapSize?.width, height: mapSize?.height, opacity: mapSize ? 1 : 0, transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onMouseDown={(event) => { if (!calibrationMode) setDragStart({ x: event.clientX - offset.x, y: event.clientY - offset.y }); }} onClick={saveMarker}>
           <img src={selected.image} alt={`${selectedBlock}井位图`} draggable={false} className="block h-full w-full" onLoad={(event) => fitMap(event.currentTarget)} />
-          {visibleMarkers.map((marker) => { const color = resolveMarkerColor(marker.wellNo, categories, categoryWells); return <div key={marker.wellNo} className="absolute h-3 w-3" style={getMarkerAnchorStyle(marker.xPercent, marker.yPercent)} title={`${marker.wellNo}：生产中`}><span className="block h-3 w-3 rounded-full border-2 border-white shadow-lg" style={{ backgroundColor: color }} />{showLabels && <span className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: color }}>{marker.wellNo}</span>}{calibrationMode && showDeleteButtons && <button onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }} className={`absolute left-1/2 -translate-x-1/2 rounded bg-white p-1 text-red-600 shadow ${showLabels ? 'top-[calc(100%+26px)]' : 'top-[calc(100%+4px)]'}`}><Trash2 size={12} /></button>}</div>})}
+          {visibleMarkers.map((marker) => { const status = injectionStatuses[marker.wellNo]; const color = status ? resolveInjectionLifecycleColor(status) : resolveMarkerColor(marker.wellNo, categories, categoryWells); return <div key={marker.wellNo} className="absolute h-3 w-3" style={getMarkerAnchorStyle(marker.xPercent, marker.yPercent)} title={`${marker.wellNo}：${status || '生产中'}`}><span className="block h-3 w-3 rounded-full border-2 border-white shadow-lg" style={{ backgroundColor: color }} />{showLabels && <span className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: color }}>{marker.wellNo}</span>}{calibrationMode && showDeleteButtons && <button onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }} className={`absolute left-1/2 -translate-x-1/2 rounded bg-white p-1 text-red-600 shadow ${showLabels ? 'top-[calc(100%+26px)]' : 'top-[calc(100%+4px)]'}`}><Trash2 size={12} /></button>}</div>})}
         </div>
       </div>
     </section>
