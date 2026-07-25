@@ -33,7 +33,7 @@ function text(value: unknown): string {
 function planMonth(title: string): string | null {
   const monthMatch = title.match(/(?:(20\d{2})年)?\s*(1[0-2]|[1-9])\s*月份?/);
   if (!monthMatch) return null;
-  const year = monthMatch[1] ?? String(new Date().getFullYear());
+  const year = monthMatch[1] ?? '2026';
   return `${year}-${monthMatch[2].padStart(2, '0')}`;
 }
 
@@ -62,7 +62,7 @@ function selectedSheet(workbook: XLSX.WorkBook): { name: string; values: unknown
       const found = values[row].map(text).find((value) => value.includes('注汽运行计划表'));
       if (found) { titleRow = row; title = found; break; }
     }
-    if (titleRow >= 0 || name.includes('注汽运行计划表')) {
+    if (titleRow >= 0) {
       return { name, values, title: title || name, titleRow };
     }
   }
@@ -75,7 +75,7 @@ export function parseMonthlyInjectionPlan(workbook: XLSX.WorkBook): MonthlyInjec
   if (!selected) return empty;
 
   const month = planMonth(selected.title);
-  const year = Number(month?.slice(0, 4) ?? new Date().getFullYear());
+  const year = Number(month?.slice(0, 4) ?? 2026);
   const result: MonthlyInjectionPlanResult = { ...empty, sheetName: selected.name, planMonth: month };
   let unit: string | null = null;
   let boiler: string | null = null;
@@ -117,11 +117,20 @@ export function parseMonthlyInjectionPlan(workbook: XLSX.WorkBook): MonthlyInjec
         continue;
       }
       const range = parseDateRange(rawScheduleText, year);
-      result.rows.push({
+      const parsed = {
         ...base, wellNo: expression[1].trim(), plannedSteam,
         gasSupport: normalizeGas(parts.slice(0, -1).join('+')),
         startDate: range.startDate, endDate: range.endDate,
-      });
+      } satisfies MonthlyInjectionPlanRow;
+      if (rawScheduleText.includes('停注')) {
+        result.pendingRows.push({ ...parsed, startDate: null, endDate: null, planStatus: 'stopped', remark: rawScheduleText });
+        continue;
+      }
+      if (!range.startDate || !range.endDate) {
+        result.invalidRows.push({ ...parsed, planStatus: 'invalid', remark: '无法解析日期' });
+        continue;
+      }
+      result.rows.push(parsed);
       result.totalPlannedSteam += plannedSteam;
     }
   }
