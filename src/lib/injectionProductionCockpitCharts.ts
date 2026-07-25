@@ -7,21 +7,21 @@ import type {
 } from './injectionProductionCockpit';
 
 export const lifecycleMeta: Record<InjectionLifecycleStatus, { label: string; color: string }> = {
-  producing: { label: '生产中', color: '#10b981' },
-  injecting: { label: '注汽中', color: '#3b82f6' },
-  soaking: { label: '焖井中', color: '#f59e0b' },
+  producing: { label: '转抽生产', color: '#10b981' },
+  injecting: { label: '正注', color: '#3b82f6' },
+  soaking: { label: '焖井', color: '#f59e0b' },
   pendingTransfer: { label: '待转抽', color: '#8b5cf6' },
-  needsData: { label: '数据待补', color: '#94a3b8' },
+  needsData: { label: '数据待补全', color: '#94a3b8' },
 };
 
 const lifecycleOrder = Object.keys(lifecycleMeta) as InjectionLifecycleStatus[];
 const alertOrder: CockpitAlertType[] = ['needsData', 'notEvaluated', 'lowEfficiency', 'soakingOverdue', 'transferOverdue'];
 const alertLabels: Record<CockpitAlertType, string> = {
-  needsData: '数据待补',
-  notEvaluated: '待评价',
+  needsData: '数据待补全',
+  notEvaluated: '未评价',
   lowEfficiency: '低效井',
-  soakingOverdue: '焖井超期',
-  transferOverdue: '转抽超期',
+  soakingOverdue: '焖井逾期',
+  transferOverdue: '待转抽逾期',
 };
 
 export function hasChartValues(values: readonly unknown[]): boolean {
@@ -100,3 +100,4 @@ export function buildAlertDistributionOption(
     series: [{ type: 'bar', data: sorted.map((item) => item.count), itemStyle: { color: '#ef4444' } }],
   };
 }
+
