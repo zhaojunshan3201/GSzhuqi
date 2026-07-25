@@ -41,6 +41,10 @@ export function shouldCloseMobileDrawer(isMobileViewport: boolean, mobileSidebar
   return isMobileViewport && mobileSidebarOpen;
 }
 
+export function shouldApplyCockpitMeasureFilters(tab: 'measures' | 'oilWellMap'): boolean {
+  return tab === 'measures';
+}
+
 export function getCockpitAlertDrilldown(
   params: unknown,
   alerts: readonly Pick<InjectionProductionCockpit['alerts'][number], 'type' | 'wellNo'>[],

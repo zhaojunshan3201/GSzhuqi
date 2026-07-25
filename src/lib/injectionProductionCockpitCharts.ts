@@ -1,4 +1,4 @@
-﻿import type { EChartsOption } from 'echarts';
+import type { EChartsOption } from 'echarts';
 import type {
   BlockStatusSummary,
   CockpitAlertType,
@@ -56,6 +56,22 @@ function tooltipMarker(param: AxisTooltipParam): string {
 
 export function hasChartValues(values: readonly unknown[]): boolean {
   return values.some((value) => typeof value === 'number' && Number.isFinite(value) && value > 0);
+}
+
+export function hasPerformanceData(
+  rows: readonly { dailyOil: number | null; cumulativeOilGain: number | null; oilSteamRatio: number | null }[],
+): boolean {
+  return rows.some((row) =>
+    [row.dailyOil, row.cumulativeOilGain, row.oilSteamRatio]
+      .some((value) => typeof value === 'number' && Number.isFinite(value)));
+}
+
+export function hasAlertDistributionData(rows: readonly { count: number }[]): boolean {
+  return rows.length > 0;
+}
+
+export function hasBlockStatusData(rows: readonly { block: string }[]): boolean {
+  return rows.length > 0;
 }
 
 export function buildStatusDistributionOption(
@@ -153,6 +169,3 @@ export function buildAlertDistributionOption(
     series: [{ type: 'bar', data: sorted.map((item) => item.count), itemStyle: { color: '#ef4444' } }],
   };
 }
-
-
-

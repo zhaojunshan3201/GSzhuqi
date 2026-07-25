@@ -38,7 +38,7 @@ import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
-import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
+import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -6113,11 +6113,13 @@ export default function App() {
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
               {activeTab === 'injectionProjectManagement' && <InjectionProjectManagement />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
-                setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
-                if (filters.alertType) {
-                  setMeasureCockpitAlertFilter({ type: filters.alertType, wellNos: filters.alertWellNos || [] });
-                } else {
-                  setMeasureCockpitAlertFilter(null);
+                if (shouldApplyCockpitMeasureFilters(tab)) {
+                  setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
+                  if (filters.alertType) {
+                    setMeasureCockpitAlertFilter({ type: filters.alertType, wellNos: filters.alertWellNos || [] });
+                  } else {
+                    setMeasureCockpitAlertFilter(null);
+                  }
                 }
                 setActiveTab(tab);
               }} />}

@@ -6,7 +6,10 @@ import {
   buildBlockPerformanceOption,
   buildBlockStatusOption,
   buildStatusDistributionOption,
+  hasAlertDistributionData,
+  hasBlockStatusData,
   hasChartValues,
+  hasPerformanceData,
 } from '../lib/injectionProductionCockpitCharts';
 import { formatCockpitMetric, getCockpitAlertDrilldown, getCockpitBlockDrilldown, type CockpitMeasureFilters } from '../lib/injectionProductionCockpitDrilldown';
 
@@ -38,9 +41,6 @@ export function InjectionProductionCockpit({ onNavigate }: {
   if (!data) return <div className="app-card p-6 text-sm text-slate-500">驾驶舱数据加载中…</div>;
 
   const statusValues = Object.values(data.statusDistribution);
-  const blockStatusValues = data.blockStatusSummary.flatMap(({ block: _block, ...counts }) => Object.values(counts));
-  const performanceValues = data.blockPerformanceSummary.flatMap((row) => [row.dailyOil, row.cumulativeOilGain, row.oilSteamRatio]);
-  const alertValues = data.alertDistribution.map((item) => item.count);
   const blockEvents = { click: (params: unknown) => { const filters = getCockpitBlockDrilldown(params); if (filters) onNavigate('measures', filters); } };
 
   return <div className="page-stack">
@@ -50,13 +50,13 @@ export function InjectionProductionCockpit({ onNavigate }: {
       <ChartCard title="生命周期状态" hasData={hasChartValues(statusValues)} className="xl:col-span-2">
         <ReactECharts option={buildStatusDistributionOption(data.statusDistribution)} style={{ height: '100%' }} />
       </ChartCard>
-      <ChartCard title="区块生产效果" hasData={hasChartValues(performanceValues)} className="xl:col-span-3">
+      <ChartCard title="区块生产效果" hasData={hasPerformanceData(data.blockPerformanceSummary)} className="xl:col-span-3">
         <ReactECharts className="cursor-pointer" option={buildBlockPerformanceOption(data.blockPerformanceSummary)} style={{ height: '100%' }} onEvents={blockEvents} />
       </ChartCard>
-      <ChartCard title="异常分布" hasData={hasChartValues(alertValues)} className="xl:col-span-2">
+      <ChartCard title="异常分布" hasData={hasAlertDistributionData(data.alertDistribution)} className="xl:col-span-2">
         <ReactECharts option={buildAlertDistributionOption(data.alertDistribution)} style={{ height: '100%' }} onEvents={{ click: (params: unknown) => { const filters = getCockpitAlertDrilldown(params, data.alerts); if (filters) onNavigate('measures', filters); } }} />
       </ChartCard>
-      <ChartCard title="区块生命周期状态" hasData={hasChartValues(blockStatusValues)} className="md:col-span-2 xl:col-span-7">
+      <ChartCard title="区块生命周期状态" hasData={hasBlockStatusData(data.blockStatusSummary)} className="md:col-span-2 xl:col-span-7">
         <ReactECharts className="cursor-pointer" option={buildBlockStatusOption(data.blockStatusSummary)} style={{ height: '100%' }} onEvents={blockEvents} />
       </ChartCard>
     </section>

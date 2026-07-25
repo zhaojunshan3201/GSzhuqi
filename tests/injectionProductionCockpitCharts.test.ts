@@ -6,6 +6,9 @@ import {
   buildBlockStatusOption,
   buildStatusDistributionOption,
   hasChartValues,
+  hasAlertDistributionData,
+  hasBlockStatusData,
+  hasPerformanceData,
   lifecycleMeta,
 } from '../src/lib/injectionProductionCockpitCharts';
 
@@ -128,4 +131,13 @@ test('axis tooltip callbacks escape dynamic labels while preserving ECharts mark
   assert.ok(performanceText.includes('&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;'));
   assert.ok(!performanceText.includes('<img'));
   assert.ok(!performanceText.includes('<script>'));
+});
+
+test('chart availability keeps legitimate zero operational data visible', () => {
+  assert.equal(hasAlertDistributionData([{ type: 'needsData', count: 0 }]), true);
+  assert.equal(hasAlertDistributionData([]), false);
+  assert.equal(hasPerformanceData([{ block: '一区', dailyOil: 0, cumulativeOilGain: null, oilSteamRatio: 0 }]), true);
+  assert.equal(hasPerformanceData([{ block: '一区', dailyOil: null, cumulativeOilGain: null, oilSteamRatio: null }]), false);
+  assert.equal(hasBlockStatusData([{ block: '一区', producing: 0, injecting: 0, soaking: 0, pendingTransfer: 0, needsData: 0 }]), true);
+  assert.equal(hasBlockStatusData([]), false);
 });

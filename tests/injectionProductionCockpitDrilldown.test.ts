@@ -9,6 +9,7 @@ import {
   getCockpitAlertDrilldown,
   getCockpitBlockDrilldown,
   shouldCloseMobileDrawer,
+  shouldApplyCockpitMeasureFilters,
 } from '../src/lib/injectionProductionCockpitDrilldown';
 
 test('maps valid ECharts block clicks and ignores invalid params', () => {
@@ -105,4 +106,9 @@ test('moves focus only when navigation closes an open mobile drawer', () => {
   assert.equal(shouldCloseMobileDrawer(true, true), true);
   assert.equal(shouldCloseMobileDrawer(true, false), false);
   assert.equal(shouldCloseMobileDrawer(false, true), false);
+});
+
+test('applies cockpit measure filters only when navigating to measures', () => {
+  assert.equal(shouldApplyCockpitMeasureFilters('measures'), true);
+  assert.equal(shouldApplyCockpitMeasureFilters('oilWellMap'), false);
 });
