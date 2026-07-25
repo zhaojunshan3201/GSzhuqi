@@ -36,6 +36,7 @@ import { getWellTemperatureChartOption } from './wellTemperatureChart';
 import { MeasureWellSelection } from './components/MeasureWellSelection';
 import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
+import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -6003,6 +6004,7 @@ export default function App() {
           <h2 className="text-gray-700 font-bold text-lg">
           {activeTab === 'externalTransferTracking' && '外输跟踪'}
           {activeTab === 'dashboard' && '系统概览'}
+          {activeTab === 'injectionProductionCockpit' && '注采驾驶舱'}
           {activeTab === 'oilWellMap' && '油井位图'}
           {activeTab === 'block' && '区块生产动态生成器'}
           {activeTab === 'well' && '单井精细化动态分析'}
@@ -6042,6 +6044,7 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
+              {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, wellNo) => { if (wellNo) setMeasureQuery((current) => ({ ...current, keyword: wellNo })); setActiveTab(tab); }} />}
               {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} />}
               {activeTab === 'externalTransferTracking' && <ExternalTransferTracking />}
               {activeTab === 'runtimeLogs' && (

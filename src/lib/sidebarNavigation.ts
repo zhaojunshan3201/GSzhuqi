@@ -2,6 +2,7 @@ export type SidebarGroupKey = 'overview' | 'analysis' | 'focus' | 'measures' | '
 
 export type SidebarTab =
   | 'dashboard'
+  | 'injectionProductionCockpit'
   | 'oilWellMap'
   | 'wellTemperature'
   | 'runtimeLogs'
@@ -52,6 +53,7 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     label: '基本情况',
     items: [
       { tab: 'dashboard', label: '系统概览', icon: 'LayoutDashboard' },
+      { tab: 'injectionProductionCockpit', label: '注采驾驶舱', icon: 'LayoutDashboard' },
       { tab: 'oilWellMap', label: '油井位图', icon: 'MapPinned' },
       { tab: 'wellTemperature', label: '井温监控', icon: 'Thermometer' },
     ],

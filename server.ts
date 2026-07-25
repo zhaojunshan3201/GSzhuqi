@@ -30,6 +30,7 @@ import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts"
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
+import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
 
 dotenv.config();
 
@@ -3388,6 +3389,31 @@ app.post("/api/register", async (req, res) => {
       res.json({ success: true, data: status });
     } catch (err: any) {
       res.status(500).json({ success: false, message: "同步状态查询失败: " + err.message });
+    }
+  });
+
+  app.get("/api/injection-production/cockpit", async (_req, res) => {
+    try {
+      const data = await buildInjectionProductionCockpit(localDb, {
+        now: new Date().toISOString().slice(0, 10),
+        syncStatus: await getSyncStatus(),
+      });
+      res.json({ success: true, data });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "注采驾驶舱数据加载失败" });
+    }
+  });
+
+  app.get("/api/injection-production/cockpit/map-wells", async (req, res) => {
+    try {
+      const data = await buildInjectionProductionCockpit(localDb, {
+        now: new Date().toISOString().slice(0, 10),
+        syncStatus: await getSyncStatus(),
+      });
+      const block = typeof req.query.block === "string" ? req.query.block : "";
+      res.json({ success: true, data: data.mapWells.filter((well) => !block || well.block === block) });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || "注采状态地图数据加载失败" });
     }
   });
 
