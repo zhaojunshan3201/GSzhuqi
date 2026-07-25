@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, MapPinned, Minus, Palette, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react';
-import { buildInjectionStatusMapQuery, getStatusMapNavigation } from '../lib/injectionStatusMapNavigation';
+import { buildInjectionStatusMapQuery, createLatestRequestGate, getDrawerFocusIndex, getStatusMapNavigation } from '../lib/injectionStatusMapNavigation';
 import type { InjectionMapAlertType, InjectionMapLifecycleStatus, InjectionMapWell, InjectionStatusMapResponse } from '../lib/injectionStatusMap';
 import { fitWellMapToWidth, getMarkerAnchorStyle, resolveInjectionLifecycleColor, resolveMarkerColor, type WellMapCategory, type WellMapCategoryWell, type WellMapMarker } from '../lib/oilWellMapMarkers';
 
@@ -65,6 +65,10 @@ export function OilWellMap({ isAdmin, onNavigate }: OilWellMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapViewportRef = useRef<HTMLDivElement>(null);
   const dailyDataInputRef = useRef<HTMLInputElement>(null);
+  const requestGateRef = useRef(createLatestRequestGate());
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const selectedWellTriggerRef = useRef<HTMLButtonElement>(null);
   const selected = BLOCKS.find((block) => block.name === selectedBlock) ?? BLOCKS[0];
 
   const loadMarkers = async (block = selectedBlock) => {
@@ -93,19 +97,23 @@ export function OilWellMap({ isAdmin, onNavigate }: OilWellMapProps) {
   }, [selectedBlock]);
   useEffect(() => {
     const controller = new AbortController();
+    const requestId = requestGateRef.current.start();
     const query = buildInjectionStatusMapQuery({ block: selectedBlock, ...filters });
     setLoading(true); setMapError('');
     fetch(`/api/injection-status-map?${query}`, { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
+        if (!requestGateRef.current.isCurrent(requestId, controller.signal)) return null;
         if (!response.ok || !payload.success) throw new Error(payload.message || '注采状态地图加载失败');
         return payload.data as InjectionStatusMapResponse;
       })
-      .then((data) => setMapData(data))
-      .catch((error: Error) => {
-        if (error.name !== 'AbortError') setMapError(error.message || '注采状态地图加载失败');
+      .then((data) => {
+        if (data && requestGateRef.current.isCurrent(requestId, controller.signal)) setMapData(data);
       })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      .catch((error: Error) => {
+        if (requestGateRef.current.isCurrent(requestId, controller.signal) && error.name !== 'AbortError') setMapError(error.message || '注采状态地图加载失败');
+      })
+      .finally(() => { if (requestGateRef.current.isCurrent(requestId, controller.signal)) setLoading(false); });
     return () => controller.abort();
   }, [selectedBlock, filters, reloadKey]);
 
@@ -116,6 +124,25 @@ export function OilWellMap({ isAdmin, onNavigate }: OilWellMapProps) {
   const calibrationWells = unlocatedWells.filter((well) => well.block === selectedBlock);
   const calibrationMarkers = markers.filter((marker) => marker.block === selectedBlock && producingWells.includes(marker.wellNo));
   const planMonths = [...new Set([...mapWells, ...unlocatedWells].map((well) => well.planMonth).filter(Boolean))].sort().reverse();
+
+  const closeDrawer = () => {
+    setSelectedWell(null);
+    requestAnimationFrame(() => selectedWellTriggerRef.current?.focus());
+  };
+  const trapDrawerFocus = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') { event.preventDefault(); closeDrawer(); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = [...(drawerRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])];
+    if (!focusable.length) return;
+    event.preventDefault();
+    const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+    const targetIndex = currentIndex < 0 ? (event.shiftKey ? focusable.length - 1 : 0) : getDrawerFocusIndex(focusable.length, currentIndex, event.shiftKey);
+    focusable[targetIndex]?.focus();
+  };
+  useEffect(() => {
+    if (!selectedWell) return;
+    drawerCloseRef.current?.focus();
+  }, [selectedWell]);
 
   const fitMap = (image: HTMLImageElement) => {
     const width = mapViewportRef.current?.clientWidth;
@@ -199,12 +226,12 @@ export function OilWellMap({ isAdmin, onNavigate }: OilWellMapProps) {
       {!mapData && !loading && mapError ? null : <div ref={mapViewportRef} className="relative min-h-[70vh] overflow-hidden bg-slate-100" style={{ height: mapSize?.height }} onMouseMove={(event) => dragStart && setOffset({ x: event.clientX - dragStart.x, y: event.clientY - dragStart.y })} onMouseUp={() => setDragStart(null)} onMouseLeave={() => setDragStart(null)}>
         <div ref={mapRef} className={`absolute left-1/2 top-1/2 select-none ${calibrationMode && selectedWellNo ? 'cursor-crosshair' : 'cursor-grab'}`} style={{ width: mapSize?.width, height: mapSize?.height, opacity: mapSize ? 1 : 0, transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }} onMouseDown={(event) => { if (!calibrationMode) setDragStart({ x: event.clientX - offset.x, y: event.clientY - offset.y }); }} onClick={saveMarker}>
           <img src={selected.image} alt={`${selectedBlock}井位图`} draggable={false} className="block h-full w-full" onLoad={(event) => fitMap(event.currentTarget)} />
-          {mapWells.map((well) => { const categoryColor = resolveMarkerColor(well.wellNo, categories, categoryWells); const statusColor = resolveInjectionLifecycleColor(well.lifecycleStatus); return <button type="button" key={well.wellNo} className="absolute h-5 w-5 rounded-full border-2 border-white shadow-lg" style={{ ...getMarkerAnchorStyle(well.xPercent!, well.yPercent!), backgroundColor: statusColor, boxShadow: categoryColor !== '#dc2626' ? `0 0 0 3px ${categoryColor}` : undefined }} title={`${well.wellNo} · ${lifecycleLabels[well.lifecycleStatus]}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSelectedWell(well); }}>{showLabels && <span className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: statusColor }}>{well.wellNo}</span>}{calibrationMode && showDeleteButtons && <span role="button" tabIndex={0} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void removeMarker(well.wellNo); }} className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 rounded bg-white p-1 text-red-600 shadow"><Trash2 size={12} /></span>}</button>; })}
+          {mapWells.map((well) => { const categoryColor = resolveMarkerColor(well.wellNo, categories, categoryWells); const statusColor = resolveInjectionLifecycleColor(well.lifecycleStatus); return <button type="button" key={well.wellNo} className="absolute h-5 w-5 rounded-full border-2 border-white shadow-lg" style={{ ...getMarkerAnchorStyle(well.xPercent!, well.yPercent!), backgroundColor: statusColor, boxShadow: categoryColor !== '#dc2626' ? `0 0 0 3px ${categoryColor}` : undefined }} title={`${well.wellNo} · ${lifecycleLabels[well.lifecycleStatus]}`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); selectedWellTriggerRef.current = event.currentTarget; setSelectedWell(well); }}>{showLabels && <span className="absolute left-1/2 top-[calc(100%+4px)] -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: statusColor }}>{well.wellNo}</span>}</button>; })}
           {calibrationMode && showDeleteButtons && calibrationMarkers.map((marker) => <button type="button" key={`delete-${marker.wellNo}`} className="absolute rounded bg-white p-1 text-red-600 shadow" style={getMarkerAnchorStyle(marker.xPercent, marker.yPercent)} title={`删除 ${marker.wellNo} 标定`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void removeMarker(marker.wellNo); }}><Trash2 size={12} /></button>)}
         </div>
       </div>}
-      <div className="border-t border-slate-100 p-3"><button className="flex items-center gap-2 text-sm font-bold text-slate-700" onClick={() => setShowUnlocated((value) => !value)}>无坐标井（{unlocatedWells.length}）{showUnlocated ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>{showUnlocated && <div className="mt-3 rounded bg-slate-50 p-3 text-sm"><p className="mb-2 text-amber-800">无坐标井不会被绘制；管理员可使用上方标定模式补充位置。</p><div className="flex flex-wrap gap-2">{unlocatedWells.map((well) => <button key={well.wellNo} className="rounded border border-slate-200 bg-white px-2 py-1 hover:border-red-300" onClick={() => setSelectedWell(well)}>{well.wellNo}</button>)}</div></div>}</div>
+      <div className="border-t border-slate-100 p-3"><button className="flex items-center gap-2 text-sm font-bold text-slate-700" onClick={() => setShowUnlocated((value) => !value)}>无坐标井（{unlocatedWells.length}）{showUnlocated ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>{showUnlocated && <div className="mt-3 rounded bg-slate-50 p-3 text-sm"><p className="mb-2 text-amber-800">无坐标井不会被绘制；管理员可使用上方标定模式补充位置。</p><div className="flex flex-wrap gap-2">{unlocatedWells.map((well) => <button key={well.wellNo} className="rounded border border-slate-200 bg-white px-2 py-1 hover:border-red-300" onClick={(event) => { selectedWellTriggerRef.current = event.currentTarget; setSelectedWell(well); }}>{well.wellNo}</button>)}</div></div>}</div>
     </section>
-    {selectedWell && <div className="fixed inset-0 z-50 bg-slate-900/30" onClick={() => setSelectedWell(null)}><aside className="absolute bottom-0 right-0 max-h-[85vh] w-full overflow-y-auto bg-white p-5 shadow-2xl md:bottom-auto md:top-0 md:h-full md:max-h-none md:w-[420px]" onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between"><div><h3 className="text-lg font-bold text-slate-900">{selectedWell.wellNo}</h3><p className="text-sm text-slate-500">{lifecycleLabels[selectedWell.lifecycleStatus]} · {selectedWell.statusSource === 'project' ? '项目数据' : '措施跟踪数据'}</p></div><button className="rounded p-1 hover:bg-slate-100" onClick={() => setSelectedWell(null)}><X size={20} /></button></div><div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">{[['区块', selectedWell.block], ['站点', selectedWell.station], ['负责人', selectedWell.owner], ['计划月份', selectedWell.planMonth], ['计划开始', selectedWell.plannedStartDate], ['计划结束', selectedWell.plannedEndDate], ['实际开始', selectedWell.actualStartDate], ['实际结束', selectedWell.actualEndDate], ['计划转抽', selectedWell.plannedTransferDate], ['超期天数', selectedWell.overdueDays], ['计划注汽', selectedWell.plannedSteam], ['实际注汽', selectedWell.actualSteam], ['当前日产油', selectedWell.currentOil], ['累计增油', selectedWell.cumulativeOilGain], ['油汽比', selectedWell.oilSteamRatio], ['效果评价', selectedWell.evaluation]].map(([label, value]) => <div key={String(label)}><div className="text-xs text-slate-500">{label}</div><div className="font-medium text-slate-800">{display(value)}</div></div>)}</div><div className="mt-5 rounded bg-rose-50 p-3 text-sm"><div className="font-bold text-rose-800">异常</div><div className="mt-1 text-rose-700">{selectedWell.alertTypes.length ? selectedWell.alertTypes.map((type) => alertLabels[type]).join('、') : '无'}</div></div><div className="mt-5 grid gap-2"><button className="action-button action-primary" disabled={selectedWell.projectId == null} onClick={() => navigate('project')}>查看注汽项目</button><button className="action-button action-outline" onClick={() => navigate('production')}>查看生产响应</button><button className="action-button action-outline" onClick={() => navigate('evaluation')}>查看效果评价</button></div></aside></div>}
+    {selectedWell && <div className="fixed inset-0 z-50 bg-slate-900/30" onClick={closeDrawer}><aside ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="selected-well-drawer-title" tabIndex={-1} className="absolute bottom-0 right-0 max-h-[85vh] w-full overflow-y-auto bg-white p-5 shadow-2xl md:bottom-auto md:top-0 md:h-full md:max-h-none md:w-[420px]" onKeyDown={trapDrawerFocus} onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between"><div><h3 id="selected-well-drawer-title" className="text-lg font-bold text-slate-900">{selectedWell.wellNo}</h3><p className="text-sm text-slate-500">{lifecycleLabels[selectedWell.lifecycleStatus]} · {selectedWell.statusSource === 'project' ? '项目数据' : '措施跟踪数据'}</p></div><button ref={drawerCloseRef} aria-label="关闭井详情" className="rounded p-1 hover:bg-slate-100" onClick={closeDrawer}><X size={20} /></button></div><div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">{[['区块', selectedWell.block], ['站点', selectedWell.station], ['负责人', selectedWell.owner], ['计划月份', selectedWell.planMonth], ['计划开始', selectedWell.plannedStartDate], ['计划结束', selectedWell.plannedEndDate], ['实际开始', selectedWell.actualStartDate], ['实际结束', selectedWell.actualEndDate], ['计划转抽', selectedWell.plannedTransferDate], ['超期天数', selectedWell.overdueDays], ['计划注汽', selectedWell.plannedSteam], ['实际注汽', selectedWell.actualSteam], ['当前日产油', selectedWell.currentOil], ['累计增油', selectedWell.cumulativeOilGain], ['油汽比', selectedWell.oilSteamRatio], ['效果评价', selectedWell.evaluation]].map(([label, value]) => <div key={String(label)}><div className="text-xs text-slate-500">{label}</div><div className="font-medium text-slate-800">{display(value)}</div></div>)}</div><div className="mt-5 rounded bg-rose-50 p-3 text-sm"><div className="font-bold text-rose-800">异常</div><div className="mt-1 text-rose-700">{selectedWell.alertTypes.length ? selectedWell.alertTypes.map((type) => alertLabels[type]).join('、') : '无'}</div></div><div className="mt-5 grid gap-2"><button className="action-button action-primary" disabled={selectedWell.projectId == null} onClick={() => navigate('project')}>查看注汽项目</button><button className="action-button action-outline" onClick={() => navigate('production')}>查看生产响应</button><button className="action-button action-outline" onClick={() => navigate('evaluation')}>查看效果评价</button></div></aside></div>}
   </div>;
 }

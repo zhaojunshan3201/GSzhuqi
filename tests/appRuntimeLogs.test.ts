@@ -57,6 +57,6 @@ test('renders each injection workflow tab with its title and project management 
 
   assert.match(
     appSource,
-    /\(activeTab === 'injectionProjectManagement' \|\| activeTab === 'injectionPlan' \|\| activeTab === 'injectionConstruction' \|\| activeTab === 'injectionSoakTransfer'\) && <InjectionProjectManagement initialProjectId=\{injectionPlanProjectId\?\.toString\(\)\} \/>/,
+    /\(activeTab === 'injectionProjectManagement' \|\| activeTab === 'injectionPlan' \|\| activeTab === 'injectionConstruction' \|\| activeTab === 'injectionSoakTransfer'\) && <InjectionProjectManagement initialProjectId=\{injectionPlanProjectId\?\.toString\(\)\} onClearInitialProjectId=/,
   );
 });

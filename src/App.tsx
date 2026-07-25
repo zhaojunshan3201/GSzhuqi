@@ -39,6 +39,7 @@ import { ExternalTransferTracking } from './components/ExternalTransferTracking'
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
+import { nextProjectLocationId } from './lib/injectionStatusMapNavigation';
 import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -2180,7 +2181,10 @@ export default function App() {
       else appMainRef.current?.focus();
     });
   };
-  const setActiveTab = (tab: SidebarTab) => {
+  const setActiveTab = (tab: SidebarTab, { preserveProjectLocation = false }: { preserveProjectLocation?: boolean } = {}) => {
+    if (!preserveProjectLocation && ['injectionPlan', 'injectionConstruction', 'injectionSoakTransfer'].includes(tab)) {
+      setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'workflow-tab' }));
+    }
     _setActiveTab(tab);
     if (shouldCloseMobileDrawer(isMobileViewport, mobileSidebarOpen)) {
       closeMobileSidebar({ restoreFocus: false });
@@ -6109,7 +6113,7 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
-              {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement initialProjectId={injectionPlanProjectId?.toString()} />}
+              {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement initialProjectId={injectionPlanProjectId?.toString()} onClearInitialProjectId={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 if (shouldApplyCockpitMeasureFilters(tab)) {
                   setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
@@ -6123,11 +6127,13 @@ export default function App() {
               }} />}
               {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} onNavigate={(tab, filters) => {
                 if (tab === 'injectionPlan') {
-                  setInjectionPlanProjectId(filters.projectId ?? null);
+                  setInjectionPlanProjectId((current) => filters.projectId == null ? nextProjectLocationId(current, { type: 'clear' }) : nextProjectLocationId(current, { type: 'map-project', projectId: filters.projectId }));
+                  setActiveTab(tab, { preserveProjectLocation: true });
                 } else {
+                  setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }));
                   setMeasureQuery((current) => ({ ...current, keyword: filters.keyword ?? '' }));
+                  setActiveTab(tab);
                 }
-                setActiveTab(tab);
               }} />}
               {activeTab === 'externalTransferTracking' && <ExternalTransferTracking />}
               {activeTab === 'runtimeLogs' && (
