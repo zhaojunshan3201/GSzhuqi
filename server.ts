@@ -34,6 +34,7 @@ import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCo
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
+import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
 
 dotenv.config();
 
@@ -3439,7 +3440,7 @@ app.post("/api/register", async (req, res) => {
       if (!preview.sheetName) throw new Error("\u672a\u627e\u5230\u4e3b\u8ba1\u5212\u8868");
       if (!preview.planMonth) throw new Error("\u6807\u9898\u672a\u5305\u542b\u6708\u4efd");
 
-      const data = await createPlanPreview(localDb, { ...preview, fileName: file.originalname });
+      const data = await createPlanPreview(localDb, { ...preview, fileName: decodeUploadedFileName(file.originalname) });
       res.status(201).json({ success: true, data });
     } catch (error: any) {
       const message = error?.message || "\u4e3b\u8ba1\u5212\u8868\u89e3\u6790\u5931\u8d25";
