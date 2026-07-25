@@ -55,8 +55,6 @@ test('renders each injection workflow tab with its title and project management 
     assert.match(appSource, new RegExp(`activeTab === '${tab}' && '${title}'`));
   }
 
-  assert.match(
-    appSource,
-    /\(activeTab === 'injectionProjectManagement' \|\| activeTab === 'injectionPlan' \|\| activeTab === 'injectionConstruction' \|\| activeTab === 'injectionSoakTransfer'\) && <InjectionProjectManagement initialProjectId=\{injectionPlanProjectId\?\.toString\(\)\} onClearInitialProjectId=/,
-  );
+  assert.match(appSource, /getInjectionProjectView\(activeTab\)/);
+  assert.match(appSource, /<InjectionProjectManagement view=\{injectionProjectView\}/);
 });

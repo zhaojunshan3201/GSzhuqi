@@ -40,6 +40,7 @@ import { InjectionProductionCockpit } from './components/InjectionProductionCock
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { nextProjectLocationId } from './lib/injectionStatusMapNavigation';
+import { getInjectionProjectView } from './lib/injectionProjectViews';
 import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -5699,6 +5700,7 @@ export default function App() {
           : '本地缓存待检查';
 
   const runtimeSyncStatus = getRuntimeSyncStatus(syncStatus, syncing);
+  const injectionProjectView = getInjectionProjectView(activeTab);
 
   const showDashboardSkeleton = activeTab === 'dashboard' && dashboardBootstrapLoading && !dashboardBootstrapLoaded;
 
@@ -6113,7 +6115,7 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
-              {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement initialProjectId={injectionPlanProjectId?.toString()} onClearInitialProjectId={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
+              {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 if (shouldApplyCockpitMeasureFilters(tab)) {
                   setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);

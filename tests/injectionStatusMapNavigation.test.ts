@@ -80,9 +80,9 @@ test('map wiring forwards project clearing and keeps marker deletion independent
   const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const mapSource = readFileSync(new URL('../src/components/OilWellMap.tsx', import.meta.url), 'utf8');
   const projectSource = readFileSync(new URL('../src/components/InjectionProjectManagement.tsx', import.meta.url), 'utf8');
-  assert.match(appSource, /<InjectionProjectManagement initialProjectId=\{injectionPlanProjectId\?\.toString\(\)\} onClearInitialProjectId=/);
-  assert.match(appSource, /onClearInitialProjectId=/);
-  assert.match(projectSource, /onClearInitialProjectId\?\.\(\)/);
+  assert.match(appSource, /<InjectionProjectManagement view=\{injectionProjectView\} initialProjectId=\{injectionPlanProjectId\?\.toString\(\)\} onClearProjectLocation=/);
+  assert.match(appSource, /onClearProjectLocation=/);
+  assert.match(projectSource, /clearProjectLocation\?\.\(\)/);
   assert.match(mapSource, /const calibrationMarkers = markers\.filter/);
   assert.match(mapSource, /calibrationMarkers\.map\(\(marker\)/);
   assert.match(mapSource, /removeMarker\(marker\.wellNo\)/);
