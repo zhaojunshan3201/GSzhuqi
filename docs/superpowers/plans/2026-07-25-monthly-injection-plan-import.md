@@ -294,4 +294,3 @@ Expected: 构建成功；若 lint 仍存在本功能之前的既有错误，记�
 Run: git status --short; git diff main...HEAD --check
 
 Expected: 无空白错误；不包含 injection-plan.xlsx 或 production.db 等运行数据。
-
