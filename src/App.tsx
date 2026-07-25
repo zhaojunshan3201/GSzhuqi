@@ -2166,6 +2166,8 @@ export default function App() {
   const [showAccessLogin, setShowAccessLogin] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [activeTab, _setActiveTab] = useState<SidebarTab>('dashboard');
+  // Task 5 consumes this selected project when the plan view gains drill-down support.
+  const [injectionPlanProjectId, setInjectionPlanProjectId] = useState<number | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   const mobileSidebarButtonRef = useRef<HTMLButtonElement>(null);
@@ -6064,7 +6066,7 @@ export default function App() {
           {activeTab === 'externalTransferTracking' && '外输跟踪'}
           {activeTab === 'dashboard' && '系统概览'}
           {activeTab === 'injectionProductionCockpit' && '注采驾驶舱'}
-          {activeTab === 'oilWellMap' && '油井位图'}
+          {activeTab === 'oilWellMap' && '注采状态地图'}
           {activeTab === 'block' && '区块生产动态生成器'}
           {activeTab === 'well' && '单井精细化动态分析'}
           {activeTab === 'analysis' && '重点情况分析与建议'}
@@ -6119,7 +6121,14 @@ export default function App() {
                 }
                 setActiveTab(tab);
               }} />}
-              {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} />}
+              {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} onNavigate={(tab, filters) => {
+                if (tab === 'injectionPlan') {
+                  setInjectionPlanProjectId(filters.projectId ?? null);
+                } else {
+                  setMeasureQuery((current) => ({ ...current, keyword: filters.keyword ?? '' }));
+                }
+                setActiveTab(tab);
+              }} />}
               {activeTab === 'externalTransferTracking' && <ExternalTransferTracking />}
               {activeTab === 'runtimeLogs' && (
                 <div className="page-stack">
