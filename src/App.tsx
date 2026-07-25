@@ -38,8 +38,7 @@ import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
-import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitAlerts, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
-import type { InjectionProductionCockpit as InjectionProductionCockpitData } from './lib/injectionProductionCockpit';
+import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
@@ -2435,7 +2434,7 @@ export default function App() {
     year: ''
   });
   const [measureAvailableYears, setMeasureAvailableYears] = useState<string[]>([]);
-  const [measureCockpitAlertFilter, setMeasureCockpitAlertFilter] = useState<{ type: CockpitMeasureFilters['alertType']; alerts: InjectionProductionCockpitData['alerts'] } | null>(null);
+  const [measureCockpitAlertFilter, setMeasureCockpitAlertFilter] = useState<{ type: NonNullable<CockpitMeasureFilters['alertType']>; wellNos: string[] } | null>(null);
   const [measureMetricMode, setMeasureMetricMode] = useState<MeasureMetricMode>('cumulative_oil');
   const [measureEvaluationSorted, setMeasureEvaluationSorted] = useState(true);
 
@@ -4347,7 +4346,7 @@ export default function App() {
 
   const displayedMeasures = React.useMemo(() => {
     const cockpitFilteredMeasures = measureCockpitAlertFilter
-      ? filterMeasuresByCockpitAlerts(measures, measureCockpitAlertFilter.alerts, measureCockpitAlertFilter.type)
+      ? filterMeasuresByCockpitWellNos(measures, measureCockpitAlertFilter.wellNos)
       : measures;
     if (!measureEvaluationSorted) {
       return cockpitFilteredMeasures;
@@ -6053,16 +6052,10 @@ export default function App() {
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
               {activeTab === 'injectionProjectManagement' && <InjectionProjectManagement />}
-              {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={async (tab, filters = {}) => {
+              {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
                 if (filters.alertType) {
-                  try {
-                    const result = await fetchJson('/api/injection-production/cockpit');
-                    const cockpit = result.data as InjectionProductionCockpitData;
-                    setMeasureCockpitAlertFilter({ type: filters.alertType, alerts: cockpit.alerts || [] });
-                  } catch {
-                    setMeasureCockpitAlertFilter({ type: filters.alertType, alerts: [] });
-                  }
+                  setMeasureCockpitAlertFilter({ type: filters.alertType, wellNos: filters.alertWellNos || [] });
                 } else {
                   setMeasureCockpitAlertFilter(null);
                 }

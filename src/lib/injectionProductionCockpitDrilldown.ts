@@ -4,6 +4,7 @@ export type CockpitMeasureFilters = {
   keyword?: string;
   block?: string;
   alertType?: CockpitAlertType;
+  alertWellNos?: string[];
 };
 
 export const cockpitAlertLabels: Record<CockpitAlertType, string> = {
@@ -21,28 +22,52 @@ export function getCockpitBlockDrilldown(params: unknown): Pick<CockpitMeasureFi
   return typeof name === 'string' && name.trim() ? { block: name } : null;
 }
 
-export function getCockpitAlertDrilldown(params: unknown): Pick<CockpitMeasureFilters, 'alertType'> | null {
+export function getCockpitAlertDrilldown(
+  params: unknown,
+  alerts: readonly Pick<InjectionProductionCockpit['alerts'][number], 'type' | 'wellNo'>[],
+): Pick<CockpitMeasureFilters, 'alertType' | 'alertWellNos'> | null {
   const name = typeof params === 'object' && params !== null && 'name' in params ? (params as { name?: unknown }).name : null;
   const alertType = typeof name === 'string' ? alertTypeByLabel.get(name) : undefined;
-  return alertType ? { alertType } : null;
+  if (!alertType) return null;
+  return {
+    alertType,
+    alertWellNos: [...new Set(alerts.filter((alert) => alert.type === alertType).map((alert) => alert.wellNo))],
+  };
 }
 
-export function applyCockpitMeasureFilters<T extends { keyword: string; block: string }>(
-  current: T,
+type MeasureQuery = {
+  start: string;
+  end: string;
+  block: string;
+  station: string;
+  status: string;
+  keyword: string;
+  year: string;
+};
+
+export function applyCockpitMeasureFilters(
+  _current: MeasureQuery,
   filters: CockpitMeasureFilters,
-): { query: T; alertType: CockpitAlertType | undefined } {
+): { query: MeasureQuery; alertType: CockpitAlertType | undefined } {
   return {
-    query: { ...current, keyword: filters.keyword || '', block: filters.block || '' },
+    query: {
+      start: '',
+      end: '',
+      block: filters.block || '',
+      station: '',
+      status: '',
+      keyword: filters.keyword || '',
+      year: '',
+    },
     alertType: filters.alertType,
   };
 }
 
-export function filterMeasuresByCockpitAlerts<T extends { jh: string }>(
+export function filterMeasuresByCockpitWellNos<T extends { jh: string }>(
   rows: T[],
-  alerts: readonly Pick<InjectionProductionCockpit['alerts'][number], 'type' | 'wellNo'>[],
-  alertType?: CockpitAlertType,
+  wellNos?: readonly string[],
 ): T[] {
-  if (!alertType) return rows;
-  const wells = new Set(alerts.filter((alert) => alert.type === alertType).map((alert) => alert.wellNo));
+  if (!wellNos) return rows;
+  const wells = new Set(wellNos);
   return rows.filter((row) => wells.has(row.jh));
 }

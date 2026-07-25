@@ -54,7 +54,7 @@ export function InjectionProductionCockpit({ onNavigate }: {
         <ReactECharts option={buildBlockPerformanceOption(data.blockPerformanceSummary)} style={{ height: '100%' }} onEvents={blockEvents} />
       </ChartCard>
       <ChartCard title="异常分布" hasData={hasChartValues(alertValues)} className="xl:col-span-2">
-        <ReactECharts option={buildAlertDistributionOption(data.alertDistribution)} style={{ height: '100%' }} onEvents={{ click: (params: unknown) => { const filters = getCockpitAlertDrilldown(params); if (filters) onNavigate('measures', filters); } }} />
+        <ReactECharts option={buildAlertDistributionOption(data.alertDistribution)} style={{ height: '100%' }} onEvents={{ click: (params: unknown) => { const filters = getCockpitAlertDrilldown(params, data.alerts); if (filters) onNavigate('measures', filters); } }} />
       </ChartCard>
       <ChartCard title="区块生命周期状态" hasData={hasChartValues(blockStatusValues)} className="md:col-span-2 xl:col-span-7">
         <ReactECharts option={buildBlockStatusOption(data.blockStatusSummary)} style={{ height: '100%' }} onEvents={blockEvents} />
