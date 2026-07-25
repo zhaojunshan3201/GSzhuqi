@@ -21,7 +21,7 @@ async function withDatabase(run: (db: any) => Promise<void>) {
       CREATE TABLE measure_tracking (
         id INTEGER PRIMARY KEY, jh TEXT, detail_json TEXT,
         current_round_start_time TEXT, current_round_stop_time TEXT,
-        current_round_boiler TEXT, current_round_steam REAL, current_round_process TEXT
+        current_round_boiler TEXT, current_round_steam REAL, current_round_process TEXT, current_round_measure_type TEXT
       );
     `);
     await run(db);
@@ -79,7 +79,7 @@ test('reads current-round columns, exposes boiler and steam comparisons, and fil
     await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07'), (2, '2026-08')`);
     await insertProject(db, { id: 1, wellNo: 'C-1', unit: '一队', boiler: '锅炉-A', steam: 100, importId: 1 });
     await insertProject(db, { id: 2, wellNo: 'D-1', unit: '二队', boiler: '锅炉-B', importId: 2 });
-    await db.run(`INSERT INTO measure_tracking VALUES (1, 'C-1', NULL, '2026-07-10', '2026-07-20', '锅炉-X', 120, '蒸汽吞吐')`);
+    await db.run(`INSERT INTO measure_tracking VALUES (1, 'C-1', NULL, '2026-07-10', '2026-07-20', '\u9505\u7089-X', 120, '\u84b8\u6c7d\u541e\u5410', NULL)`);
 
     const all = await buildInjectionPlanActualComparison(db);
     const row = all.find((item) => item.wellNo === 'C-1')!;
@@ -91,3 +91,26 @@ test('reads current-round columns, exposes boiler and steam comparisons, and fil
   });
 });
 
+
+
+test('normalizes Chinese well numbers, parses Excel date serials, prefers the greatest id on the same latest date, and applies the one-day schedule threshold', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_plan_imports VALUES (1, '2026-07')`);
+    await insertProject(db, { id: 1, wellNo: '高 2 - 2 - 96', start: '2026-07-10', end: '2026-07-20', process: '蒸汽吞吐' });
+    await insertProject(db, { id: 2, wellNo: 'EARLY-1', start: '2026-07-10', end: '2026-07-20', process: '蒸汽吞吐' });
+    await insertProject(db, { id: 3, wellNo: 'LATE-1', start: '2026-07-10', end: '2026-07-20', process: '蒸汽吞吐' });
+
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json, current_round_boiler, current_round_steam, current_round_measure_type) VALUES (1, ' 高2-2-96 ', ?, '锅炉-A', 90, '蒸汽吞吐')`, [JSON.stringify({ '开注时间': 46213, '停注时间': 46223 })]);
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json, current_round_boiler, current_round_steam, current_round_measure_type) VALUES (2, '高 2 - 2 - 96', ?, '锅炉-A', 101, '蒸汽吞吐')`, [JSON.stringify({ '开注时间': 46213, '停注时间': 46224 })]);
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json, current_round_boiler, current_round_steam, current_round_measure_type) VALUES (3, 'EARLY-1', ?, '锅炉-A', 100, '蒸汽吞吐')`, [JSON.stringify({ '开注时间': '2026/07/08', '停注时间': '2026/07/18' })]);
+    await db.run(`INSERT INTO measure_tracking (id, jh, detail_json, current_round_boiler, current_round_steam, current_round_measure_type) VALUES (4, 'LATE-1', ?, '锅炉-A', 100, '蒸汽吞吐')`, [JSON.stringify({ '开注时间': '2026-07-12', '停注时间': '2026-07-22' })]);
+
+    const result = await buildInjectionPlanActualComparison(db);
+
+    assert.deepEqual(result.map((row) => [row.wellNo, row.actualStartDate, row.actualEndDate, row.actualSteam, row.actualProcess, row.comparisonStatus]), [
+      ['高2-2-96', '2026-07-10', '2026-07-21', 101, '蒸汽吞吐', 'on_schedule'],
+      ['EARLY-1', '2026-07-08', '2026-07-18', 100, '蒸汽吞吐', 'early'],
+      ['LATE-1', '2026-07-12', '2026-07-22', 100, '蒸汽吞吐', 'delayed'],
+    ]);
+  });
+});

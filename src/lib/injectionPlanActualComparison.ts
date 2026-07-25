@@ -30,7 +30,7 @@ export type InjectionPlanActualComparisonFilters = {
 };
 
 type DatabaseLike = { all(sql: string, params?: unknown[]): Promise<any[]> };
-type Actual = { startDate: string | null; endDate: string | null; boiler: string | null; steam: number | null; process: string | null };
+type Actual = { id: number; startDate: string | null; endDate: string | null; boiler: string | null; steam: number | null; process: string | null };
 
 function normalizedText(value: unknown): string | null {
   const text = String(value ?? '').trim();
@@ -38,7 +38,7 @@ function normalizedText(value: unknown): string | null {
 }
 
 function normalizedWellNo(value: unknown): string {
-  return String(value ?? '').trim().toUpperCase();
+  return String(value ?? '').replace(/\s+/g, '').toUpperCase();
 }
 
 function numberValue(value: unknown): number | null {
@@ -50,7 +50,18 @@ function numberValue(value: unknown): number | null {
 function dateValue(value: unknown): string | null {
   const text = normalizedText(value);
   if (!text) return null;
-  const match = text.match(/^(\d{4})[/.年-](\d{1,2})[/.月-](\d{1,2})/);
+
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    if (Number.isFinite(serial) && serial >= 1) {
+      const wholeDays = Math.floor(serial);
+      const adjustedDays = wholeDays >= 60 ? wholeDays - 1 : wholeDays;
+      const date = new Date(Date.UTC(1899, 11, 31) + adjustedDays * 86400000);
+      return date.toISOString().slice(0, 10);
+    }
+  }
+
+  const match = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s].*)?$/);
   if (!match) return text;
   return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
 }
@@ -73,11 +84,12 @@ function firstValue(row: any, json: Record<string, unknown>, keys: string[]): un
 function actualFrom(row: any): Actual {
   const json = detail(row);
   return {
-    startDate: dateValue(firstValue(row, json, ['current_round_start_time', 'current_round_injection_time', 'current_round_start_date', 'current_round_open_time', '开注时间'])),
-    endDate: dateValue(firstValue(row, json, ['current_round_stop_time', 'current_round_end_time', 'current_round_end_date', '停注时间'])),
-    boiler: normalizedText(firstValue(row, json, ['current_round_boiler', 'current_round_boiler_no', 'boiler', '锅炉编号'])),
-    steam: numberValue(firstValue(row, json, ['current_round_steam', 'current_round_cumulative_steam', 'actual_steam', 'cumulative_steam', '累注汽量'])),
-    process: normalizedText(firstValue(row, json, ['current_round_process', 'current_round_process_type', 'process_type', '措施类型'])),
+    id: Number(row.id) || 0,
+    startDate: dateValue(firstValue(row, json, ['current_round_start_time', 'current_round_injection_time', 'current_round_start_date', 'current_round_open_time', '\u5f00\u6ce8\u65f6\u95f4', '开注时间'])),
+    endDate: dateValue(firstValue(row, json, ['current_round_stop_time', 'current_round_end_time', 'current_round_end_date', '\u505c\u6ce8\u65f6\u95f4', '停注时间'])),
+    boiler: normalizedText(firstValue(row, json, ['current_round_boiler', 'current_round_boiler_no', 'boiler', '\u9505\u7089\u7f16\u53f7', '锅炉编号'])),
+    steam: numberValue(firstValue(row, json, ['current_round_steam', 'current_round_cumulative_steam', 'actual_steam', 'cumulative_steam', '\u7d2f\u6ce8\u6c7d\u91cf', '累注汽量'])),
+    process: normalizedText(firstValue(row, json, ['current_round_process', 'current_round_process_type', 'current_round_measure_type', 'process_type', '\u63aa\u65bd\u7c7b\u578b', '措施类型'])),
   };
 }
 
@@ -93,8 +105,8 @@ function statusFor(row: Omit<InjectionPlanActualComparison, 'comparisonStatus'>)
   const missingCriticalData = !row.plannedStartDate || !row.plannedEndDate || row.plannedBoiler == null || row.actualBoiler == null || row.plannedSteam == null || row.actualSteam == null || row.plannedProcess == null || row.actualProcess == null;
   if (missingCriticalData) return 'incomplete';
   if (!row.actualEndDate) return 'in_progress';
-  if ((row.startVarianceDays ?? 0) > 0 || (row.endVarianceDays ?? 0) > 0) return 'delayed';
-  if ((row.startVarianceDays ?? 0) < 0 || (row.endVarianceDays ?? 0) < 0) return 'early';
+  if ((row.startVarianceDays ?? 0) > 1 || (row.endVarianceDays ?? 0) > 1) return 'delayed';
+  if ((row.startVarianceDays ?? 0) < -1 || (row.endVarianceDays ?? 0) < -1) return 'early';
   return 'on_schedule';
 }
 
@@ -108,13 +120,13 @@ export async function buildInjectionPlanActualComparison(db: DatabaseLike, filte
     const wellNo = normalizedWellNo(trackingRow.jh);
     const actual = actualFrom(trackingRow);
     const current = actualByWell.get(wellNo);
-    if (!current || (actual.startDate || '') >= (current.startDate || '')) actualByWell.set(wellNo, actual);
+    if (!current || (actual.startDate || '') > (current.startDate || '') || ((actual.startDate || '') === (current.startDate || '') && actual.id > current.id)) actualByWell.set(wellNo, actual);
   }
 
   return projects
     .map((project) => {
       const wellNo = normalizedWellNo(project.well_no);
-      const actual = actualByWell.get(wellNo) ?? { startDate: null, endDate: null, boiler: null, steam: null, process: null };
+      const actual = actualByWell.get(wellNo) ?? { id: 0, startDate: null, endDate: null, boiler: null, steam: null, process: null };
       const plannedStartDate = dateValue(project.planned_start_date);
       const plannedEndDate = dateValue(project.planned_end_date);
       const plannedBoiler = normalizedText(project.boiler);
