@@ -37,11 +37,9 @@ test('renders runtime details outside the header and uses button navigation', ()
   assert.match(appSource, /const SidebarItem[\s\S]*?<button[\s\S]*?type="button"/);
 });
 
-test('renders the standalone runtime log navigation item after navigation groups', () => {
+test('renders runtime logs only through the grouped sidebar navigation', () => {
   const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
-  assert.match(
-    appSource,
-    /\{sidebarNavigationGroups\.map\([\s\S]*?\}\)\}\s*<SidebarItem[\s\S]*?icon=\{sidebarIconMap\[runtimeLogNavigationItem\.icon\]\}[\s\S]*?label=\{runtimeLogNavigationItem\.label\}[\s\S]*?active=\{activeTab === runtimeLogNavigationItem\.tab\}[\s\S]*?onClick=\{\(\) => setActiveTab\(runtimeLogNavigationItem\.tab\)\}/,
-  );
+  assert.match(appSource, /\{sidebarNavigationGroups\.map\(/);
+  assert.doesNotMatch(appSource, /runtimeLogNavigationItem/);
 });

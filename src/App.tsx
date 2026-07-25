@@ -39,7 +39,7 @@ import { ExternalTransferTracking } from './components/ExternalTransferTracking'
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
-import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
+import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
 import { AxonLandingPage } from './components/AxonLandingPage';
@@ -6010,13 +6010,6 @@ export default function App() {
             </div>
           );
         })}
-        <SidebarItem
-          icon={sidebarIconMap[runtimeLogNavigationItem.icon]}
-          label={runtimeLogNavigationItem.label}
-          active={activeTab === runtimeLogNavigationItem.tab}
-          onClick={() => setActiveTab(runtimeLogNavigationItem.tab)}
-        />
-
         <div className="mt-auto border-t border-white/10 pt-4">
         <div className="px-5 py-3 flex items-center gap-3 text-gray-400">
         <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-inner">
