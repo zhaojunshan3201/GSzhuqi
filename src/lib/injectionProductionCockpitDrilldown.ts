@@ -18,8 +18,22 @@ export const cockpitAlertLabels: Record<CockpitAlertType, string> = {
 const alertTypeByLabel = new Map(Object.entries(cockpitAlertLabels).map(([type, label]) => [label, type as CockpitAlertType]));
 
 export function getCockpitBlockDrilldown(params: unknown): Pick<CockpitMeasureFilters, 'block'> | null {
-  const name = typeof params === 'object' && params !== null && 'name' in params ? (params as { name?: unknown }).name : null;
+  if (typeof params !== 'object' || params === null) return null;
+  const event = params as { name?: unknown; axisValue?: unknown; data?: unknown };
+  const dataName = typeof event.data === 'object' && event.data !== null && 'name' in event.data
+    ? (event.data as { name?: unknown }).name
+    : null;
+  const name = event.name || dataName || event.axisValue;
   return typeof name === 'string' && name.trim() ? { block: name } : null;
+}
+
+export function formatCockpitMetric(
+  value: number,
+  metric: keyof InjectionProductionCockpit['metrics'],
+): string {
+  return new Intl.NumberFormat('zh-CN', {
+    maximumFractionDigits: metric === 'oilSteamRatio' ? 3 : 2,
+  }).format(value);
 }
 
 export function getCockpitAlertDrilldown(

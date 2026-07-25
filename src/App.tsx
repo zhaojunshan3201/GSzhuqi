@@ -2166,6 +2166,10 @@ export default function App() {
   const [showAccessLogin, setShowAccessLogin] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [activeTab, setActiveTab] = useState<SidebarTab>('dashboard');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [activeTab]);
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState<SidebarGroupKey | null>(getSidebarGroupKey('dashboard') ?? 'overview');
   const [dailyCompare, setDailyCompare] = useState<any>(null);
 
@@ -5933,7 +5937,8 @@ export default function App() {
       }}
     >
       {/* Sidebar */}
-      <aside className="app-sidebar">
+      {mobileSidebarOpen && <button type="button" aria-label="关闭导航" className="fixed inset-0 z-10 bg-slate-950/40 md:hidden" onClick={() => setMobileSidebarOpen(false)} />}
+      <aside className={cn('app-sidebar fixed inset-y-0 left-0 transition-transform duration-200 md:static md:translate-x-0', mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full')}>
         <div className="app-sidebar-brand flex items-center gap-3 px-5 py-5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white shadow-sm">
             <Droplets size={19} />
@@ -6006,7 +6011,9 @@ export default function App() {
         {/* Header */}
         <header className="app-header">
           <div className="flex items-center gap-3">
-          <Menu className="text-gray-400" size={20} />
+          <button type="button" aria-label="切换导航" className="rounded-md p-1 text-gray-500 hover:bg-slate-100 md:hidden" onClick={() => setMobileSidebarOpen((open) => !open)}>
+            <Menu size={20} />
+          </button>
           <h2 className="text-gray-700 font-bold text-lg">
           {activeTab === 'externalTransferTracking' && '外输跟踪'}
           {activeTab === 'dashboard' && '系统概览'}
@@ -9413,7 +9420,7 @@ export default function App() {
 
                   {measureCockpitAlertFilter && (
                     <div className="status-banner status-banner-info flex items-center justify-between gap-3">
-                      <span>驾驶舱异常筛选：{cockpitAlertLabels[measureCockpitAlertFilter.type!]}（{displayedMeasures.length} 口井）</span>
+                      <span>驾驶舱异常筛选：{cockpitAlertLabels[measureCockpitAlertFilter.type]}（{measureCockpitAlertFilter.wellNos.length} 口井）</span>
                       <button type="button" className="action-button action-outline" onClick={() => setMeasureCockpitAlertFilter(null)}>清除异常筛选</button>
                     </div>
                   )}

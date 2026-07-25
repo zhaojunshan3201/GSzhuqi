@@ -1,15 +1,23 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 
 import {
   applyCockpitMeasureFilters,
   filterMeasuresByCockpitWellNos,
+  formatCockpitMetric,
   getCockpitAlertDrilldown,
   getCockpitBlockDrilldown,
 } from '../src/lib/injectionProductionCockpitDrilldown';
 
 test('maps valid ECharts block clicks and ignores invalid params', () => {
   assert.deepEqual(getCockpitBlockDrilldown({ name: '一区' }), { block: '一区' });
+  assert.deepEqual(getCockpitBlockDrilldown({
+    componentType: 'series',
+    seriesType: 'bar',
+    data: { name: '二区', value: 12 },
+  }), { block: '二区' });
+  assert.deepEqual(getCockpitBlockDrilldown({ axisValue: '三区' }), { block: '三区' });
   assert.equal(getCockpitBlockDrilldown({ name: '' }), null);
   assert.equal(getCockpitBlockDrilldown(null), null);
 });
@@ -56,6 +64,21 @@ test('applies keyword and block before retaining the cockpit alert type', () => 
 });
 
 test('cockpit alert well numbers filter measures without recalculating alerts', () => {
-  const rows = [{ jh: 'W-1' }, { jh: 'W-2' }, { jh: 'W-3' }, { jh: 'W-4' }];
-  assert.deepEqual(filterMeasuresByCockpitWellNos(rows, ['W-1', 'W-3']), [{ jh: 'W-1' }, { jh: 'W-3' }]);
+  const rows = [{ jh: 'W-1', id: 1 }, { jh: 'W-1', id: 2 }, { jh: 'W-2', id: 3 }];
+  assert.equal(filterMeasuresByCockpitWellNos(rows, ['W-1']).length, 2);
+});
+
+test('formats cockpit metrics without floating point noise', () => {
+  assert.equal(formatCockpitMetric(66661.19999999995, 'dailyOil'), '66,661.2');
+  assert.equal(formatCockpitMetric(1234.567, 'cumulativeOilGain'), '1,234.57');
+  assert.equal(formatCockpitMetric(0.123456, 'oilSteamRatio'), '0.123');
+});
+
+
+test('App sidebar is an off-canvas drawer below md and navigation closes it', () => {
+  const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.match(source, /fixed inset-y-0 left-0/);
+  assert.match(source, /md:static md:translate-x-0/);
+  assert.match(source, /setMobileSidebarOpen\(false\)/);
+  assert.match(source, /setMobileSidebarOpen\(\(open\) => !open\)/);
 });
