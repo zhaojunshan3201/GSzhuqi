@@ -3546,7 +3546,7 @@ app.post("/api/register", async (req, res) => {
     try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
-  const allowedProjectPatchFields = new Set(["projectName", "block", "owner", "status", "governanceMeasure", "plannedDate", "actualDate", "beforeMetric", "afterMetric", "closureEvidence", "riskLevel", "estimatedLoss", "affectedWellCount"]);
+  const allowedProjectPatchFields = new Set(["projectName", "block", "owner", "status", "governanceMeasure", "plannedDate", "actualDate", "beforeMetric", "afterMetric", "closureEvidence", "riskLevel", "estimatedLoss", "affectedWellCount", "affectedDailyOil", "occupiedProduction"]);
   app.get("/api/channeling-projects/pending", async (req, res) => {
     try { res.json({ success: true, data: await listChannelingGovernanceTodos(localDb, typeof req.query.date === "string" ? req.query.date : new Date().toISOString().slice(0, 10)) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
@@ -3559,7 +3559,7 @@ app.post("/api/register", async (req, res) => {
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   const allowedRelationPatchFields = new Set(["injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
-  const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") ? 400 : 500;
+  const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") || error.message?.includes("Invalid governance status transition") ? 400 : 500;
   const forceChannelingTestError = (req: any) => {
     if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-error") === "1") throw new Error("forced channeling runtime error");
   };
