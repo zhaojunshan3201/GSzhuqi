@@ -20,7 +20,7 @@ const expectedNavigation: Array<{
     key: 'injection',
     label: '注汽管理',
     tabs: ['channelingProjectManagement', 'measureWellSelection', 'injectionPlan', 'injectionConstruction', 'injectionSoakTransfer', 'measures', 'measureAnalysis'],
-    labels: ['注窜项目台账', '选井决策', '方案与计划', '施工监控', '焦井转抽', '生产响应', '效果评价'],
+    labels: ['注窜项目台账', '选井决策', '方案与计划', '施工监控', '焾井转抽', '生产响应', '效果评价'],
   },
   {
     key: 'analysis',
