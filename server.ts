@@ -24,12 +24,16 @@ import {
 import {
   getSelectionWellDetail,
   initMeasureWellSelectionTables,
+  listSelectionCycles,
   listSelectionWells,
+  replaceSelectionScores,
+  upsertSelectionCycles,
   type SelectionFilter,
 } from "./src/lib/measureWellSelectionStore.ts";
 import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts";
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
+import { findSimilarInjectionWells, type InjectionWellProfile } from "./src/lib/similarInjectionWells.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
@@ -3107,6 +3111,24 @@ function buildLargeChangeData(rows: CompareResultRow[]) {
   };
 }
 
+function buildSimilarInjectionProfiles(cycles: Awaited<ReturnType<typeof listSelectionCycles>>): InjectionWellProfile[] {
+  const latest = new Map<string, (typeof cycles)[number]>();
+  for (const cycle of cycles) {
+    const key = `${cycle.block}\u0000${cycle.wellName}`;
+    if (!latest.has(key)) latest.set(key, cycle);
+  }
+  return [...latest.values()].map((cycle) => ({
+    wellName: cycle.wellName,
+    block: cycle.block,
+    process: cycle.injectN2 ? 'steam+n2' : cycle.boiler ? 'steam' : null,
+    production: cycle.peakOil ?? null,
+    steamVolume: cycle.actualSteam ?? cycle.designSteam ?? null,
+    steamRate: cycle.rate ?? null,
+    pressure: cycle.maxPressure ?? cycle.pressure ?? null,
+    cycleOil: cycle.cycleOil ?? null,
+  }));
+}
+
 async function rebuildMeasureWellSelection() {
   const trackingRows = await localDb.all('SELECT jh, block, station, detail_json FROM measure_tracking');
   const cycles = buildSelectionCyclesFromTrackingRows(trackingRows);
@@ -3591,12 +3613,6 @@ app.post("/api/register", async (req, res) => {
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
   const channelingRole = (req: express.Request) => authenticatedUser(req)?.role;
-  const requireChannelingOperator = (req: express.Request, res: express.Response) => {
-    const role = channelingRole(req);
-    if (!role) { res.status(401).json({ success: false, message: "Authentication is required" }); return false; }
-    if (["admin", "technical", "technician", "operation", "operator"].includes(role)) return true;
-    res.status(403).json({ success: false, message: "Channeling operation permission is required" }); return false;
-  };
   const requireChannelingAdmin = (req: express.Request, res: express.Response) => {
     const role = channelingRole(req);
     if (!role) { res.status(401).json({ success: false, message: "Authentication is required" }); return false; }
@@ -3604,7 +3620,7 @@ app.post("/api/register", async (req, res) => {
     res.status(403).json({ success: false, message: "Channeling admin permission is required" }); return false;
   };
   app.post("/api/channeling-projects", async (req, res) => {
-    if (!requireChannelingOperator(req, res)) return;
+    if (!requireChannelingAdmin(req, res)) return;
     try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
@@ -3614,7 +3630,7 @@ app.post("/api/register", async (req, res) => {
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-projects/:id", async (req, res) => {
-    if (req.body?.status === "closed" ? !requireChannelingAdmin(req, res) : !requireChannelingOperator(req, res)) return;
+    if (!requireChannelingAdmin(req, res)) return;
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     if (!req.body || typeof req.body !== "object" || Object.keys(req.body).some((key) => !allowedProjectPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported project patch field" });
@@ -3643,14 +3659,14 @@ app.post("/api/register", async (req, res) => {
     } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-projects/:id/relations", async (req, res) => {
-    if (!requireChannelingOperator(req, res)) return;
+    if (!requireChannelingAdmin(req, res)) return;
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-projects/:id/relation-imports/preview", channelingRelationImportUploadMiddleware, async (req, res) => {
-    if (!requireChannelingOperator(req, res)) return;
+    if (!requireChannelingAdmin(req, res)) return;
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try {
@@ -3668,14 +3684,14 @@ app.post("/api/register", async (req, res) => {
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-relation-imports/:id/confirm", async (req, res) => {
-    if (!requireChannelingOperator(req, res)) return;
+    if (!requireChannelingAdmin(req, res)) return;
     const importId = Number(req.params.id);
     if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try { res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId) }); }
     catch (error: any) { const status = error.message === "channeling relation import not found" ? 404 : error.message === "only preview imports can be confirmed" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-relations/:id", async (req, res) => {
-    if (req.body?.status === "released" ? !requireChannelingAdmin(req, res) : !requireChannelingOperator(req, res)) return;
+    if (!requireChannelingAdmin(req, res)) return;
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     if (!req.body || typeof req.body !== "object" || Object.keys(req.body || {}).some((key) => !allowedRelationPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported relation patch field" });
@@ -5108,10 +5124,21 @@ app.post("/api/register", async (req, res) => {
     } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
   });
 
+  app.get('/api/measure-well-selection/wells/:wellName/similar', async (req, res) => {
+    try {
+      await ensureMeasureWellSelectionScores();
+      const block = typeof req.query.block === 'string' ? req.query.block : undefined;
+      const profiles = buildSimilarInjectionProfiles(await listSelectionCycles(localDb));
+      const target = profiles.find((profile) => profile.wellName === req.params.wellName && (!block || profile.block === block));
+      if (!target) { res.status(404).json({ success: false, message: 'well not found' }); return; }
+      res.json({ success: true, data: findSimilarInjectionWells(target, profiles) });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
   app.get('/api/measure-well-selection/wells/:wellName', async (req, res) => {
     try {
       await ensureMeasureWellSelectionScores();
-      const detail = await getSelectionWellDetail(localDb, req.params.wellName);
+      const detail = await getSelectionWellDetail(localDb, req.params.wellName, typeof req.query.block === 'string' ? req.query.block : undefined);
       if (!detail) { res.status(404).json({ success: false, message: 'well not found' }); return; }
       const curves = await Promise.all(detail.cycles.map(async (cycle) => {
         const rows = await localDb.all('SELECT rq AS date, oil FROM production WHERE jh = ? AND rq BETWEEN ? AND ? ORDER BY rq ASC', [

@@ -20,6 +20,19 @@ type Detail = {
   cycles: Cycle[];
   curves: Array<{ round: number; transferDate: string; oilSeeingDay: number | null; points: Array<{ day: number; oil: number }> }>;
 };
+type SimilarMatch = {
+  wellName: string;
+  block: string | null;
+  score: number;
+  completeness: number;
+  confidence: number;
+  scoreBreakdown: Record<string, { score: number | null; max: number; reason: string }>;
+  caseEffect: { production: number | null; cycleOil: number | null; declineRate: number | null };
+};
+type SimilarWells = {
+  matches: SimilarMatch[];
+  parameterRanges: Record<string, { min: number; max: number; median: number; count: number }>;
+};
 type ApiResponse<T> = { success: boolean; data?: T; message?: string };
 
 const gradeLabel: Record<Grade, string> = {
@@ -42,6 +55,8 @@ export function MeasureWellSelection() {
   const [wells, setWells] = useState<Well[]>([]);
   const [selected, setSelected] = useState<Well | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [similar, setSimilar] = useState<SimilarWells | null>(null);
+  const [similarLoading, setSimilarLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -77,6 +92,18 @@ export function MeasureWellSelection() {
       .then((data) => { if (active) setDetail(data); })
       .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : '加载井详情失败'); })
       .finally(() => { if (active) setDetailLoading(false); });
+    return () => { active = false; };
+  }, [selected]);
+
+  useEffect(() => {
+    if (!selected) { setSimilar(null); return; }
+    let active = true;
+    setSimilarLoading(true);
+    const query = new URLSearchParams({ block: selected.block });
+    void requestJson<SimilarWells>(`/api/measure-well-selection/wells/${encodeURIComponent(selected.wellName)}/similar?${query}`)
+      .then((data) => { if (active) setSimilar(data); })
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : '加载同类井失败'); })
+      .finally(() => { if (active) setSimilarLoading(false); });
     return () => { active = false; };
   }, [selected]);
 
@@ -170,6 +197,13 @@ export function MeasureWellSelection() {
       <section className="space-y-6">
         <div className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">{selected ? `${selected.wellName}近三轮日产油曲线` : '近三轮日产油曲线'}</h4><p className="mt-1 text-sm text-slate-500">以转抽日为第 0 天，展示转抽前 30 天与后 180 天。</p></div>{detailLoading ? <div className="flex h-[330px] items-center justify-center text-sm text-slate-400">加载详情中…</div> : <ReactECharts option={chartOption} style={{ height: 330 }} />}</div>
         <div className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">近三轮注汽参数</h4></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr>{['轮次', '转抽时间', '注汽量', '最高压力', '排量', 'N2', '锅炉', '峰值产油', '见油天数', '周期产油', '油汽比'].map((name) => <th key={name} className="px-3 py-3 font-semibold">{name}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{detail?.cycles.map((cycle) => <tr key={`${cycle.transferDate}-${cycle.round}`}><td className="px-3 py-3">{cycle.round}</td><td className="px-3 py-3">{cycle.transferDate}</td><td className="px-3 py-3">{cycle.actualSteam ?? cycle.designSteam ?? '--'}</td><td className="px-3 py-3">{cycle.maxPressure ?? '--'}</td><td className="px-3 py-3">{cycle.rate ?? '--'}</td><td className="px-3 py-3">{cycle.injectN2 === null || cycle.injectN2 === undefined ? '--' : cycle.injectN2 ? '是' : '否'}</td><td className="px-3 py-3">{cycle.boiler ?? '--'}</td><td className="px-3 py-3">{cycle.peakOil ?? '--'}</td><td className="px-3 py-3">{cycle.oilSeeingDays ?? '--'}</td><td className="px-3 py-3">{cycle.cycleOil ?? '--'}</td><td className="px-3 py-3">{cycle.actualSteam && cycle.cycleOil != null ? (cycle.cycleOil / cycle.actualSteam).toFixed(3) : '--'}</td></tr>)}{!detailLoading && selected && detail?.cycles.length === 0 && <tr><td className="px-3 py-5 text-slate-400" colSpan={11}>暂无轮次参数。</td></tr>}</tbody></table></div></div>
+        <div className="app-card overflow-hidden">
+          <div className="app-card-header"><h4 className="font-bold text-slate-800">同类注汽井（Top 10）</h4><p className="mt-1 text-sm text-slate-500">评分由区块、层系、井型、工艺、生产/递减、注汽方案、风险与效果组成；缺失字段不计分并降低置信度。</p></div>
+          {similarLoading ? <div className="p-5 text-sm text-slate-400">加载同类井中…</div> : !similar?.matches.length ? <div className="p-5 text-sm text-slate-500">暂无可比较的同类井数据。</div> : <>
+            <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-3">井号</th><th className="px-3 py-3">综合相似度</th><th className="px-3 py-3">完整度/置信度</th><th className="px-3 py-3">案例效果</th><th className="px-3 py-3">评分依据</th></tr></thead><tbody className="divide-y divide-slate-100">{similar.matches.map((match) => <tr key={`${match.block}-${match.wellName}`}><td className="px-3 py-3 font-semibold">{match.wellName}<small className="ml-2 text-slate-400">{match.block ?? '--'}</small></td><td className="px-3 py-3 text-emerald-700">{match.score.toFixed(1)}</td><td className="px-3 py-3">{(match.completeness * 100).toFixed(0)}% / {(match.confidence * 100).toFixed(0)}%</td><td className="px-3 py-3">峰值 {match.caseEffect.production ?? '--'}；周期油 {match.caseEffect.cycleOil ?? '--'}</td><td className="px-3 py-3 text-xs text-slate-500">{Object.entries(match.scoreBreakdown).filter(([, part]) => part.score !== null).map(([name, part]) => `${name} ${part.score?.toFixed(1)}/${part.max}`).join('，')}</td></tr>)}</tbody></table></div>
+            <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">参数范围：{Object.entries(similar.parameterRanges).map(([name, range]) => `${name} ${range.min}–${range.max}（中位 ${range.median}，${range.count} 例）`).join('；')}</div>
+          </>}
+        </div>
       </section>
     </div>
   </div>;

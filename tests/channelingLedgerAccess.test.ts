@@ -14,10 +14,10 @@ test("channeling ledger exposes complete lists and role-specific actions instead
   assert.match(component, /auth-expired/);
 });
 
-test("channeling APIs restrict mutating actions to technical, operation, or admin roles and reserve high-risk actions for admins", async () => {
+test("channeling APIs reserve every mutating action for administrators", async () => {
   const server = await readFile(new URL("../server.ts", import.meta.url), "utf8");
   assert.match(server, /const channelingRole =/);
-  assert.match(server, /requireChannelingOperator/);
+  assert.doesNotMatch(server, /requireChannelingOperator/);
   assert.match(server, /requireChannelingAdmin/);
   assert.match(server, /crypto\.randomBytes\(32\)/);
   assert.match(server, /AUTH_TOKEN_SECRET/);
