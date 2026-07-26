@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { createChannelingRelation, initChannelingProjectTables, type DatabaseLike, type ImpactLevel, type RelationSource } from './channelingProjectStore.ts';
 
 export type ChannelingRelationImportRow = {
+  rowNumber: number;
   injectorWellNo: string;
   producerWellNo: string;
   impactLevel: ImpactLevel;
@@ -53,7 +54,7 @@ export function parseChannelingRelationRows(workbook: XLSX.WorkBook): Channeling
   rows.slice(1).forEach((row, index) => {
     if (row.every(isBlank)) return;
     const rowNumber = index + 2;
-    try { valid.push(parseRow(row, columns)); }
+    try { valid.push({ rowNumber, ...parseRow(row, columns) }); }
     catch (error: any) { invalid.push({ row: rowNumber, reason: error.message }); }
   });
   return { valid, invalid };
@@ -79,16 +80,28 @@ export async function createChannelingRelationPreview(db: DatabaseLike, projectI
   const now = new Date().toISOString();
   const result = await db.run(`INSERT INTO channeling_relation_imports (project_id, file_name, status, valid_count, invalid_count, created_at) VALUES (?, ?, 'preview', ?, ?, ?)`, [projectId, fileName.trim(), rows.valid.length, rows.invalid.length, now]);
   const importId = result.lastID!;
-  for (const [index, value] of rows.valid.entries()) await db.run(`INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, 'valid', ?, ?)`, [importId, index + 2, JSON.stringify(value)]);
+  for (const value of rows.valid) await db.run(`INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, 'valid', ?, ?)`, [importId, value.rowNumber, JSON.stringify(value)]);
   for (const value of rows.invalid) await db.run(`INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, 'invalid', ?, ?)`, [importId, value.row, JSON.stringify(value)]);
   return readImport(db, importId, true);
 }
 
+const confirmationQueues = new WeakMap<DatabaseLike, Promise<void>>();
+
+function queueConfirmation<T>(db: DatabaseLike, operation: () => Promise<T>): Promise<T> {
+  const previous = confirmationQueues.get(db) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  confirmationQueues.set(db, current.then(() => undefined, () => undefined));
+  return current;
+}
+
 export async function confirmChannelingRelationImport(db: DatabaseLike, importId: number): Promise<ChannelingRelationImport> {
-  await initChannelingProjectTables(db);
-  await initChannelingRelationImportTables(db);
-  await db.exec('BEGIN');
-  try {
+  return queueConfirmation(db, async () => {
+    await initChannelingProjectTables(db);
+    await initChannelingRelationImportTables(db);
+    let began = false;
+    try {
+      await db.exec('BEGIN');
+      began = true;
     const batch = await db.get('SELECT * FROM channeling_relation_imports WHERE id = ?', [importId]);
     if (!batch) throw new Error('channeling relation import not found');
     if (batch.status !== 'preview') throw new Error('only preview imports can be confirmed');
@@ -106,9 +119,13 @@ export async function confirmChannelingRelationImport(db: DatabaseLike, importId
     }
     const now = new Date().toISOString();
     await db.run("UPDATE channeling_relation_imports SET status = 'confirmed', confirmed_at = ? WHERE id = ?", [now, importId]);
-    await db.exec('COMMIT');
-    return readImport(db, importId, false);
-  } catch (error) { await db.exec('ROLLBACK'); throw error; }
+      await db.exec('COMMIT');
+      return readImport(db, importId, false);
+    } catch (error) {
+      if (began) await db.exec('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 export async function listChannelingRelationImports(db: DatabaseLike, projectId?: number): Promise<ChannelingRelationImport[]> {
@@ -147,7 +164,7 @@ function parseRow(row: unknown[], columns: Columns): ChannelingRelationImportRow
   const source = parseSource(textAt(row, columns.source));
   const effectiveStartDate = parseDate(row[columns.effectiveStartDate!]);
   const effectiveEndDate = parseDate(row[columns.effectiveEndDate!]);
-  if (effectiveStartDate && effectiveEndDate && effectiveEndDate < effectiveStartDate) throw new Error('ÓÐÐ§ÆÚÖ¹ must not precede ÓÐÐ§ÆÚÆð');
+  if (effectiveStartDate && effectiveEndDate && effectiveEndDate < effectiveStartDate) throw new Error('æœ‰æ•ˆæœŸæ­¢ must not precede æœ‰æ•ˆæœŸèµ·');
   return omitUndefined({ injectorWellNo, producerWellNo, impactLevel, confidence, source, reservoirLayer: textAt(row, columns.reservoirLayer), evidence: textAt(row, columns.evidence), effectiveStartDate, effectiveEndDate, owner: textAt(row, columns.owner) });
 }
 function omitUndefined<T extends Record<string, unknown>>(value: T): T { return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T; }
@@ -156,11 +173,7 @@ function textAt(row: unknown[], column: number | undefined): string | undefined 
 function required(value: string | undefined, label: string): string { if (!value) throw new Error(`${label} is required`); return value; }
 function normalizeHeader(value: unknown): string { return String(value ?? '').replace(/\s+/g, '').trim(); }
 function parseImpactLevel(value: string | undefined): ImpactLevel { const levels: Record<string, ImpactLevel> = { high: 'high', '\u9ad8': 'high', medium: 'medium', '\u4e2d': 'medium', low: 'low', '\u4f4e': 'low' }; if (!value || !levels[value.toLowerCase()]) throw new Error('impactLevel is invalid'); return levels[value.toLowerCase()]; }
-function parseSource(value: string | undefined): RelationSource | undefined { if (!value) return undefined; if (['suspected', '\u7591\u4f3c', '\u7591\u4f3c\u8bc6\u522b'].includes(value.toLowerCase())) return 'suspected'; if (['manual', '\u624b\u5de5'].includes(value.toLowerCase())) return 'manual'; if (['import', '\u5bfc\u5165'].includes(value.toLowerCase())) return 'import'; throw new Error('À´Ô´ is invalid'); }
-function parseConfidence(value: unknown): number | undefined { if (isBlank(value)) return undefined; const parsed = typeof value === 'number' ? value : Number(String(value).replace('%', '').trim()); const normalized = parsed > 1 ? parsed / 100 : parsed; if (!Number.isFinite(normalized) || normalized < 0 || normalized > 1) throw new Error('ÖÃÐÅ¶È is invalid'); return normalized; }
-function parseDate(value: unknown): string | undefined { if (isBlank(value)) return undefined; if (typeof value === 'number') { const date = XLSX.SSF.parse_date_code(value); return date ? formatDate(date.y, date.m, date.d) : undefined; } const match = /^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/.exec(String(value).trim()); if (!match) throw new Error('ÓÐÐ§ÆÚ is invalid'); return formatDate(Number(match[1]), Number(match[2]), Number(match[3])) ?? (() => { throw new Error('ÓÐÐ§ÆÚ is invalid'); })(); }
+function parseSource(value: string | undefined): RelationSource | undefined { if (!value) return undefined; if (['suspected', '\u7591\u4f3c', '\u7591\u4f3c\u8bc6\u522b'].includes(value.toLowerCase())) return 'suspected'; if (['manual', '\u624b\u5de5'].includes(value.toLowerCase())) return 'manual'; if (['import', '\u5bfc\u5165'].includes(value.toLowerCase())) return 'import'; throw new Error('æ¥æº is invalid'); }
+function parseConfidence(value: unknown): number | undefined { if (isBlank(value)) return undefined; const parsed = typeof value === 'number' ? value : Number(String(value).replace('%', '').trim()); const normalized = parsed > 1 ? parsed / 100 : parsed; if (!Number.isFinite(normalized) || normalized < 0 || normalized > 1) throw new Error('ç½®ä¿¡åº¦ is invalid'); return normalized; }
+function parseDate(value: unknown): string | undefined { if (isBlank(value)) return undefined; if (typeof value === 'number') { const date = XLSX.SSF.parse_date_code(value); return date ? formatDate(date.y, date.m, date.d) : undefined; } const match = /^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/.exec(String(value).trim()); if (!match) throw new Error('æœ‰æ•ˆæœŸ is invalid'); return formatDate(Number(match[1]), Number(match[2]), Number(match[3])) ?? (() => { throw new Error('æœ‰æ•ˆæœŸ is invalid'); })(); }
 function formatDate(year: number, month: number, day: number): string | undefined { const date = new Date(Date.UTC(year, month - 1, day)); return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : undefined; }
-
-
-
-
