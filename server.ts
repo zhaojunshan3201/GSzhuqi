@@ -3555,19 +3555,24 @@ app.post("/api/register", async (req, res) => {
     catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
   });
   app.post("/api/injection-operation-recommendations/:planId/adjustments", async (req, res) => {
-    const actor = requireOperationAdmin(req, res); if (!actor) return;
-    const planId = req.params.planId;
-    const body = req.body as { reason?: unknown; patch?: unknown };
-    const allowed = new Set(["staggerDays", "steamVolume", "pressure", "steamRate", "soakDays", "convertToProductionDay"]);
-    if (!body || typeof body.reason !== "string" || !body.reason.trim() || !body.patch || typeof body.patch !== "object" || Object.keys(body.patch).some((key) => !allowed.has(key)) || Object.values(body.patch as Record<string, unknown>).some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0)) { res.status(400).json({ success: false, message: "\u8c03\u6574\u5408\u540c\u65e0\u6548" }); return; }
-    const input = await buildOperationInput(operationBlock(req));
-    const original = input.candidates.find((candidate) => candidate.id === planId);
-    if (!original) { res.status(404).json({ success: false, message: "\u65b9\u6848\u4e0d\u5b58\u5728" }); return; }
-    const updated = { ...original, ...(body.patch as object) };
-    const auditId = crypto.randomUUID(); const adjustedAt = new Date().toISOString();
-    await localDb.run("INSERT INTO injection_operation_adjustment_audits (audit_id, plan_id, actor, adjusted_at, original_json, new_json, reason) VALUES (?, ?, ?, ?, ?, ?, ?)", [auditId, planId, actor.username, adjustedAt, JSON.stringify(original), JSON.stringify(updated), body.reason.trim()]);
-    input.adjustments = [{ planId, reason: body.reason.trim(), patch: body.patch as any }];
-    res.status(201).json({ success: true, data: buildInjectionOperationRecommendations(input), audit: { auditId, actor: actor.username, adjustedAt, reason: body.reason.trim(), original, updated } });
+    try {
+      const actor = requireOperationAdmin(req, res); if (!actor) return;
+      const planId = req.params.planId;
+      const body = req.body as { reason?: unknown; patch?: unknown };
+      const allowed = new Set(["staggerDays", "steamVolume", "pressure", "steamRate", "soakDays", "convertToProductionDay"]);
+      if (!body || typeof body.reason !== "string" || !body.reason.trim() || !body.patch || typeof body.patch !== "object" || Object.keys(body.patch).some((key) => !allowed.has(key)) || Object.values(body.patch as Record<string, unknown>).some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0)) { res.status(400).json({ success: false, message: "\u8c03\u6574\u5408\u540c\u65e0\u6548" }); return; }
+      const input = await buildOperationInput(operationBlock(req));
+      const original = input.candidates.find((candidate) => candidate.id === planId);
+      if (!original) { res.status(404).json({ success: false, message: "\u65b9\u6848\u4e0d\u5b58\u5728" }); return; }
+      const adjustment = { planId, reason: body.reason.trim(), patch: body.patch as any };
+      const evaluated = buildInjectionOperationRecommendations({ ...input, adjustments: [adjustment] });
+      const rejected = evaluated.rejected.find((item) => item.id === planId);
+      if (rejected) { res.status(400).json({ success: false, message: `\u8c03\u6574\u8fdd\u53cd\u8fd0\u884c\u7ea6\u675f\uff1a${rejected.reason}` }); return; }
+      const updated = { ...original, ...(body.patch as object) };
+      const auditId = crypto.randomUUID(); const adjustedAt = new Date().toISOString();
+      await localDb.run("INSERT INTO injection_operation_adjustment_audits (audit_id, plan_id, actor, adjusted_at, original_json, new_json, reason) VALUES (?, ?, ?, ?, ?, ?, ?)", [auditId, planId, actor.username, adjustedAt, JSON.stringify(original), JSON.stringify(updated), body.reason.trim()]);
+      res.status(201).json({ success: true, data: evaluated, audit: { auditId, actor: actor.username, adjustedAt, reason: body.reason.trim(), original, updated } });
+    } catch (error: any) { res.status(500).json({ success: false, message: error?.message || "\u4fdd\u5b58\u8c03\u6574\u5931\u8d25" }); }
   });
 
   app.get("/api/injection-production/cockpit", async (_req, res) => {
