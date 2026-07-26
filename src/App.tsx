@@ -6116,7 +6116,7 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
-              {activeTab === 'channelingProjectManagement' && <ChannelingProjectManagement canEdit={user?.role === 'admin'} />}
+              {activeTab === 'channelingProjectManagement' && <ChannelingProjectManagement role={user?.role || 'guest'} />}
               {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 if (shouldApplyCockpitMeasureFilters(tab)) {

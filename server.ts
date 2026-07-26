@@ -36,7 +36,7 @@ import { buildInjectionStatusMap } from "./src/lib/injectionStatusMap.ts";
 import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHandler.ts";
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
-import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingGovernanceTodos, listChannelingProjects, listChannelingRelations, updateChannelingProject, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
+import { createChannelingProject, createChannelingRelation, deleteChannelingProject, deleteChannelingRelation, initChannelingProjectTables, listChannelingGovernanceTodos, listChannelingProjects, listChannelingRelations, updateChannelingProject, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
 import { confirmChannelingRelationImport, createChannelingRelationPreview, initChannelingRelationImportTables, listChannelingRelationImports, parseChannelingRelationRows } from "./src/lib/channelingRelationImport.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
@@ -3542,7 +3542,17 @@ app.post("/api/register", async (req, res) => {
     try { res.json({ success: true, data: await listChannelingProjects(localDb, { block: typeof req.query.block === "string" ? req.query.block : undefined }) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
+  const channelingRole = (req: express.Request) => req.get("x-channeling-role") || "admin";
+  const requireChannelingOperator = (req: express.Request, res: express.Response) => {
+    if (["admin", "technical", "technician", "operation", "operator"].includes(channelingRole(req))) return true;
+    res.status(403).json({ success: false, message: "Channeling operation permission is required" }); return false;
+  };
+  const requireChannelingAdmin = (req: express.Request, res: express.Response) => {
+    if (channelingRole(req) === "admin") return true;
+    res.status(403).json({ success: false, message: "Channeling admin permission is required" }); return false;
+  };
   app.post("/api/channeling-projects", async (req, res) => {
+    if (!requireChannelingOperator(req, res)) return;
     try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
@@ -3552,10 +3562,18 @@ app.post("/api/register", async (req, res) => {
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-projects/:id", async (req, res) => {
+    if (req.body?.status === "closed" ? !requireChannelingAdmin(req, res) : !requireChannelingOperator(req, res)) return;
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     if (!req.body || typeof req.body !== "object" || Object.keys(req.body).some((key) => !allowedProjectPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported project patch field" });
     try { res.json({ success: true, data: await updateChannelingProject(localDb, id, req.body) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.delete("/api/channeling-projects/:id", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { await deleteChannelingProject(localDb, id); res.status(204).end(); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   const allowedRelationPatchFields = new Set(["injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
@@ -3573,12 +3591,14 @@ app.post("/api/register", async (req, res) => {
     } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-projects/:id/relations", async (req, res) => {
+    if (!requireChannelingOperator(req, res)) return;
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-projects/:id/relation-imports/preview", channelingRelationImportUploadMiddleware, async (req, res) => {
+    if (!requireChannelingOperator(req, res)) return;
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try {
@@ -3596,16 +3616,26 @@ app.post("/api/register", async (req, res) => {
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-relation-imports/:id/confirm", async (req, res) => {
+    if (!requireChannelingOperator(req, res)) return;
     const importId = Number(req.params.id);
     if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try { res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId) }); }
     catch (error: any) { const status = error.message === "channeling relation import not found" ? 404 : error.message === "only preview imports can be confirmed" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-relations/:id", async (req, res) => {
+    if (req.body?.status === "released" ? !requireChannelingAdmin(req, res) : !requireChannelingOperator(req, res)) return;
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     if (!req.body || typeof req.body !== "object" || Object.keys(req.body || {}).some((key) => !allowedRelationPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported relation patch field" });
     try { forceChannelingTestError(req); res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+
+  app.delete("/api/channeling-relations/:id", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { await deleteChannelingRelation(localDb, id); res.status(204).end(); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
 
