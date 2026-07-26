@@ -36,7 +36,7 @@ import { buildInjectionStatusMap } from "./src/lib/injectionStatusMap.ts";
 import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHandler.ts";
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
-import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingProjects, listChannelingRelations, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
+import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingGovernanceTodos, listChannelingProjects, listChannelingRelations, updateChannelingProject, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
 import { confirmChannelingRelationImport, createChannelingRelationPreview, initChannelingRelationImportTables, listChannelingRelationImports, parseChannelingRelationRows } from "./src/lib/channelingRelationImport.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
@@ -3545,6 +3545,18 @@ app.post("/api/register", async (req, res) => {
   app.post("/api/channeling-projects", async (req, res) => {
     try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  const allowedProjectPatchFields = new Set(["projectName", "block", "owner", "status", "governanceMeasure", "plannedDate", "actualDate", "beforeMetric", "afterMetric", "closureEvidence", "riskLevel", "estimatedLoss", "affectedWellCount"]);
+  app.get("/api/channeling-projects/pending", async (req, res) => {
+    try { res.json({ success: true, data: await listChannelingGovernanceTodos(localDb, typeof req.query.date === "string" ? req.query.date : new Date().toISOString().slice(0, 10)) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  app.patch("/api/channeling-projects/:id", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    if (!req.body || typeof req.body !== "object" || Object.keys(req.body).some((key) => !allowedProjectPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported project patch field" });
+    try { res.json({ success: true, data: await updateChannelingProject(localDb, id, req.body) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   const allowedRelationPatchFields = new Set(["injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
   const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") ? 400 : 500;
