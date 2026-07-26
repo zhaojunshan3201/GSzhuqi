@@ -36,6 +36,7 @@ import { buildInjectionStatusMap } from "./src/lib/injectionStatusMap.ts";
 import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHandler.ts";
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
+import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingProjects, listChannelingRelations, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -1005,6 +1006,7 @@ async function initLocalDb() {
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
   await initInjectionProjectTables(localDb);
+  await initChannelingProjectTables(localDb);
   await initMonthlyInjectionPlanImportTables(localDb);
   await initExternalTransferTables(localDb);
 
@@ -3530,6 +3532,32 @@ app.post("/api/register", async (req, res) => {
   });
   app.get("/api/injection-projects/pending", async (req, res) => {
     res.json({ success: true, data: await listProjectPendingItems(localDb, typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10)) });
+  });
+
+  app.get("/api/channeling-projects", async (req, res) => {
+    try { res.json({ success: true, data: await listChannelingProjects(localDb, { block: typeof req.query.block === "string" ? req.query.block : undefined }) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-projects", async (req, res) => {
+    try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  app.get("/api/channeling-project-relations", async (req, res) => {
+    try {
+      const projectId = typeof req.query.projectId === "string" ? Number(req.query.projectId) : undefined;
+      if (projectId !== undefined && (!Number.isInteger(projectId) || projectId <= 0)) throw new Error("projectId is invalid");
+      res.json({ success: true, data: await listChannelingRelations(localDb, { projectId, status: typeof req.query.status === "string" ? req.query.status : undefined, source: typeof req.query.source === "string" ? req.query.source : undefined, block: typeof req.query.block === "string" ? req.query.block : undefined }) });
+    } catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-project-relations", async (req, res) => {
+    try { res.status(201).json({ success: true, data: await createChannelingRelation(localDb, req.body) }); }
+    catch (error: any) { res.status(error.message === "Project not found" ? 404 : 400).json({ success: false, message: error.message }); }
+  });
+  app.patch("/api/channeling-project-relations/:id", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }
+    catch (error: any) { res.status(error.message === "Relation not found" ? 404 : 400).json({ success: false, message: error.message }); }
   });
 
   app.get("/api/dashboard/bootstrap", async (req, res) => {
