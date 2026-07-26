@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
@@ -36,6 +36,7 @@ import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelec
 import { findSimilarInjectionWells, type InjectionWellProfile } from "./src/lib/similarInjectionWells.ts";
 import { buildInjectionScenarioForecast } from "./src/lib/injectionScenarioForecast.ts";
 import { buildInjectionOperationRecommendations, type InjectionOperationOptimizerInput } from "./src/lib/injectionOperationOptimizer.ts";
+import { buildInjectionOperationReport, buildInjectionOperationReportWorkbook, type InjectionOperationReportKind } from "./src/lib/injectionOperationReports.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
@@ -3554,6 +3555,39 @@ app.post("/api/register", async (req, res) => {
     try { res.json({ success: true, data: buildInjectionOperationRecommendations(await buildOperationInput(operationBlock(req))) }); }
     catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
   });
+  const operationReportOptions = (req: express.Request) => {
+    const kind = typeof req.query.type === "string" ? req.query.type : "daily";
+    if (!(["daily", "weekly", "retrospective"] as const).includes(kind as InjectionOperationReportKind)) throw new Error("\u62a5\u544a\u7c7b\u578b\u65e0\u6548");
+    const date = typeof req.query.date === "string" ? req.query.date : new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) throw new Error("\u62a5\u544a\u65e5\u671f\u65e0\u6548");
+    return { kind: kind as InjectionOperationReportKind, date, block: operationBlock(req) };
+  };
+  const buildOperationReport = async (req: express.Request) => {
+    const options = operationReportOptions(req);
+    const rows = await localDb.all(`SELECT rq, oil, liquid, water_cut, jh, block FROM production WHERE rq <= ?${options.block ? " AND block = ?" : ""} ORDER BY rq DESC LIMIT 30`, options.block ? [options.date, options.block] : [options.date]);
+    const recommendations = buildInjectionOperationRecommendations(await buildOperationInput(options.block)).recommendations;
+    return buildInjectionOperationReport({
+      ...options,
+      production: rows.map((row: any) => ({ date: row.rq, oil: row.oil, liquid: row.liquid, waterCut: row.water_cut, well: row.jh, block: row.block })),
+      channelingProjects: await listChannelingProjects(localDb, options.block ? { block: options.block } : {}),
+      recommendations: recommendations.map((item) => ({ id: item.id, name: item.name, score: item.score, confidence: item.confidence, netBenefit: item.metrics.netBenefit, assumptions: item.assumptions })),
+    });
+  };
+  app.get("/api/injection-operation-reports", async (req, res) => {
+    try { res.json({ success: true, data: await buildOperationReport(req) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error?.message || "\u8fd0\u884c\u62a5\u544a\u751f\u6210\u5931\u8d25" }); }
+  });
+  app.get("/api/injection-operation-reports.xlsx", async (req, res) => {
+    try {
+      const report = await buildOperationReport(req);
+      const workbook = buildInjectionOperationReportWorkbook(report);
+      const filename = `${report.title}-${report.period.end}.xlsx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.attachment(encodeURIComponent(filename));
+      res.send(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+    } catch (error: any) { res.status(400).json({ success: false, message: error?.message || "\u8fd0\u884c\u62a5\u544a\u751f\u6210\u5931\u8d25" }); }
+  });
+
   app.post("/api/injection-operation-recommendations/:planId/adjustments", async (req, res) => {
     try {
       const actor = requireOperationAdmin(req, res); if (!actor) return;
@@ -5361,3 +5395,5 @@ app.post("/api/register", async (req, res) => {
 }
 
 startServer();
+
+
