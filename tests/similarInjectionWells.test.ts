@@ -38,3 +38,13 @@ test('returns no more than ten matches and an explainable score composition', ()
   assert.equal(result.matches[0].scoreBreakdown.risk.max, 7.5);
   assert.equal(result.matches[0].scoreBreakdown.outcome.max, 7.5);
 });
+
+test('keeps a same-named candidate from a different block while excluding the target itself', () => {
+  const sameNamedOtherBlock: InjectionWellProfile = { ...exact, wellName: target.wellName, block: 'B' };
+  const targetDuplicate: InjectionWellProfile = { ...target };
+
+  const result = findSimilarInjectionWells(target, [sameNamedOtherBlock, targetDuplicate]);
+
+  assert.deepEqual(result.matches.map((match) => match.block), ['B']);
+  assert.deepEqual(result.matches.map((match) => match.wellName), [target.wellName]);
+});

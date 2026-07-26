@@ -54,7 +54,7 @@ export interface SimilarInjectionWellsResult {
 
 export function findSimilarInjectionWells(target: InjectionWellProfile, candidates: readonly InjectionWellProfile[]): SimilarInjectionWellsResult {
   const matches = candidates
-    .filter((candidate) => candidate.wellName !== target.wellName)
+    .filter((candidate) => candidate.wellName !== target.wellName || text(candidate.block) !== text(target.block))
     .map((candidate) => scoreCandidate(target, candidate))
     .sort((left, right) => right.score - left.score || right.confidence - left.confidence || left.wellName.localeCompare(right.wellName))
     .slice(0, 10);
