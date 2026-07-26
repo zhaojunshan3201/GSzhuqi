@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { formatShanghaiBusinessDate } from '../src/lib/businessDate.ts';
 import { buildConstructionDashboard, buildSoakTransferDashboard, filterProjectsForView, getInjectionProjectView, isOverdue } from '../src/lib/injectionProjectViews.ts';
 
 test('maps injection workflow tabs to project views', () => {
@@ -113,4 +114,20 @@ test('filters and summarizes plan-actual comparisons for the construction view o
     { label: '\u63d0\u524d', count: 0 }, { label: '\u6309\u8ba1\u5212', count: 1 }, { label: '\u6ede\u540e', count: 1 }, { label: '\u4e25\u91cd\u6ede\u540e', count: 0 },
   ]);
   assert.deepEqual(result.charts.boilerSteamTotals, [{ boiler: 'B-1', plannedSteam: 30, actualSteam: 27 }]);
+});
+
+// The component normalizes the instant to a Shanghai business date before dashboard calculation.
+test('keeps extended todo fields and uses the Shanghai day for overdue dashboard calculations', () => {
+  const businessToday = formatShanghaiBusinessDate(new Date('2026-07-25T16:30:00.000Z'));
+  const projects = [
+    { id: 1, lifecycleStatus: 'soaking', plannedTransferDate: '2026-07-25', soakStartDate: '2026-07-25', wellNo: 'J-1', owner: 'owner-a' },
+  ];
+
+  const dashboard = buildSoakTransferDashboard(projects, businessToday);
+  const todoProject = dashboard.todo[0];
+  assert.equal(todoProject.wellNo, 'J-1');
+  assert.equal(todoProject.owner, 'owner-a');
+  assert.equal(dashboard.kpis.overdue, 1);
+  assert.equal(dashboard.kpis.averageSoakDays, 1);
+  assert.equal(isOverdue(projects[0], businessToday), true);
 });

@@ -5,7 +5,7 @@ type ViewProject = {
   plannedTransferDate?: string | null;
 };
 
-export type BusinessDate = string | Date;
+export type BusinessDate = string;
 
 export type ConstructionDashboardProject = ViewProject & { id: number };
 export type SoakTransferDashboardProject = ConstructionDashboardProject & { soakStartDate?: string | null };
@@ -21,7 +21,7 @@ export type SoakTransferDashboard<TProject extends SoakTransferDashboardProject 
   kpis: { soaking: number; pendingTransfer: number; overdue: number; averageSoakDays: number | null; missingSoakDate: number };
   durationDistribution: { label: string; count: number }[];
   statusDistribution: { status: string; count: number }[];
-  todo: SoakTransferDashboardProject[];
+  todo: TProject[];
 };
 
 export function getInjectionProjectView(tab: string): InjectionProjectView {
@@ -40,14 +40,14 @@ export function filterProjectsForView<T extends ViewProject>(projects: T[], view
   return filtered.sort((left, right) => Number(isOverdue(right, today)) - Number(isOverdue(left, today)));
 }
 
-function validDate(value: BusinessDate | null | undefined): string | null {
-  const date = value instanceof Date ? (Number.isFinite(value.getTime()) ? value.toISOString().slice(0, 10) : null) : value;
+function validDate(value: string | null | undefined): string | null {
+  const date = value;
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const time = Date.parse(`${date}T00:00:00Z`);
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === date ? date : null;
 }
 
-function dateTime(value: BusinessDate | null | undefined): number | null {
+function dateTime(value: string | null | undefined): number | null {
   const date = validDate(value);
   return date ? Date.parse(`${date}T00:00:00Z`) : null;
 }
