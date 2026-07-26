@@ -36,6 +36,8 @@ import { buildInjectionStatusMap } from "./src/lib/injectionStatusMap.ts";
 import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHandler.ts";
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
+import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingProjects, listChannelingRelations, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
+import { confirmChannelingRelationImport, createChannelingRelationPreview, initChannelingRelationImportTables, listChannelingRelationImports, parseChannelingRelationRows } from "./src/lib/channelingRelationImport.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -44,7 +46,7 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_FILE = path.join(__dirname, "production.db");
+const DB_FILE = process.env.LOCAL_DB_FILE || path.join(__dirname, "production.db");
 const WELL_MAP_DATA_DIR = [
   path.resolve(__dirname, "..", "..", "井位图"),
   path.resolve(__dirname, "..", "..", "..", "..", "井位图"),
@@ -1005,6 +1007,8 @@ async function initLocalDb() {
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
   await initInjectionProjectTables(localDb);
+  await initChannelingProjectTables(localDb);
+  await initChannelingRelationImportTables(localDb);
   await initMonthlyInjectionPlanImportTables(localDb);
   await initExternalTransferTables(localDb);
 
@@ -3083,6 +3087,8 @@ async function startServer() {
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
   });
   const monthlyInjectionPlanUploadMiddleware = handleMeasureImportUpload(monthlyInjectionPlanUpload);
+  const channelingRelationImportUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES } });
+  const channelingRelationImportUploadMiddleware = handleMeasureImportUpload(channelingRelationImportUpload);
   const wellMapDailyUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
@@ -3530,6 +3536,65 @@ app.post("/api/register", async (req, res) => {
   });
   app.get("/api/injection-projects/pending", async (req, res) => {
     res.json({ success: true, data: await listProjectPendingItems(localDb, typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10)) });
+  });
+
+  app.get("/api/channeling-projects", async (req, res) => {
+    try { res.json({ success: true, data: await listChannelingProjects(localDb, { block: typeof req.query.block === "string" ? req.query.block : undefined }) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-projects", async (req, res) => {
+    try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  const allowedRelationPatchFields = new Set(["injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
+  const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") ? 400 : 500;
+  const forceChannelingTestError = (req: any) => {
+    if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-error") === "1") throw new Error("forced channeling runtime error");
+  };
+  app.get("/api/channeling-projects/:id/relations", async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try {
+      forceChannelingTestError(req);
+      if (!await localDb.get("SELECT id FROM channeling_projects WHERE id = ?", [projectId])) return res.status(404).json({ success: false, message: "Project not found" });
+      res.json({ success: true, data: await listChannelingRelations(localDb, { projectId, status: typeof req.query.status === "string" ? req.query.status : undefined, source: typeof req.query.source === "string" ? req.query.source : undefined, block: typeof req.query.block === "string" ? req.query.block : undefined }) });
+    } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-projects/:id/relations", async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-projects/:id/relation-imports/preview", channelingRelationImportUploadMiddleware, async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try {
+      const file = (req as express.Request & { file?: { originalname: string; buffer: Buffer } }).file;
+      if (!file) return res.status(400).json({ success: false, message: "Excel file is required" });
+      if (!/\.xlsx?$/i.test(file.originalname)) return res.status(400).json({ success: false, message: "only .xlsx and .xls files are supported" });
+      const data = await createChannelingRelationPreview(localDb, projectId, decodeUploadedFileName(file.originalname), parseChannelingRelationRows(XLSX.read(file.buffer, { type: "buffer" })));
+      res.status(201).json({ success: true, data });
+    } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.get("/api/channeling-projects/:id/relation-imports", async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { res.json({ success: true, data: await listChannelingRelationImports(localDb, projectId) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-relation-imports/:id/confirm", async (req, res) => {
+    const importId = Number(req.params.id);
+    if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId) }); }
+    catch (error: any) { const status = error.message === "channeling relation import not found" ? 404 : error.message === "only preview imports can be confirmed" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
+  });
+  app.patch("/api/channeling-relations/:id", async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    if (!req.body || typeof req.body !== "object" || Object.keys(req.body || {}).some((key) => !allowedRelationPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported relation patch field" });
+    try { forceChannelingTestError(req); res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
 
   app.get("/api/dashboard/bootstrap", async (req, res) => {
