@@ -38,6 +38,8 @@ import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
+import { ChannelingProjectManagement } from './components/ChannelingProjectManagement';
+import { InjectionOptimization } from './components/InjectionOptimization';
 import { InjectionOperationReports } from './components/InjectionOperationReports';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { nextProjectLocationId } from './lib/injectionStatusMapNavigation';
@@ -710,16 +712,16 @@ const decodeMojibakeText = (value: unknown) => {
   const raw = String(value ?? '').trim();
   if (!raw) return raw;
 
-  const countCjk = (text: string) => (text.match(/[\u3400-\u9fff]/g) || []).length;
-  const countMojibake = (text: string) => (text.match(/[ÃÂÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ�]/g) || []).length;
+  const countCjk = (text: string) => (text.match(/[㐀-鿿]/g) || []).length;
+  const countMojibake = (text: string) => (text.match(/[À-ÿ]/g) || []).length;
 
   try {
     const bytes = Uint8Array.from(Array.from(raw).map((char) => char.charCodeAt(0) & 0xff));
     const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes).trim();
-    if (decoded && !decoded.includes('� ') && countCjk(decoded) > countCjk(raw)) {
+    if (decoded && !decoded.includes('\uFFFD') && countCjk(decoded) > countCjk(raw)) {
       return decoded;
     }
-    if (decoded && countMojibake(raw) > 0 && countMojibake(decoded) < countMojibake(raw)) {
+    if (decoded && !decoded.includes('\uFFFD') && countMojibake(raw) > 0 && countMojibake(decoded) < countMojibake(raw)) {
       return decoded;
     }
   } catch {
@@ -734,16 +736,16 @@ const decodeMojibakeText = (value: unknown) => {
 const normalizeWaterLabValue = (value: string): string | null => {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
-  const emptyKeywords = ["?", "??", "???", "???", "??", "???", "????", "?"];
+  const emptyKeywords = ["无", "无数据", "无结果", "未测", "未测试", "未录入", "暂无", "/"];
   if (emptyKeywords.includes(raw)) return null;
-  if (raw === "?") return "100";
+  if (raw === "全") return "100";
   if (raw.includes("/")) {
     const parts = raw.split("/");
     const numbers: number[] = [];
     for (const part of parts) {
       const cleaned = part.trim().replace(/\+$/, "");
-      if (emptyKeywords.includes(cleaned) || cleaned === "?" || cleaned === "??") continue;
-      if (cleaned === "?") { numbers.push(100); continue; }
+      if (emptyKeywords.includes(cleaned) || cleaned === "无" || cleaned === "暂无") continue;
+      if (cleaned === "全") { numbers.push(100); continue; }
       const num = parseFloat(cleaned);
       if (!isNaN(num) && isFinite(num)) numbers.push(num);
     }
@@ -1827,6 +1829,7 @@ const Login = ({ onLogin, globalError, overlay = false, onCancel }: { onLogin: (
           setIsRegister(false);
           setPassword('');
         } else {
+          if (data.token) localStorage.setItem('token', data.token);
           onLogin(data.user);
         }
       } else {
@@ -2503,6 +2506,18 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      localStorage.removeItem('oil_system_user');
+      localStorage.removeItem('token');
+      setUser({ name: '??', role: 'guest', username: 'guest' });
+      setIsLoggedIn(true);
+      setShowAccessLogin(true);
+    };
+    window.addEventListener('auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('auth-expired', handleAuthExpired);
+  }, []);
+
   const handleLogin = (userData: UserInfo) => {
     setGlobalError('');
     setUser(userData);
@@ -2572,6 +2587,7 @@ export default function App() {
     setBlockChartSource(null);
     blockDefaultAutoLoadedRef.current = false;
     localStorage.removeItem('oil_system_user');
+    localStorage.removeItem('token');
   };
 
   const showDataError = (message = '数据获取失败') => {
@@ -6078,6 +6094,7 @@ export default function App() {
           {activeTab === 'well' && '单井精细化动态分析'}
           {activeTab === 'analysis' && '重点情况分析与建议'}
           {activeTab === 'comparison' && '对比分析'}
+          {activeTab === 'injectionOptimization' && '注汽优化预测'}
           {activeTab === 'measureWellSelection' && '措施选井'}
           {activeTab === 'injectionProjectManagement' && '注汽项目管理'}
           {activeTab === 'injectionPlan' && '方案与计划'}
@@ -6116,8 +6133,10 @@ export default function App() {
           </div>
         </header>
         <main className="app-content">
+              {activeTab === 'injectionOptimization' && <InjectionOptimization />}
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
-              {activeTab === 'injectionOperationReports' && <InjectionOperationReports />}
+               {activeTab === 'channelingProjectManagement' && <ChannelingProjectManagement role={user?.role || 'guest'} />}
+                {activeTab === 'injectionOperationReports' && <InjectionOperationReports />}
               {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 if (shouldApplyCockpitMeasureFilters(tab)) {

@@ -10,3 +10,4 @@ coverage/
 .worktrees/
 *.db-shm
 *.db-wal
+.auth-token-secret

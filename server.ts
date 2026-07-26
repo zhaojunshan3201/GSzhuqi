@@ -1,4 +1,5 @@
-import express from "express";
+﻿import express from "express";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import path from "path";
@@ -23,12 +24,19 @@ import {
 import {
   getSelectionWellDetail,
   initMeasureWellSelectionTables,
+  listSelectionCycles,
   listSelectionWells,
+  replaceSelectionScores,
+  upsertSelectionCycles,
   type SelectionFilter,
 } from "./src/lib/measureWellSelectionStore.ts";
 import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts";
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
+import { findSimilarInjectionWells, type InjectionWellProfile } from "./src/lib/similarInjectionWells.ts";
+import { buildInjectionScenarioForecast } from "./src/lib/injectionScenarioForecast.ts";
+import { buildInjectionOperationRecommendations, type InjectionOperationOptimizerInput } from "./src/lib/injectionOperationOptimizer.ts";
+import { buildInjectionOperationReport, buildInjectionOperationReportWorkbook, type InjectionOperationReportKind } from "./src/lib/injectionOperationReports.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
@@ -36,6 +44,8 @@ import { buildInjectionStatusMap } from "./src/lib/injectionStatusMap.ts";
 import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHandler.ts";
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
+import { createChannelingProject, createChannelingRelation, deleteChannelingProject, deleteChannelingRelation, initChannelingProjectTables, listChannelingGovernanceTodos, listChannelingProjects, listChannelingRelations, updateChannelingProject, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
+import { confirmChannelingRelationImport, createChannelingRelationPreview, initChannelingRelationImportTables, listChannelingRelationImports, parseChannelingRelationRows } from "./src/lib/channelingRelationImport.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -44,7 +54,7 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_FILE = path.join(__dirname, "production.db");
+const DB_FILE = process.env.LOCAL_DB_FILE || path.join(__dirname, "production.db");
 const WELL_MAP_DATA_DIR = [
   path.resolve(__dirname, "..", "..", "井位图"),
   path.resolve(__dirname, "..", "..", "..", "..", "井位图"),
@@ -64,6 +74,51 @@ const MEASURE_IMPORT_FILE_LIMIT_BYTES = 50 * 1024 * 1024;
 const WATER_CUT_FORMULA_VERSION = "2026-04-14-v4";
 const GAS_FORMULA_VERSION = "2026-04-14-v2";
 const LOCAL_ONLY_MODE = process.env.LOCAL_ONLY === "true";
+function resolveAuthTokenSecret() {
+  const configuredSecret = process.env.AUTH_TOKEN_SECRET?.trim();
+  if (configuredSecret) return configuredSecret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUTH_TOKEN_SECRET is required in production");
+  }
+
+  const secretFile = process.env.AUTH_TOKEN_SECRET_FILE || path.join(__dirname, ".auth-token-secret");
+  try {
+    const persistedSecret = fs.readFileSync(secretFile, "utf8").trim();
+    if (persistedSecret) return persistedSecret;
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
+  const generatedSecret = crypto.randomBytes(32).toString("base64url");
+  try {
+    fs.writeFileSync(secretFile, `${generatedSecret}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    return generatedSecret;
+  } catch (error: any) {
+    if (error?.code !== "EEXIST") throw error;
+    const persistedSecret = fs.readFileSync(secretFile, "utf8").trim();
+    if (persistedSecret) return persistedSecret;
+    throw new Error(`AUTH_TOKEN_SECRET_FILE is empty: ${secretFile}`);
+  }
+}
+const AUTH_TOKEN_SECRET = resolveAuthTokenSecret();
+type AuthenticatedUser = { username: string; role: string };
+function issueAuthToken(user: AuthenticatedUser) {
+  const payload = Buffer.from(JSON.stringify(user)).toString("base64url");
+  const signature = crypto.createHmac("sha256", AUTH_TOKEN_SECRET).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+function authenticatedUser(req: express.Request): AuthenticatedUser | null {
+  const token = req.get("authorization")?.match(/^Bearer (.+)$/i)?.[1];
+  if (!token) return null;
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = crypto.createHmac("sha256", AUTH_TOKEN_SECRET).update(payload).digest("base64url");
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    const user = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return typeof user?.username === "string" && typeof user?.role === "string" ? user : null;
+  } catch { return null; }
+}
 const CHART_BLOCK_GROUPS: Record<string, string[]> = {
   "___246___": ["246___L6", "246___L5"],
   "___3618___": ["3618___L4", "3618___L5", "3618___L6"],
@@ -911,6 +966,15 @@ async function initLocalDb() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS injection_operation_adjustment_audits (
+      audit_id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      adjusted_at TEXT NOT NULL,
+      original_json TEXT NOT NULL,
+      new_json TEXT NOT NULL,
+      reason TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS dashboard_summary_daily (
       rq TEXT NOT NULL,
       scope_type TEXT NOT NULL,
@@ -1005,6 +1069,8 @@ async function initLocalDb() {
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
   await initInjectionProjectTables(localDb);
+  await initChannelingProjectTables(localDb);
+  await initChannelingRelationImportTables(localDb);
   await initMonthlyInjectionPlanImportTables(localDb);
   await initExternalTransferTables(localDb);
 
@@ -3057,6 +3123,24 @@ function buildLargeChangeData(rows: CompareResultRow[]) {
   };
 }
 
+function buildSimilarInjectionProfiles(cycles: Awaited<ReturnType<typeof listSelectionCycles>>): InjectionWellProfile[] {
+  const latest = new Map<string, (typeof cycles)[number]>();
+  for (const cycle of cycles) {
+    const key = `${cycle.block}\u0000${cycle.wellName}`;
+    if (!latest.has(key)) latest.set(key, cycle);
+  }
+  return [...latest.values()].map((cycle) => ({
+    wellName: cycle.wellName,
+    block: cycle.block,
+    process: cycle.injectN2 ? 'steam+n2' : cycle.boiler ? 'steam' : null,
+    production: cycle.peakOil ?? null,
+    steamVolume: cycle.actualSteam ?? cycle.designSteam ?? null,
+    steamRate: cycle.rate ?? null,
+    pressure: cycle.maxPressure ?? cycle.pressure ?? null,
+    cycleOil: cycle.cycleOil ?? null,
+  }));
+}
+
 async function rebuildMeasureWellSelection() {
   const trackingRows = await localDb.all('SELECT jh, block, station, detail_json FROM measure_tracking');
   const cycles = buildSelectionCyclesFromTrackingRows(trackingRows);
@@ -3083,6 +3167,8 @@ async function startServer() {
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
   });
   const monthlyInjectionPlanUploadMiddleware = handleMeasureImportUpload(monthlyInjectionPlanUpload);
+  const channelingRelationImportUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES } });
+  const channelingRelationImportUploadMiddleware = handleMeasureImportUpload(channelingRelationImportUpload);
   const wellMapDailyUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
@@ -3362,9 +3448,11 @@ async function startServer() {
       }
       
       if (user) {
-        res.json({ success: true, user: { name: user.name || user.username, role: user.role, username: user.username } });
+        const authenticated = { name: user.name || user.username, role: user.role, username: user.username };
+        res.json({ success: true, user: authenticated, token: issueAuthToken(authenticated) });
       } else if (username === "admin" && password === "123456") {
-        res.json({ success: true, user: { name: "系统管理员", role: "admin", username: "admin" } });
+        const authenticated = { name: "系统管理员", role: "admin", username: "admin" };
+        res.json({ success: true, user: authenticated, token: issueAuthToken(authenticated) });
       } else {
         res.status(401).json({ success: false, message: "用户名或密码错误" });
       }
@@ -3422,6 +3510,105 @@ app.post("/api/register", async (req, res) => {
     } catch (err: any) {
       res.status(500).json({ success: false, message: "同步状态查询失败: " + err.message });
     }
+  });
+
+  app.get("/api/injection-scenario-forecast", async (req, res) => {
+    try {
+      const block = typeof req.query.block === "string" && req.query.block.trim() ? req.query.block.trim() : null;
+      const where = block ? " AND block = ?" : "";
+      const historyRows = await localDb.all(`SELECT oil FROM production WHERE oil IS NOT NULL${where} ORDER BY rq DESC LIMIT 180`, block ? [block] : []);
+      const metrics = await localDb.get(`SELECT SUM(estimated_loss) AS channelingLoss, SUM(occupied_production) AS occupancyLoss, AVG(CASE WHEN before_metric IS NOT NULL AND after_metric IS NOT NULL THEN after_metric - before_metric END) AS plannedGain FROM channeling_projects${block ? " WHERE block = ?" : ""}`, block ? [block] : []);
+      const plannedGain = Number.isFinite(metrics?.plannedGain) ? Math.max(0, metrics.plannedGain) : null;
+      const forecast = buildInjectionScenarioForecast({
+        historicalDailyOil: historyRows.reverse().map((row: any) => row.oil),
+        plannedGain,
+        optimizedGain: plannedGain === null ? null : plannedGain * 1.25,
+        riskConstrainedGain: plannedGain === null ? null : plannedGain * 0.75,
+        channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null,
+        occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null,
+      });
+      res.json({ success: true, data: forecast });
+    } catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
+  });
+
+  const requireOperationAdmin = (req: express.Request, res: express.Response) => {
+    const user = authenticatedUser(req);
+    if (!user) { res.status(401).json({ success: false, message: "\u9700\u8981\u8ba4\u8bc1" }); return null; }
+    if (user.role !== "admin") { res.status(403).json({ success: false, message: "\u9700\u8981\u7ba1\u7406\u5458\u6743\u9650" }); return null; }
+    return user;
+  };
+  const operationBlock = (req: express.Request) => typeof req.query.block === "string" && req.query.block.trim() ? req.query.block.trim() : null;
+  const buildOperationInput = async (block: string | null): Promise<InjectionOperationOptimizerInput> => {
+    const where = block ? " AND block = ?" : "";
+    const historyRows = await localDb.all(`SELECT oil FROM production WHERE oil IS NOT NULL${where} ORDER BY rq DESC LIMIT 180`, block ? [block] : []);
+    const metrics = await localDb.get(`SELECT SUM(estimated_loss) AS channelingLoss, SUM(occupied_production) AS occupancyLoss, AVG(CASE WHEN before_metric IS NOT NULL AND after_metric IS NOT NULL THEN after_metric - before_metric END) AS plannedGain FROM channeling_projects${block ? " WHERE block = ?" : ""}`, block ? [block] : []);
+    const plannedGain = Number.isFinite(metrics?.plannedGain) ? Math.max(0, metrics.plannedGain) : null;
+    const forecast = buildInjectionScenarioForecast({ historicalDailyOil: historyRows.reverse().map((row: any) => row.oil), plannedGain, optimizedGain: plannedGain === null ? null : plannedGain * 1.25, riskConstrainedGain: plannedGain === null ? null : plannedGain * 0.75, channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null, occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null });
+    const gain = forecast.scenarios.find((scenario) => scenario.id === "currentPlan")?.points[0]?.gain ?? null;
+    return { constraints: { boilerSteamCapacity: 1200, maxConcurrentWells: 2, maxChannelingRisk: 0.5, oilPrice: 500, steamUnitCost: 20 }, candidates: [
+      { id: "stable", name: "\u7a33\u4ea7\u4f18\u5148", wellOrder: ["\u5f85\u786e\u8ba4\u6ce8\u4e95 1"], staggerDays: 3, steamVolume: 900, pressure: 11, steamRate: 18, soakDays: 6, convertToProductionDay: 7, boiler: "\u9505\u7089 B-1", grossIncrementalOil: gain, productionVolatility: 0.15, channelingRisk: 0.15 },
+      { id: "balanced", name: "\u5e73\u8861\u6536\u76ca", wellOrder: ["\u5f85\u786e\u8ba4\u6ce8\u4e95 1", "\u5f85\u786e\u8ba4\u6ce8\u4e95 2"], staggerDays: 2, steamVolume: 1100, pressure: 12, steamRate: 20, soakDays: 5, convertToProductionDay: 6, boiler: "\u9505\u7089 B-1", grossIncrementalOil: gain === null ? null : gain * 1.15, productionVolatility: 0.25, channelingRisk: 0.25 },
+      { id: "risk", name: "\u98ce\u9669\u7ea6\u675f", wellOrder: ["\u5f85\u786e\u8ba4\u6ce8\u4e95 1"], staggerDays: 5, steamVolume: 750, pressure: 10, steamRate: 16, soakDays: 7, convertToProductionDay: 8, boiler: "\u9505\u7089 B-1", grossIncrementalOil: gain === null ? null : gain * 0.8, productionVolatility: 0.1, channelingRisk: 0.1 },
+    ], channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null, occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null, confidence: forecast.confidence, similarCaseEvidence: ["\u53c2\u6570\u4e3a\u89c4\u5219/\u6848\u4f8b\u63a8\u8350\uff1b\u5f85\u786e\u8ba4\u6ce8\u4e95\u987b\u7531\u6280\u672f\u4eba\u5458\u66ff\u6362\u540e\u6267\u884c"] };
+  };
+  app.get("/api/injection-operation-recommendations", async (req, res) => {
+    try { res.json({ success: true, data: buildInjectionOperationRecommendations(await buildOperationInput(operationBlock(req))) }); }
+    catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
+  });
+  const operationReportOptions = (req: express.Request) => {
+    const kind = typeof req.query.type === "string" ? req.query.type : "daily";
+    if (!(["daily", "weekly", "retrospective"] as const).includes(kind as InjectionOperationReportKind)) throw new Error("\u62a5\u544a\u7c7b\u578b\u65e0\u6548");
+    const date = typeof req.query.date === "string" ? req.query.date : new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || formatUtcDate(parseIsoDate(date)) !== date) throw new Error("\u62a5\u544a\u65e5\u671f\u65e0\u6548");
+    return { kind: kind as InjectionOperationReportKind, date, block: operationBlock(req) };
+  };
+  const buildOperationReport = async (req: express.Request) => {
+    const options = operationReportOptions(req);
+    const span = options.kind === "daily" ? 0 : options.kind === "weekly" ? 6 : 29;
+    const start = shiftDateDays(options.date, -span);
+    const rows = await localDb.all(`SELECT rq, SUM(oil) AS oil, SUM(liquid) AS liquid, CASE WHEN SUM(liquid) > 0 THEN SUM(liquid * water_cut) / SUM(liquid) ELSE AVG(water_cut) END AS water_cut FROM production WHERE rq >= ? AND rq <= ?${options.block ? " AND block = ?" : ""} GROUP BY rq ORDER BY rq`, options.block ? [start, options.date, options.block] : [start, options.date]);
+    const recommendations = buildInjectionOperationRecommendations(await buildOperationInput(options.block)).recommendations;
+    return buildInjectionOperationReport({
+      ...options,
+      production: rows.map((row: any) => ({ date: row.rq, oil: row.oil, liquid: row.liquid, waterCut: row.water_cut, well: row.jh, block: row.block })),
+      channelingProjects: await listChannelingProjects(localDb, options.block ? { block: options.block } : {}),
+      recommendations: recommendations.map((item) => ({ id: item.id, name: item.name, score: item.score, confidence: item.confidence, netBenefit: item.metrics.netBenefit, assumptions: item.assumptions })),
+    });
+  };
+  app.get("/api/injection-operation-reports", async (req, res) => {
+    try { res.json({ success: true, data: await buildOperationReport(req) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error?.message || "\u8fd0\u884c\u62a5\u544a\u751f\u6210\u5931\u8d25" }); }
+  });
+  app.get("/api/injection-operation-reports.xlsx", async (req, res) => {
+    try {
+      const report = await buildOperationReport(req);
+      const workbook = buildInjectionOperationReportWorkbook(report);
+      const filename = `${report.title}-${report.period.end}.xlsx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.attachment(encodeURIComponent(filename));
+      res.send(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+    } catch (error: any) { res.status(400).json({ success: false, message: error?.message || "\u8fd0\u884c\u62a5\u544a\u751f\u6210\u5931\u8d25" }); }
+  });
+
+  app.post("/api/injection-operation-recommendations/:planId/adjustments", async (req, res) => {
+    try {
+      const actor = requireOperationAdmin(req, res); if (!actor) return;
+      const planId = req.params.planId;
+      const body = req.body as { reason?: unknown; patch?: unknown };
+      const allowed = new Set(["staggerDays", "steamVolume", "pressure", "steamRate", "soakDays", "convertToProductionDay"]);
+      if (!body || typeof body.reason !== "string" || !body.reason.trim() || !body.patch || typeof body.patch !== "object" || Object.keys(body.patch).some((key) => !allowed.has(key)) || Object.values(body.patch as Record<string, unknown>).some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0)) { res.status(400).json({ success: false, message: "\u8c03\u6574\u5408\u540c\u65e0\u6548" }); return; }
+      const input = await buildOperationInput(operationBlock(req));
+      const original = input.candidates.find((candidate) => candidate.id === planId);
+      if (!original) { res.status(404).json({ success: false, message: "\u65b9\u6848\u4e0d\u5b58\u5728" }); return; }
+      const adjustment = { planId, reason: body.reason.trim(), patch: body.patch as any };
+      const evaluated = buildInjectionOperationRecommendations({ ...input, adjustments: [adjustment] });
+      const rejected = evaluated.rejected.find((item) => item.id === planId);
+      if (rejected) { res.status(400).json({ success: false, message: `\u8c03\u6574\u8fdd\u53cd\u8fd0\u884c\u7ea6\u675f\uff1a${rejected.reason}` }); return; }
+      const updated = { ...original, ...(body.patch as object) };
+      const auditId = crypto.randomUUID(); const adjustedAt = new Date().toISOString();
+      await localDb.run("INSERT INTO injection_operation_adjustment_audits (audit_id, plan_id, actor, adjusted_at, original_json, new_json, reason) VALUES (?, ?, ?, ?, ?, ?, ?)", [auditId, planId, actor.username, adjustedAt, JSON.stringify(original), JSON.stringify(updated), body.reason.trim()]);
+      res.status(201).json({ success: true, data: evaluated, audit: { auditId, actor: actor.username, adjustedAt, reason: body.reason.trim(), original, updated } });
+    } catch (error: any) { res.status(500).json({ success: false, message: error?.message || "\u4fdd\u5b58\u8c03\u6574\u5931\u8d25" }); }
   });
 
   app.get("/api/injection-production/cockpit", async (_req, res) => {
@@ -3530,6 +3717,105 @@ app.post("/api/register", async (req, res) => {
   });
   app.get("/api/injection-projects/pending", async (req, res) => {
     res.json({ success: true, data: await listProjectPendingItems(localDb, typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10)) });
+  });
+
+  app.get("/api/channeling-projects", async (req, res) => {
+    try { res.json({ success: true, data: await listChannelingProjects(localDb, { block: typeof req.query.block === "string" ? req.query.block : undefined }) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  const channelingRole = (req: express.Request) => authenticatedUser(req)?.role;
+  const requireChannelingAdmin = (req: express.Request, res: express.Response) => {
+    const role = channelingRole(req);
+    if (!role) { res.status(401).json({ success: false, message: "Authentication is required" }); return false; }
+    if (role === "admin") return true;
+    res.status(403).json({ success: false, message: "Channeling admin permission is required" }); return false;
+  };
+  app.post("/api/channeling-projects", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  const allowedProjectPatchFields = new Set(["projectName", "block", "owner", "status", "governanceMeasure", "plannedDate", "actualDate", "beforeMetric", "afterMetric", "closureEvidence", "riskLevel", "estimatedLoss", "affectedWellCount", "affectedDailyOil", "occupiedProduction"]);
+  app.get("/api/channeling-projects/pending", async (req, res) => {
+    try { res.json({ success: true, data: await listChannelingGovernanceTodos(localDb, typeof req.query.date === "string" ? req.query.date : new Date().toISOString().slice(0, 10)) }); }
+    catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+  });
+  app.patch("/api/channeling-projects/:id", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    if (!req.body || typeof req.body !== "object" || Object.keys(req.body).some((key) => !allowedProjectPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported project patch field" });
+    try { res.json({ success: true, data: await updateChannelingProject(localDb, id, req.body) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.delete("/api/channeling-projects/:id", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { await deleteChannelingProject(localDb, id); res.status(204).end(); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  const allowedRelationPatchFields = new Set(["injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
+  const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") || error.message?.includes("Invalid governance status transition") ? 400 : 500;
+  const forceChannelingTestError = (req: any) => {
+    if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-error") === "1") throw new Error("forced channeling runtime error");
+  };
+  app.get("/api/channeling-projects/:id/relations", async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try {
+      forceChannelingTestError(req);
+      if (!await localDb.get("SELECT id FROM channeling_projects WHERE id = ?", [projectId])) return res.status(404).json({ success: false, message: "Project not found" });
+      res.json({ success: true, data: await listChannelingRelations(localDb, { projectId, status: typeof req.query.status === "string" ? req.query.status : undefined, source: typeof req.query.source === "string" ? req.query.source : undefined, block: typeof req.query.block === "string" ? req.query.block : undefined }) });
+    } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-projects/:id/relations", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-projects/:id/relation-imports/preview", channelingRelationImportUploadMiddleware, async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try {
+      const file = (req as express.Request & { file?: { originalname: string; buffer: Buffer } }).file;
+      if (!file) return res.status(400).json({ success: false, message: "Excel file is required" });
+      if (!/\.xlsx?$/i.test(file.originalname)) return res.status(400).json({ success: false, message: "only .xlsx and .xls files are supported" });
+      const data = await createChannelingRelationPreview(localDb, projectId, decodeUploadedFileName(file.originalname), parseChannelingRelationRows(XLSX.read(file.buffer, { type: "buffer" })));
+      res.status(201).json({ success: true, data });
+    } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.get("/api/channeling-projects/:id/relation-imports", async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { res.json({ success: true, data: await listChannelingRelationImports(localDb, projectId) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-relation-imports/:id/confirm", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const importId = Number(req.params.id);
+    if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId) }); }
+    catch (error: any) { const status = error.message === "channeling relation import not found" ? 404 : error.message === "only preview imports can be confirmed" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
+  });
+  app.patch("/api/channeling-relations/:id", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    if (!req.body || typeof req.body !== "object" || Object.keys(req.body || {}).some((key) => !allowedRelationPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported relation patch field" });
+    try { forceChannelingTestError(req); res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+
+  app.delete("/api/channeling-relations/:id", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { await deleteChannelingRelation(localDb, id); res.status(204).end(); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
 
   app.get("/api/dashboard/bootstrap", async (req, res) => {
@@ -4949,10 +5235,21 @@ app.post("/api/register", async (req, res) => {
     } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
   });
 
+  app.get('/api/measure-well-selection/wells/:wellName/similar', async (req, res) => {
+    try {
+      await ensureMeasureWellSelectionScores();
+      const block = typeof req.query.block === 'string' ? req.query.block : undefined;
+      const profiles = buildSimilarInjectionProfiles(await listSelectionCycles(localDb));
+      const target = profiles.find((profile) => profile.wellName === req.params.wellName && (!block || profile.block === block));
+      if (!target) { res.status(404).json({ success: false, message: 'well not found' }); return; }
+      res.json({ success: true, data: findSimilarInjectionWells(target, profiles) });
+    } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+  });
+
   app.get('/api/measure-well-selection/wells/:wellName', async (req, res) => {
     try {
       await ensureMeasureWellSelectionScores();
-      const detail = await getSelectionWellDetail(localDb, req.params.wellName);
+      const detail = await getSelectionWellDetail(localDb, req.params.wellName, typeof req.query.block === 'string' ? req.query.block : undefined);
       if (!detail) { res.status(404).json({ success: false, message: 'well not found' }); return; }
       const curves = await Promise.all(detail.cycles.map(async (cycle) => {
         const rows = await localDb.all('SELECT rq AS date, oil FROM production WHERE jh = ? AND rq BETWEEN ? AND ? ORDER BY rq ASC', [
@@ -5100,3 +5397,5 @@ app.post("/api/register", async (req, res) => {
 }
 
 startServer();
+
+
