@@ -56,5 +56,5 @@ test('does not turn unknown losses into zero and reports low confidence', () => 
   assert.equal(result.scenarios[0].points[0].channelingLoss, null);
   assert.equal(result.scenarios[0].points[0].dailyOil, null);
   assert.ok(result.confidence < 0.6);
-  assert.ok(result.assumptions.some((item) => item.includes('´ý²¹È«')));
+  assert.ok(result.assumptions.some((item) => item.includes('å¾…è¡¥å…¨')));
 });

@@ -5,7 +5,7 @@ import test from 'node:test';
 test('injection optimization page draws an accessible four-scenario chart with an empty state', () => {
   const source = readFileSync(new URL('../src/components/InjectionOptimization.tsx', import.meta.url), 'utf8');
   assert.match(source, /aria: \{ enabled: true/);
-  assert.match(source, /Êı¾İ´ı²¹È«/);
+  assert.match(source, /æ•°æ®å¾…è¡¥å…¨/);
   assert.match(source, /naturalDecline/);
   assert.match(source, /riskConstrained/);
 });

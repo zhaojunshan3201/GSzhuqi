@@ -66,10 +66,10 @@ export function buildInjectionScenarioForecast(input: InjectionScenarioForecastI
   const hasHistoricalFit = history.length >= 2;
   const baselineStart = hasHistoricalFit ? history.at(-1)! : (valid(input.baselineDailyOil) ? input.baselineDailyOil : null);
   const decline = hasHistoricalFit ? fittedDecline(history)! : 0.003;
-  const missing = [baselineStart === null ? '»ùÏß²úÁ¿' : null, valid(input.channelingLoss) ? null : '×¢´ÜËğÊ§', valid(input.occupancyLoss) ? null : 'Õ¼²úËğÊ§'].filter((item): item is string => item !== null);
+  const missing = [baselineStart === null ? 'åŸºçº¿äº§é‡' : null, valid(input.channelingLoss) ? null : 'æ³¨çªœæŸå¤±', valid(input.occupancyLoss) ? null : 'å äº§æŸå¤±'].filter((item): item is string => item !== null);
   const assumptions = [
-    hasHistoricalFit ? `»ùÓÚ${history.length}ÌõÀúÊ·ÈÕ²úÓÍÄâºÏ×ÔÈ»µİ¼õÂÊ` : 'ÀúÊ·ÇúÏß²»×ã£¬Ê¹ÓÃ¹æÔò°¸Àıµİ¼õÂÊ 0.3%/ÈÕ',
-    ...missing.map((field) => `${field}´ı²¹È«£¬Î´°´ 0 ´¦Àí`),
+    hasHistoricalFit ? `åŸºäº${history.length}æ¡å†å²æ—¥äº§æ²¹æ‹Ÿåˆè‡ªç„¶é€’å‡ç‡` : 'å†å²æ›²çº¿ä¸è¶³ï¼Œä½¿ç”¨è§„åˆ™æ¡ˆä¾‹é€’å‡ç‡ 0.3%/æ—¥',
+    ...missing.map((field) => `${field}å¾…è¡¥å…¨ï¼ŒæœªæŒ‰ 0 å¤„ç†`),
   ];
   const knownInputs = [baselineStart, input.plannedGain, input.optimizedGain, input.riskConstrainedGain, input.channelingLoss, input.occupancyLoss].filter(valid).length;
   const completeness = knownInputs / 6;

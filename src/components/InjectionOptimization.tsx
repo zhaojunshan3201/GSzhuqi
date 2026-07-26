@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { InjectionScenarioForecast } from '../lib/injectionScenarioForecast';
 
-const labels = { naturalDecline: '×ÔÈ»µİ¼õ', currentPlan: 'µ±Ç°¼Æ»®', stableProductionOptimization: 'ÎÈ²úÓÅ»¯', riskConstrained: '·çÏÕÔ¼Êø' } as const;
+const labels = { naturalDecline: 'è‡ªç„¶é€’å‡', currentPlan: 'å½“å‰è®¡åˆ’', stableProductionOptimization: 'ç¨³äº§ä¼˜åŒ–', riskConstrained: 'é£é™©çº¦æŸ' } as const;
 const colors = ['#64748b', '#2563eb', '#16a34a', '#dc2626'];
 
 export function InjectionOptimization() {
@@ -13,23 +13,23 @@ export function InjectionOptimization() {
     const query = block.trim() ? `?block=${encodeURIComponent(block.trim())}` : '';
     void fetch(`/api/injection-scenario-forecast${query}`)
       .then((response) => response.json())
-      .then((payload) => { if (!payload.success) throw new Error(payload.message || 'Ô¤²â¼ÓÔØÊ§°Ü'); setData(payload.data); })
-      .catch((cause) => setError(cause.message || 'Ô¤²â¼ÓÔØÊ§°Ü'));
+      .then((payload) => { if (!payload.success) throw new Error(payload.message || 'é¢„æµ‹åŠ è½½å¤±è´¥'); setData(payload.data); })
+      .catch((cause) => setError(cause.message || 'é¢„æµ‹åŠ è½½å¤±è´¥'));
   }, [block]);
   const option = useMemo(() => ({
-    aria: { enabled: true, description: '30¡¢90¡¢180Ìì×¢Æû²úÁ¿ËÄÇé¾°Ô¤²âÇúÏß' },
+    aria: { enabled: true, description: '30ã€90ã€180å¤©æ³¨æ±½äº§é‡å››æƒ…æ™¯é¢„æµ‹æ›²çº¿' },
     tooltip: { trigger: 'axis' },
     legend: { data: Object.values(labels) },
-    xAxis: { type: 'category', name: 'Ìì', data: Array.from({ length: 180 }, (_, index) => index + 1) },
-    yAxis: { type: 'value', name: 'ÈÕ²úÓÍ' },
+    xAxis: { type: 'category', name: 'å¤©', data: Array.from({ length: 180 }, (_, index) => index + 1) },
+    yAxis: { type: 'value', name: 'æ—¥äº§æ²¹' },
     series: data?.scenarios.map((scenario, index) => ({ name: labels[scenario.id], type: 'line', showSymbol: false, connectNulls: false, itemStyle: { color: colors[index] }, data: scenario.points.map((point) => point.dailyOil) })) ?? [],
   }), [data]);
   return <div className="page-stack">
-    <section className="app-card p-5"><h3 className="text-lg font-bold">×¢ÆûÉú²ú¶àÇé¾°Ô¤²â</h3><p className="mt-1 text-sm text-slate-500">¹«Ê½£º»ùÏß + ÔöÓÍ¹±Ï× ? ×¢´ÜËğÊ§ ? Õ¼²úËğÊ§£»¸²¸Ç30¡¢90¡¢180Ìì¡£</p><label className="mt-3 block max-w-xs text-sm">Çø¿éÉ¸Ñ¡<input className="field-control mt-1" value={block} onChange={(event) => setBlock(event.target.value)} placeholder="È«²¿Çø¿é" /></label></section>
-    {error ? <div className="status-banner status-banner-error">{error}</div> : !data ? <div className="app-card p-6 text-sm text-slate-500">Ô¤²â¼ÓÔØÖĞ¡­</div> : <>
-      <section className="grid gap-3 md:grid-cols-3"><div className="app-card p-4"><p className="text-sm text-slate-500">Ô¤²âÀ´Ô´</p><p className="mt-1 font-bold">{data.source === 'historical-fit' ? 'ÀúÊ·ÇúÏßÄâºÏ' : '¹æÔò°¸Àı'}</p></div><div className="app-card p-4"><p className="text-sm text-slate-500">ÖÃĞÅ¶È</p><p className="mt-1 font-bold">{Math.round(data.confidence * 100)}%</p></div><div className="app-card p-4"><p className="text-sm text-slate-500">Êı¾İÍêÕû¶È</p><p className="mt-1 font-bold">{Math.round(data.completeness * 100)}%</p></div></section>
-      <section className="app-card p-5"><h4 className="font-bold">ËÄÇé¾°ÈÕ²úÓÍÇúÏß</h4><div className="mt-3 h-80">{data.scenarios.some((scenario) => scenario.points.some((point) => point.dailyOil !== null)) ? <ReactECharts option={option} style={{ height: '100%' }} /> : <div className="flex h-full items-center justify-center text-sm text-slate-400">Êı¾İ´ı²¹È«£ºËğÊ§»ò»ùÏßÈ±Ê§£¬²»ÄÜÒÔ0Ìæ´ú</div>}</div></section>
-      <section className="app-card p-5"><h4 className="font-bold">¼ÙÉèÓë¿É×·ËİĞÅÏ¢</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{data.assumptions.map((item) => <li key={item}>{item}</li>)}</ul></section>
+    <section className="app-card p-5"><h3 className="text-lg font-bold">æ³¨æ±½ç”Ÿäº§å¤šæƒ…æ™¯é¢„æµ‹</h3><p className="mt-1 text-sm text-slate-500">å…¬å¼ï¼šåŸºçº¿ + å¢æ²¹è´¡çŒ® âˆ’ æ³¨çªœæŸå¤± âˆ’ å äº§æŸå¤±ï¼›è¦†ç›–30ã€90ã€180å¤©ã€‚</p><label className="mt-3 block max-w-xs text-sm">åŒºå—ç­›é€‰<input className="field-control mt-1" value={block} onChange={(event) => setBlock(event.target.value)} placeholder="å…¨éƒ¨åŒºå—" /></label></section>
+    {error ? <div className="status-banner status-banner-error">{error}</div> : !data ? <div className="app-card p-6 text-sm text-slate-500">é¢„æµ‹åŠ è½½ä¸­â€¦</div> : <>
+      <section className="grid gap-3 md:grid-cols-3"><div className="app-card p-4"><p className="text-sm text-slate-500">é¢„æµ‹æ¥æº</p><p className="mt-1 font-bold">{data.source === 'historical-fit' ? 'å†å²æ›²çº¿æ‹Ÿåˆ' : 'è§„åˆ™æ¡ˆä¾‹'}</p></div><div className="app-card p-4"><p className="text-sm text-slate-500">ç½®ä¿¡åº¦</p><p className="mt-1 font-bold">{Math.round(data.confidence * 100)}%</p></div><div className="app-card p-4"><p className="text-sm text-slate-500">æ•°æ®å®Œæ•´åº¦</p><p className="mt-1 font-bold">{Math.round(data.completeness * 100)}%</p></div></section>
+      <section className="app-card p-5"><h4 className="font-bold">å››æƒ…æ™¯æ—¥äº§æ²¹æ›²çº¿</h4><div className="mt-3 h-80">{data.scenarios.some((scenario) => scenario.points.some((point) => point.dailyOil !== null)) ? <ReactECharts option={option} style={{ height: '100%' }} /> : <div className="flex h-full items-center justify-center text-sm text-slate-400">æ•°æ®å¾…è¡¥å…¨ï¼šæŸå¤±æˆ–åŸºçº¿ç¼ºå¤±ï¼Œä¸èƒ½ä»¥0æ›¿ä»£</div>}</div></section>
+      <section className="app-card p-5"><h4 className="font-bold">å‡è®¾ä¸å¯è¿½æº¯ä¿¡æ¯</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">{data.assumptions.map((item) => <li key={item}>{item}</li>)}</ul></section>
     </>}
   </div>;
 }
