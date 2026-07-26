@@ -5,6 +5,23 @@ type ViewProject = {
   plannedTransferDate?: string | null;
 };
 
+export type ConstructionDashboardProject = ViewProject & { id: number };
+export type SoakTransferDashboardProject = ConstructionDashboardProject & { soakStartDate?: string | null };
+export type ConstructionDashboard = {
+  projects: ConstructionDashboardProject[];
+  rows: ViewComparisonRow[];
+  kpis: { active: number; cumulativeSteam: number; dailySteam: null; delayed: number; missingData: number };
+  boilerSteamTotals: { boiler: string; plannedSteam: number; actualSteam: number }[];
+  statusDistribution: { status: string; count: number }[];
+};
+export type SoakTransferDashboard = {
+  projects: SoakTransferDashboardProject[];
+  kpis: { soaking: number; pendingTransfer: number; overdue: number; averageSoakDays: number | null; missingSoakDate: number };
+  durationDistribution: { label: string; count: number }[];
+  statusDistribution: { status: string; count: number }[];
+  todo: SoakTransferDashboardProject[];
+};
+
 export function getInjectionProjectView(tab: string): InjectionProjectView {
   if (tab === 'injectionConstruction') return 'construction';
   if (tab === 'injectionSoakTransfer') return 'soakTransfer';
@@ -68,6 +85,17 @@ export function summarizeComparisonForView<T extends ViewComparisonRow>(rows: T[
     }
     return buckets;
   };
+  return {
+    summary,
+    charts: {
+      startVarianceBuckets: varianceBuckets('startVarianceDays'),
+      endVarianceBuckets: varianceBuckets('endVarianceDays'),
+      boilerSteamTotals: boilerSteamTotals(rows),
+    },
+  };
+}
+
+function boilerSteamTotals(rows: ViewComparisonRow[]) {
   const totals = new Map<string, { plannedSteam: number; actualSteam: number }>();
   for (const row of rows) {
     const boiler = row.plannedBoiler || '--';
@@ -76,12 +104,72 @@ export function summarizeComparisonForView<T extends ViewComparisonRow>(rows: T[
     total.actualSteam += row.actualSteam ?? 0;
     totals.set(boiler, total);
   }
+  return [...totals.entries()].map(([boiler, total]) => ({ boiler, ...total })).sort((left, right) => left.boiler.localeCompare(right.boiler));
+}
+
+function statusDistribution(items: { lifecycleStatus?: string; comparisonStatus?: string }[], key: 'lifecycleStatus' | 'comparisonStatus') {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const status = item[key];
+    if (!status) continue;
+    counts.set(status, (counts.get(status) || 0) + 1);
+  }
+  return [...counts.entries()].map(([status, count]) => ({ status, count }));
+}
+
+export function buildConstructionDashboard<T extends ConstructionDashboardProject, R extends ViewComparisonRow>(projects: T[], comparisonRows: R[]): ConstructionDashboard {
+  const constructionProjects = filterProjectsForView(projects, 'construction');
+  const rows = filterComparisonForView(comparisonRows, constructionProjects);
+  const rowsByProject = new Map(rows.map((row) => [row.projectId, row]));
   return {
-    summary,
-    charts: {
-      startVarianceBuckets: varianceBuckets('startVarianceDays'),
-      endVarianceBuckets: varianceBuckets('endVarianceDays'),
-      boilerSteamTotals: [...totals.entries()].map(([boiler, total]) => ({ boiler, ...total })).sort((left, right) => left.boiler.localeCompare(right.boiler)),
+    projects: constructionProjects,
+    rows,
+    kpis: {
+      active: constructionProjects.filter((project) => project.lifecycleStatus === 'injecting').length,
+      cumulativeSteam: rows.reduce((total, row) => total + (row.actualSteam ?? 0), 0),
+      dailySteam: null,
+      delayed: rows.filter((row) => row.comparisonStatus === 'delayed').length,
+      missingData: constructionProjects.filter((project) => rowsByProject.get(project.id)?.actualSteam == null).length,
     },
+    boilerSteamTotals: boilerSteamTotals(rows),
+    statusDistribution: statusDistribution(rows, 'comparisonStatus'),
+  };
+}
+
+function validDate(value: string | null | undefined): number | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value ? time : null;
+}
+
+export function buildSoakTransferDashboard<T extends SoakTransferDashboardProject>(projects: T[], today = new Date().toISOString().slice(0, 10)): SoakTransferDashboard {
+  const soakTransferProjects = filterProjectsForView(projects, 'soakTransfer', today);
+  const todayTime = validDate(today);
+  const soakDays = soakTransferProjects.flatMap((project) => {
+    const soakStartTime = validDate(project.soakStartDate);
+    return soakStartTime == null || todayTime == null ? [] : [Math.floor((todayTime - soakStartTime) / 86400000)];
+  });
+  const durationDistribution = [
+    { label: '0-7\u5929', count: 0 },
+    { label: '8-14\u5929', count: 0 },
+    { label: '15\u5929\u4ee5\u4e0a', count: 0 },
+  ];
+  for (const days of soakDays) {
+    if (days <= 7) durationDistribution[0].count++;
+    else if (days <= 14) durationDistribution[1].count++;
+    else durationDistribution[2].count++;
+  }
+  return {
+    projects: soakTransferProjects,
+    kpis: {
+      soaking: soakTransferProjects.filter((project) => project.lifecycleStatus === 'soaking').length,
+      pendingTransfer: soakTransferProjects.filter((project) => project.lifecycleStatus === 'pendingTransfer').length,
+      overdue: soakTransferProjects.filter((project) => isOverdue(project, today)).length,
+      averageSoakDays: soakDays.length ? soakDays.reduce((total, days) => total + days, 0) / soakDays.length : null,
+      missingSoakDate: soakTransferProjects.length - soakDays.length,
+    },
+    durationDistribution,
+    statusDistribution: statusDistribution(soakTransferProjects, 'lifecycleStatus'),
+    todo: soakTransferProjects,
   };
 }

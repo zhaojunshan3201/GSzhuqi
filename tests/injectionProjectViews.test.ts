@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { filterProjectsForView, getInjectionProjectView } from '../src/lib/injectionProjectViews.ts';
+import { buildConstructionDashboard, buildSoakTransferDashboard, filterProjectsForView, getInjectionProjectView } from '../src/lib/injectionProjectViews.ts';
 
 test('maps injection workflow tabs to project views', () => {
   assert.equal(getInjectionProjectView('injectionPlan'), 'plan');
@@ -23,6 +23,55 @@ test('filters projects by their workflow view and prioritizes overdue transfer w
   assert.deepEqual(filterProjectsForView(projects, 'plan', '2026-07-26').map((project) => project.id), [1, 2, 4, 3, 5]);
   assert.deepEqual(filterProjectsForView(projects, 'construction', '2026-07-26').map((project) => project.id), [1, 2]);
   assert.deepEqual(filterProjectsForView(projects, 'soakTransfer', '2026-07-26').map((project) => project.id), [3, 4]);
+});
+
+test('builds construction dashboard data from pending and injecting projects only', () => {
+  const projects = [
+    { id: 1, lifecycleStatus: 'pending' },
+    { id: 2, lifecycleStatus: 'injecting' },
+    { id: 3, lifecycleStatus: 'soaking' },
+  ];
+  const comparisons = [
+    { projectId: 1, comparisonStatus: 'not_started', actualStartDate: null, plannedBoiler: 'B-1', plannedSteam: 10, actualSteam: null },
+    { projectId: 2, comparisonStatus: 'delayed', actualStartDate: '2026-07-01', plannedBoiler: 'B-1', plannedSteam: 20, actualSteam: 18 },
+    { projectId: 3, comparisonStatus: 'incomplete', actualStartDate: '2026-07-02', plannedBoiler: 'B-2', plannedSteam: 30, actualSteam: 28 },
+  ];
+
+  assert.deepEqual(buildConstructionDashboard(projects, comparisons), {
+    projects: [projects[0], projects[1]],
+    rows: [comparisons[0], comparisons[1]],
+    kpis: { active: 1, cumulativeSteam: 18, dailySteam: null, delayed: 1, missingData: 1 },
+    boilerSteamTotals: [{ boiler: 'B-1', plannedSteam: 30, actualSteam: 18 }],
+    statusDistribution: [
+      { status: 'not_started', count: 1 },
+      { status: 'delayed', count: 1 },
+    ],
+  });
+});
+
+test('builds soak-transfer dashboard with valid soaking dates only and overdue tasks first', () => {
+  const projects = [
+    { id: 1, lifecycleStatus: 'soaking', plannedTransferDate: '2026-07-20', soakStartDate: '2026-07-16' },
+    { id: 2, lifecycleStatus: 'pendingTransfer', plannedTransferDate: '2026-08-01', soakStartDate: '2026-07-21' },
+    { id: 3, lifecycleStatus: 'soaking', plannedTransferDate: '2026-07-21', soakStartDate: '2026-02-31' },
+    { id: 4, lifecycleStatus: 'pending', plannedTransferDate: '2026-07-01', soakStartDate: '2026-07-01' },
+    { id: 5, lifecycleStatus: 'soaking', plannedTransferDate: '2026-07-19', soakStartDate: null },
+  ];
+
+  assert.deepEqual(buildSoakTransferDashboard(projects, '2026-07-26'), {
+    projects: [projects[0], projects[2], projects[4], projects[1]],
+    kpis: { soaking: 3, pendingTransfer: 1, overdue: 3, averageSoakDays: 7.5, missingSoakDate: 2 },
+    durationDistribution: [
+      { label: '0-7天', count: 1 },
+      { label: '8-14天', count: 1 },
+      { label: '15天以上', count: 0 },
+    ],
+    statusDistribution: [
+      { status: 'soaking', count: 3 },
+      { status: 'pendingTransfer', count: 1 },
+    ],
+    todo: [projects[0], projects[2], projects[4], projects[1]],
+  });
 });
 
 test('wires a single workflow project view from the active tab', () => {
