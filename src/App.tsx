@@ -710,13 +710,13 @@ const decodeMojibakeText = (value: unknown) => {
   const raw = String(value ?? '').trim();
   if (!raw) return raw;
 
-  const countCjk = (text: string) => (text.match(/[\u3400-\u9fff]/g) || []).length;
-  const countMojibake = (text: string) => (text.match(/[ÃÂÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ�]/g) || []).length;
+  const countCjk = (text: string) => (text.match(/[㐀-鿿]/g) || []).length;
+  const countMojibake = (text: string) => (text.match(/[À-ÿ]/g) || []).length;
 
   try {
     const bytes = Uint8Array.from(Array.from(raw).map((char) => char.charCodeAt(0) & 0xff));
     const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes).trim();
-    if (decoded && !decoded.includes('� ') && countCjk(decoded) > countCjk(raw)) {
+    if (decoded && countCjk(decoded) > countCjk(raw)) {
       return decoded;
     }
     if (decoded && countMojibake(raw) > 0 && countMojibake(decoded) < countMojibake(raw)) {
@@ -734,16 +734,16 @@ const decodeMojibakeText = (value: unknown) => {
 const normalizeWaterLabValue = (value: string): string | null => {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
-  const emptyKeywords = ["?", "??", "???", "???", "??", "???", "????", "?"];
+  const emptyKeywords = ["无", "无数据", "无结果", "未测", "未测试", "未录入", "暂无", "/"];
   if (emptyKeywords.includes(raw)) return null;
-  if (raw === "?") return "100";
+  if (raw === "全") return "100";
   if (raw.includes("/")) {
     const parts = raw.split("/");
     const numbers: number[] = [];
     for (const part of parts) {
       const cleaned = part.trim().replace(/\+$/, "");
-      if (emptyKeywords.includes(cleaned) || cleaned === "?" || cleaned === "??") continue;
-      if (cleaned === "?") { numbers.push(100); continue; }
+      if (emptyKeywords.includes(cleaned) || cleaned === "无" || cleaned === "暂无") continue;
+      if (cleaned === "全") { numbers.push(100); continue; }
       const num = parseFloat(cleaned);
       if (!isNaN(num) && isFinite(num)) numbers.push(num);
     }
