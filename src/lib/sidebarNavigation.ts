@@ -24,7 +24,8 @@ export type SidebarTab =
   | 'measures'
   | 'measureAnalysis'
   | 'productionForecast'
-  | 'externalTransferTracking';
+  | 'externalTransferTracking'
+  | 'injectionOperationReports';
 
 export type SidebarIcon =
   | 'LayoutDashboard'
@@ -76,6 +77,7 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
       { tab: 'injectionSoakTransfer', label: '焖井转抽', icon: 'TrendingUp' },
       { tab: 'measures', label: '生产响应', icon: 'ClipboardList' },
       { tab: 'measureAnalysis', label: '效果评价', icon: 'MessageSquare' },
+      { tab: 'injectionOperationReports', label: '运行报告', icon: 'FileSpreadsheet' },
     ],
   },
   {
