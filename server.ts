@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import path from "path";
@@ -66,6 +67,25 @@ const MEASURE_IMPORT_FILE_LIMIT_BYTES = 50 * 1024 * 1024;
 const WATER_CUT_FORMULA_VERSION = "2026-04-14-v4";
 const GAS_FORMULA_VERSION = "2026-04-14-v2";
 const LOCAL_ONLY_MODE = process.env.LOCAL_ONLY === "true";
+const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || crypto.randomBytes(32).toString("hex");
+type AuthenticatedUser = { username: string; role: string };
+function issueAuthToken(user: AuthenticatedUser) {
+  const payload = Buffer.from(JSON.stringify(user)).toString("base64url");
+  const signature = crypto.createHmac("sha256", AUTH_TOKEN_SECRET).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+function authenticatedUser(req: express.Request): AuthenticatedUser | null {
+  const token = req.get("authorization")?.match(/^Bearer (.+)$/i)?.[1];
+  if (!token) return null;
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = crypto.createHmac("sha256", AUTH_TOKEN_SECRET).update(payload).digest("base64url");
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    const user = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return typeof user?.username === "string" && typeof user?.role === "string" ? user : null;
+  } catch { return null; }
+}
 const CHART_BLOCK_GROUPS: Record<string, string[]> = {
   "___246___": ["246___L6", "246___L5"],
   "___3618___": ["3618___L4", "3618___L5", "3618___L6"],
@@ -3368,9 +3388,11 @@ async function startServer() {
       }
       
       if (user) {
-        res.json({ success: true, user: { name: user.name || user.username, role: user.role, username: user.username } });
+        const authenticated = { name: user.name || user.username, role: user.role, username: user.username };
+        res.json({ success: true, user: authenticated, token: issueAuthToken(authenticated) });
       } else if (username === "admin" && password === "123456") {
-        res.json({ success: true, user: { name: "系统管理员", role: "admin", username: "admin" } });
+        const authenticated = { name: "系统管理员", role: "admin", username: "admin" };
+        res.json({ success: true, user: authenticated, token: issueAuthToken(authenticated) });
       } else {
         res.status(401).json({ success: false, message: "用户名或密码错误" });
       }
@@ -3542,13 +3564,17 @@ app.post("/api/register", async (req, res) => {
     try { res.json({ success: true, data: await listChannelingProjects(localDb, { block: typeof req.query.block === "string" ? req.query.block : undefined }) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
-  const channelingRole = (req: express.Request) => req.get("x-channeling-role") || "admin";
+  const channelingRole = (req: express.Request) => authenticatedUser(req)?.role;
   const requireChannelingOperator = (req: express.Request, res: express.Response) => {
-    if (["admin", "technical", "technician", "operation", "operator"].includes(channelingRole(req))) return true;
+    const role = channelingRole(req);
+    if (!role) { res.status(401).json({ success: false, message: "Authentication is required" }); return false; }
+    if (["admin", "technical", "technician", "operation", "operator"].includes(role)) return true;
     res.status(403).json({ success: false, message: "Channeling operation permission is required" }); return false;
   };
   const requireChannelingAdmin = (req: express.Request, res: express.Response) => {
-    if (channelingRole(req) === "admin") return true;
+    const role = channelingRole(req);
+    if (!role) { res.status(401).json({ success: false, message: "Authentication is required" }); return false; }
+    if (role === "admin") return true;
     res.status(403).json({ success: false, message: "Channeling admin permission is required" }); return false;
   };
   app.post("/api/channeling-projects", async (req, res) => {

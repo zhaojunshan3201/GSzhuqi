@@ -10,6 +10,7 @@ test("channeling ledger exposes complete lists and role-specific actions instead
   assert.match(component, /isAdmin/);
   assert.match(component, /deleteProject/);
   assert.match(component, /releaseRelation/);
+  assert.match(component, /<form key=\{selected\.id\}/);
 });
 
 test("channeling APIs restrict mutating actions to technical, operation, or admin roles and reserve high-risk actions for admins", async () => {

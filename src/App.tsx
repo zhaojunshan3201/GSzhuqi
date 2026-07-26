@@ -1827,6 +1827,7 @@ const Login = ({ onLogin, globalError, overlay = false, onCancel }: { onLogin: (
           setIsRegister(false);
           setPassword('');
         } else {
+          if (data.token) localStorage.setItem('token', data.token);
           onLogin(data.user);
         }
       } else {
@@ -2572,6 +2573,7 @@ export default function App() {
     setBlockChartSource(null);
     blockDefaultAutoLoadedRef.current = false;
     localStorage.removeItem('oil_system_user');
+    localStorage.removeItem('token');
   };
 
   const showDataError = (message = '数据获取失败') => {
