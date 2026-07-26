@@ -16,6 +16,7 @@ export type SidebarTab =
   | 'pumpAnalysis'
   | 'injectionProjectManagement'
   | 'channelingProjectManagement'
+  | 'injectionOptimization'
   | 'measureWellSelection'
   | 'injectionPlan'
   | 'injectionConstruction'
@@ -68,6 +69,7 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     label: '注汽管理',
     items: [
       { tab: 'channelingProjectManagement', label: '\u6ce8\u7a9c\u9879\u76ee\u53f0\u8d26', icon: 'Target' },
+      { tab: 'injectionOptimization', label: '注汽优化预测', icon: 'TrendingUp' },
       { tab: 'measureWellSelection', label: '选井决策', icon: 'Target' },
       { tab: 'injectionPlan', label: '方案与计划', icon: 'ClipboardList' },
       { tab: 'injectionConstruction', label: '施工监控', icon: 'Activity' },

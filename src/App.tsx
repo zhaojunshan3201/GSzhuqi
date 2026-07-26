@@ -39,6 +39,8 @@ import { ExternalTransferTracking } from './components/ExternalTransferTracking'
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
 import { ChannelingProjectManagement } from './components/ChannelingProjectManagement';
+import { InjectionOptimization } from './components/InjectionOptimization';
+import { InjectionOptimization } from './components/InjectionOptimization';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { nextProjectLocationId } from './lib/injectionStatusMapNavigation';
 import { getInjectionProjectView } from './lib/injectionProjectViews';
@@ -6092,6 +6094,7 @@ export default function App() {
           {activeTab === 'well' && '单井精细化动态分析'}
           {activeTab === 'analysis' && '重点情况分析与建议'}
           {activeTab === 'comparison' && '对比分析'}
+          {activeTab === 'injectionOptimization' && '注汽优化预测'}
           {activeTab === 'measureWellSelection' && '措施选井'}
           {activeTab === 'injectionProjectManagement' && '注汽项目管理'}
           {activeTab === 'injectionPlan' && '方案与计划'}
@@ -6129,7 +6132,9 @@ export default function App() {
           </div>
         </header>
         <main className="app-content">
+              {activeTab === 'injectionOptimization' && <InjectionOptimization />}
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
+              {activeTab === 'injectionOptimization' && <InjectionOptimization />}
               {activeTab === 'channelingProjectManagement' && <ChannelingProjectManagement role={user?.role || 'guest'} />}
               {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {

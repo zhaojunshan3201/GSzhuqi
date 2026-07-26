@@ -34,6 +34,7 @@ import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts";
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
 import { findSimilarInjectionWells, type InjectionWellProfile } from "./src/lib/similarInjectionWells.ts";
+import { buildInjectionScenarioForecast } from "./src/lib/injectionScenarioForecast.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
@@ -3498,6 +3499,25 @@ app.post("/api/register", async (req, res) => {
     } catch (err: any) {
       res.status(500).json({ success: false, message: "同步状态查询失败: " + err.message });
     }
+  });
+
+  app.get("/api/injection-scenario-forecast", async (req, res) => {
+    try {
+      const block = typeof req.query.block === "string" && req.query.block.trim() ? req.query.block.trim() : null;
+      const where = block ? " AND block = ?" : "";
+      const historyRows = await localDb.all(`SELECT oil FROM production WHERE oil IS NOT NULL${where} ORDER BY rq DESC LIMIT 180`, block ? [block] : []);
+      const metrics = await localDb.get(`SELECT SUM(estimated_loss) AS channelingLoss, SUM(occupied_production) AS occupancyLoss, AVG(CASE WHEN before_metric IS NOT NULL AND after_metric IS NOT NULL THEN after_metric - before_metric END) AS plannedGain FROM channeling_projects${block ? " WHERE block = ?" : ""}`, block ? [block] : []);
+      const plannedGain = Number.isFinite(metrics?.plannedGain) ? Math.max(0, metrics.plannedGain) : null;
+      const forecast = buildInjectionScenarioForecast({
+        historicalDailyOil: historyRows.reverse().map((row: any) => row.oil),
+        plannedGain,
+        optimizedGain: plannedGain === null ? null : plannedGain * 1.25,
+        riskConstrainedGain: plannedGain === null ? null : plannedGain * 0.75,
+        channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null,
+        occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null,
+      });
+      res.json({ success: true, data: forecast });
+    } catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
   });
 
   app.get("/api/injection-production/cockpit", async (_req, res) => {
