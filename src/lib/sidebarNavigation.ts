@@ -40,6 +40,7 @@ export type SidebarIcon =
   | 'Droplets'
   | 'Filter'
   | 'Target'
+  | 'GitBranch'
   | 'MessageSquare';
 
 export interface SidebarNavigationItem {
@@ -69,15 +70,15 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
     key: 'injection',
     label: '注汽管理',
     items: [
-      { tab: 'channelingProjectManagement', label: '\u6ce8\u7a9c\u9879\u76ee\u53f0\u8d26', icon: 'Target' },
-      { tab: 'injectionOptimization', label: '注汽优化预测', icon: 'TrendingUp' },
       { tab: 'measureWellSelection', label: '选井决策', icon: 'Target' },
       { tab: 'injectionPlan', label: '方案与计划', icon: 'ClipboardList' },
       { tab: 'injectionConstruction', label: '施工监控', icon: 'Activity' },
       { tab: 'injectionSoakTransfer', label: '焖井转抽', icon: 'TrendingUp' },
       { tab: 'measures', label: '生产响应', icon: 'ClipboardList' },
       { tab: 'measureAnalysis', label: '效果评价', icon: 'MessageSquare' },
+      { tab: 'injectionOptimization', label: '注汽优化预测', icon: 'TrendingUp' },
       { tab: 'injectionOperationReports', label: '运行报告', icon: 'FileSpreadsheet' },
+      { tab: 'channelingProjectManagement', label: '\u6ce8\u7a9c\u9879\u76ee\u53f0\u8d26', icon: 'GitBranch' },
     ],
   },
   {
