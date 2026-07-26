@@ -88,7 +88,7 @@ export function buildRecommendationBenefitWaterfallOption(plan: ChartPlan | null
     grid: { left: 48, right: 24, top: 26, bottom: 35, containLabel: true },
     xAxis: { type: 'category', data: ['毛增油收益', '注窜损失', '占产损失', '注汽成本', '净收益'] },
     yAxis: { type: 'value', name: '元' },
-    series: [{ name: '累计', type: 'bar', stack: '收益', silent: true, itemStyle: { color: 'transparent' }, data: rows.map(() => 0) }, {
+    series: [{ name: '累计', type: 'bar', stack: '收益', silent: true, itemStyle: { color: 'transparent' }, data: bases }, {
       name: '收益损失', type: 'bar', stack: '收益', data: rows.map((amount, index) => amount === null ? null : ({ value: amount, itemStyle: { color: index === 4 ? bestColor : amount >= 0 ? planColor : '#dc2626' } })),
     }],
   }, rows.some(finite));
@@ -124,3 +124,4 @@ export function buildRecommendationRiskStabilityOption(plans: ChartPlanList): EC
     }],
   }, data.length > 0);
 }
+
