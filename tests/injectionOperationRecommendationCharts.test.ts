@@ -56,3 +56,14 @@ test('all options expose accessible no-data graphics and do not treat zeros as e
   assert.equal(option.aria.enabled, true);
 });
 
+
+
+import { readFileSync } from 'node:fs';
+
+test('renders recommendation charts and an accessible empty state', () => {
+  const component = readFileSync(new URL('../src/components/InjectionOptimization.tsx', import.meta.url), 'utf8');
+  for (const helper of ['buildRecommendationComparisonOption', 'buildRecommendationRadarOption', 'buildRecommendationBenefitWaterfallOption', 'buildRecommendationParameterOption', 'buildRecommendationRiskStabilityOption']) assert.match(component, new RegExp(helper));
+  assert.match(component, /ReactECharts/);
+  assert.match(component, /aria-label=/);
+  assert.match(component, /RecommendationTable/);
+});
