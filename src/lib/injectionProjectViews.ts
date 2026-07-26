@@ -21,7 +21,7 @@ export type SoakTransferDashboard<TProject extends SoakTransferDashboardProject 
   kpis: { soaking: number; pendingTransfer: number; overdue: number; averageSoakDays: number | null; missingSoakDate: number };
   durationDistribution: { label: string; count: number }[];
   statusDistribution: { status: string; count: number }[];
-  todo: TProject[];
+  todo: (TProject & { soakDays: number | null })[];
 };
 
 export function getInjectionProjectView(tab: string): InjectionProjectView {
@@ -183,6 +183,9 @@ export function buildSoakTransferDashboard<T extends SoakTransferDashboardProjec
     },
     durationDistribution,
     statusDistribution: statusDistribution(soakTransferProjects, 'lifecycleStatus'),
-    todo: soakTransferProjects,
+    todo: soakTransferProjects.map((project) => {
+      const soakStartTime = dateTime(project.soakStartDate);
+      return { ...project, soakDays: soakStartTime == null || todayTime == null ? null : Math.floor((todayTime - soakStartTime) / 86400000) };
+    }),
   };
 }

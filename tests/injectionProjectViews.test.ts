@@ -78,7 +78,9 @@ test('builds soak-transfer dashboard with valid soaking dates only and overdue t
       { status: 'soaking', count: 3 },
       { status: 'pendingTransfer', count: 1 },
     ],
-    todo: [projects[0], projects[2], projects[4], projects[1]],
+    todo: [
+      { ...projects[0], soakDays: 10 }, { ...projects[2], soakDays: null }, { ...projects[4], soakDays: null }, { ...projects[1], soakDays: 5 },
+    ],
   });
 });
 
