@@ -10,7 +10,8 @@ const relation = { injectionWell: '×¢A-1', productionWell: '²ÉA-2', reservoirLay
 test('channeling endpoints enforce request contracts over HTTP', { timeout: 30000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channeling-api-'));
   const port = 38000 + Math.floor(Math.random() * 1000);
-  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { cwd: process.cwd(), env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: path.join(directory, 'test.db'), CHANNELING_TEST_FORCE_ERROR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const serverOptions = { cwd: process.cwd(), env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: path.join(directory, 'test.db'), CHANNELING_TEST_FORCE_ERROR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] as const };
+  let child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], serverOptions);
   try {
     await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('server did not start')), 15000); child.stdout.on('data', (data) => { if (String(data).includes('Server running')) { clearTimeout(timer); resolve(); } }); child.once('error', reject); child.once('exit', (code) => reject(new Error(`server exited ${code}`))); });
     const request = async (url: string, init?: RequestInit) => fetch(`http://127.0.0.1:${port}${url}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers || {}) } });
@@ -23,6 +24,10 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     const token = (await login.json() as any).token;
     assert.ok(token);
     const authorized = { authorization: `Bearer ${token}` };
+    child.kill();
+    await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], serverOptions);
+    await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('restarted server did not start')), 15000); child.stdout.on('data', (data) => { if (String(data).includes('Server running')) { clearTimeout(timer); resolve(); } }); child.once('error', reject); child.once('exit', (code) => reject(new Error(`restarted server exited ${code}`))); });
     const projectResponse = await request('/api/channeling-projects', { method: 'POST', headers: authorized, body: JSON.stringify({ projectName: 'project', block: 'A', owner: 'tester' }) });
     assert.equal(projectResponse.status, 201); const project = (await projectResponse.json() as any).data;
     const created = await request(`/api/channeling-projects/${project.id}/relations`, { method: 'POST', headers: authorized, body: JSON.stringify(relation) });

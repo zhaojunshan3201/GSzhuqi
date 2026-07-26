@@ -55,3 +55,11 @@ test('does not return replacement characters for invalid UTF-8 bytes', () => {
   assert.equal(decodeMojibakeText(invalidUtf8), invalidUtf8);
   assert.doesNotMatch(decodeMojibakeText(invalidUtf8), /\uFFFD/);
 });
+
+
+test("expired channeling authorization clears the restored client session and prompts for login", async () => {
+  const app = readSource('src/App.tsx');
+  assert.match(app, /auth-expired/);
+  assert.match(app, /localStorage\.removeItem\('oil_system_user'\)/);
+  assert.match(app, /setShowAccessLogin\(true\)/);
+});

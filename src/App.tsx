@@ -2504,6 +2504,18 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      localStorage.removeItem('oil_system_user');
+      localStorage.removeItem('token');
+      setUser({ name: '??', role: 'guest', username: 'guest' });
+      setIsLoggedIn(true);
+      setShowAccessLogin(true);
+    };
+    window.addEventListener('auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('auth-expired', handleAuthExpired);
+  }, []);
+
   const handleLogin = (userData: UserInfo) => {
     setGlobalError('');
     setUser(userData);

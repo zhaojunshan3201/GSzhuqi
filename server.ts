@@ -67,7 +67,7 @@ const MEASURE_IMPORT_FILE_LIMIT_BYTES = 50 * 1024 * 1024;
 const WATER_CUT_FORMULA_VERSION = "2026-04-14-v4";
 const GAS_FORMULA_VERSION = "2026-04-14-v2";
 const LOCAL_ONLY_MODE = process.env.LOCAL_ONLY === "true";
-const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || crypto.randomBytes(32).toString("hex");
+const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || "oil-system-local-auth-v1";
 type AuthenticatedUser = { username: string; role: string };
 function issueAuthToken(user: AuthenticatedUser) {
   const payload = Buffer.from(JSON.stringify(user)).toString("base64url");

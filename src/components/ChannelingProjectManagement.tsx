@@ -24,7 +24,8 @@ export function ChannelingProjectManagement({ role }: Props) {
   const selected = projects.find((item) => item.id === selectedId);
   const visibleProjects = useMemo(() => projects.filter((item) => (!projectFilters.block || item.block.includes(projectFilters.block)) && (!projectFilters.status || item.status === projectFilters.status)), [projects, projectFilters]);
   const visibleRelations = useMemo(() => relations.filter((item) => (!relationFilters.status || item.status === relationFilters.status) && (!relationFilters.source || item.source === relationFilters.source)), [relations, relationFilters]);
-  const headers = localStorage.getItem('token') ? { Authorization: `Bearer ${localStorage.getItem('token')}` } : {};
+  const token = localStorage.getItem('token');
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
   const load = async () => {
     const [projectResponse, todoResponse] = await Promise.all([fetch('/api/channeling-projects'), fetch(`/api/channeling-projects/pending?date=${today()}`)]);
     const [projectPayload, todoPayload] = await Promise.all([projectResponse.json(), todoResponse.json()]);
@@ -40,8 +41,14 @@ export function ChannelingProjectManagement({ role }: Props) {
   useEffect(() => { if (selectedId) void loadRelations(selectedId).catch(() => setMessage('关系加载失败')); else { setRelations([]); setImports([]); } }, [selectedId]);
   const request = async (url: string, init: RequestInit) => {
     const response = await fetch(url, { ...init, headers: { ...headers, ...(init.headers || {}) } });
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('oil_system_user');
+      window.dispatchEvent(new Event('auth-expired'));
+      throw new Error('Authentication expired. Please sign in again.');
+    }
     const payload = await response.json();
-    if (!response.ok || !payload.success) throw new Error(payload.message || '操作失败');
+    if (!response.ok || !payload.success) throw new Error(payload.message || 'Operation failed');
     return payload.data;
   };
   const save = async (changes: Record<string, unknown>) => { if (!selected) return; try { await request(`/api/channeling-projects/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) }); await load(); setMessage('治理台账已保存'); } catch (error: any) { setMessage(error.message); } };
