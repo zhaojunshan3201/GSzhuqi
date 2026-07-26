@@ -35,6 +35,7 @@ import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts"
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
 import { findSimilarInjectionWells, type InjectionWellProfile } from "./src/lib/similarInjectionWells.ts";
 import { buildInjectionScenarioForecast } from "./src/lib/injectionScenarioForecast.ts";
+import { buildInjectionOperationRecommendations, type InjectionOperationOptimizerInput } from "./src/lib/injectionOperationOptimizer.ts";
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
@@ -3518,6 +3519,34 @@ app.post("/api/register", async (req, res) => {
       });
       res.json({ success: true, data: forecast });
     } catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
+  });
+
+  app.get("/api/injection-operation-recommendations", async (req, res) => {
+    try {
+      const block = typeof req.query.block === "string" && req.query.block.trim() ? req.query.block.trim() : null;
+      const where = block ? " AND block = ?" : "";
+      const historyRows = await localDb.all(`SELECT oil FROM production WHERE oil IS NOT NULL${where} ORDER BY rq DESC LIMIT 180`, block ? [block] : []);
+      const metrics = await localDb.get(`SELECT SUM(estimated_loss) AS channelingLoss, SUM(occupied_production) AS occupancyLoss, AVG(CASE WHEN before_metric IS NOT NULL AND after_metric IS NOT NULL THEN after_metric - before_metric END) AS plannedGain FROM channeling_projects${block ? " WHERE block = ?" : ""}`, block ? [block] : []);
+      const plannedGain = Number.isFinite(metrics?.plannedGain) ? Math.max(0, metrics.plannedGain) : null;
+      const forecast = buildInjectionScenarioForecast({ historicalDailyOil: historyRows.reverse().map((row: any) => row.oil), plannedGain, optimizedGain: plannedGain === null ? null : plannedGain * 1.25, riskConstrainedGain: plannedGain === null ? null : plannedGain * 0.75, channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null, occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null });
+      const gain = forecast.scenarios.find((scenario) => scenario.id === "currentPlan")?.points[0]?.gain ?? null;
+      const input: InjectionOperationOptimizerInput = {
+        constraints: { boilerSteamCapacity: 1200, maxConcurrentWells: 2, maxChannelingRisk: 0.5, oilPrice: 500, steamUnitCost: 20 },
+        candidates: [
+          { id: "stable", name: "????", wellOrder: ["????? 1"], staggerDays: 3, steamVolume: 900, pressure: 11, steamRate: 18, soakDays: 6, convertToProductionDay: 7, boiler: "?? B-1", grossIncrementalOil: gain, productionVolatility: 0.15, channelingRisk: 0.15 },
+          { id: "balanced", name: "????", wellOrder: ["????? 1", "????? 2"], staggerDays: 2, steamVolume: 1100, pressure: 12, steamRate: 20, soakDays: 5, convertToProductionDay: 6, boiler: "?? B-1", grossIncrementalOil: gain === null ? null : gain * 1.15, productionVolatility: 0.25, channelingRisk: 0.25 },
+          { id: "risk", name: "????", wellOrder: ["????? 1"], staggerDays: 5, steamVolume: 750, pressure: 10, steamRate: 16, soakDays: 7, convertToProductionDay: 8, boiler: "?? B-1", grossIncrementalOil: gain === null ? null : gain * 0.8, productionVolatility: 0.1, channelingRisk: 0.1 },
+        ], channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null, occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null, confidence: forecast.confidence, similarCaseEvidence: ["?????/?????????????????????"],
+      };
+      res.json({ success: true, data: buildInjectionOperationRecommendations(input), input });
+    } catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
+  });
+
+  app.post("/api/injection-operation-recommendations/evaluate", (req, res) => {
+    const input = req.body as InjectionOperationOptimizerInput;
+    if (!input?.constraints || !Array.isArray(input.candidates)) { res.status(400).json({ success: false, message: "?????????" }); return; }
+    if ((input.adjustments ?? []).some((adjustment) => !adjustment.reason?.trim())) { res.status(400).json({ success: false, message: "??????????" }); return; }
+    res.json({ success: true, data: buildInjectionOperationRecommendations(input) });
   });
 
   app.get("/api/injection-production/cockpit", async (_req, res) => {
