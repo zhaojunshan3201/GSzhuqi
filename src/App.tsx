@@ -716,10 +716,10 @@ const decodeMojibakeText = (value: unknown) => {
   try {
     const bytes = Uint8Array.from(Array.from(raw).map((char) => char.charCodeAt(0) & 0xff));
     const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes).trim();
-    if (decoded && countCjk(decoded) > countCjk(raw)) {
+    if (decoded && !decoded.includes('\uFFFD') && countCjk(decoded) > countCjk(raw)) {
       return decoded;
     }
-    if (decoded && countMojibake(raw) > 0 && countMojibake(decoded) < countMojibake(raw)) {
+    if (decoded && !decoded.includes('\uFFFD') && countMojibake(raw) > 0 && countMojibake(decoded) < countMojibake(raw)) {
       return decoded;
     }
   } catch {
