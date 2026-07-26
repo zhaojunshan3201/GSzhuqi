@@ -67,6 +67,14 @@ tests/               Node 测试用例
 
 ### 本地启动
 
+在项目根目录创建或更新 `.env`，设置本地端口：
+
+```env
+PORT=5001
+```
+
+随后安装依赖并启动：
+
 ```bash
 npm install
 npm run dev
