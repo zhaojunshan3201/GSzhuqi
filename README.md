@@ -51,7 +51,7 @@
 - 前端：React 19、TypeScript、Vite、Tailwind CSS、ECharts / Recharts
 - 后端：Node.js、Express、TypeScript（`tsx`）
 - 数据：SQLite（`sqlite`、`sqlite3`），Excel 导入导出（`xlsx`）
-- 可选集成：Oracle 驱动（`oracledb`）和生成式分析能力（`@google/genai`）
+- 可选集成：Oracle 驱动（`oracledb`）
 
 ### 目录说明
 
