@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { buildConstructionDashboard, buildSoakTransferDashboard, filterProjectsForView, getInjectionProjectView } from '../src/lib/injectionProjectViews.ts';
+import { buildConstructionDashboard, buildSoakTransferDashboard, filterProjectsForView, getInjectionProjectView, isOverdue } from '../src/lib/injectionProjectViews.ts';
 
 test('maps injection workflow tabs to project views', () => {
   assert.equal(getInjectionProjectView('injectionPlan'), 'plan');
@@ -18,11 +18,14 @@ test('filters projects by their workflow view and prioritizes overdue transfer w
     { id: 4, lifecycleStatus: 'pendingTransfer', plannedTransferDate: '2026-08-01' },
     { id: 3, lifecycleStatus: 'soaking', plannedTransferDate: '2026-07-20' },
     { id: 5, lifecycleStatus: 'producing', plannedTransferDate: '2026-07-01' },
+    { id: 6, lifecycleStatus: 'soaking', plannedTransferDate: '2026-02-31' },
   ];
 
-  assert.deepEqual(filterProjectsForView(projects, 'plan', '2026-07-26').map((project) => project.id), [1, 2, 4, 3, 5]);
+  assert.deepEqual(filterProjectsForView(projects, 'plan', '2026-07-26').map((project) => project.id), [1, 2, 4, 3, 5, 6]);
   assert.deepEqual(filterProjectsForView(projects, 'construction', '2026-07-26').map((project) => project.id), [1, 2]);
-  assert.deepEqual(filterProjectsForView(projects, 'soakTransfer', '2026-07-26').map((project) => project.id), [3, 4]);
+  assert.deepEqual(filterProjectsForView(projects, 'soakTransfer', '2026-07-26').map((project) => project.id), [3, 4, 6]);
+  assert.equal(isOverdue({ lifecycleStatus: 'soaking', plannedTransferDate: '2026-02-31' }, '2026-07-26'), false);
+  assert.equal(isOverdue({ lifecycleStatus: 'soaking', plannedTransferDate: '2026-07-20' }, '2026-02-31'), false);
 });
 
 test('builds construction dashboard data from pending and injecting projects only', () => {
@@ -33,20 +36,24 @@ test('builds construction dashboard data from pending and injecting projects onl
   ];
   const comparisons = [
     { projectId: 1, comparisonStatus: 'not_started', actualStartDate: null, plannedBoiler: 'B-1', plannedSteam: 10, actualSteam: null },
-    { projectId: 2, comparisonStatus: 'delayed', actualStartDate: '2026-07-01', plannedBoiler: 'B-1', plannedSteam: 20, actualSteam: 18 },
+    { projectId: 2, comparisonStatus: 'delayed', actualStartDate: '2026-07-01', plannedBoiler: 'B-1', actualBoiler: 'A-1', plannedSteam: 20, actualSteam: 18, completionRate: 0.9, wellNo: 'J-2' },
     { projectId: 3, comparisonStatus: 'incomplete', actualStartDate: '2026-07-02', plannedBoiler: 'B-2', plannedSteam: 30, actualSteam: 28 },
   ];
 
-  assert.deepEqual(buildConstructionDashboard(projects, comparisons), {
+  assert.deepEqual(buildConstructionDashboard(projects, comparisons, '2026-07-26'), {
     projects: [projects[0], projects[1]],
     rows: [comparisons[0], comparisons[1]],
     kpis: { active: 1, cumulativeSteam: 18, dailySteam: null, delayed: 1, missingData: 1 },
     boilerSteamTotals: [{ boiler: 'B-1', plannedSteam: 30, actualSteam: 18 }],
     statusDistribution: [
-      { status: 'not_started', count: 1 },
-      { status: 'delayed', count: 1 },
+      { status: 'pending', count: 1 },
+      { status: 'injecting', count: 1 },
     ],
   });
+  const dashboard = buildConstructionDashboard(projects, comparisons, '2026-07-26');
+  assert.equal(dashboard.rows[1].wellNo, 'J-2');
+  assert.equal(dashboard.rows[1].actualBoiler, 'A-1');
+  assert.equal(dashboard.rows[1].completionRate, 0.9);
 });
 
 test('builds soak-transfer dashboard with valid soaking dates only and overdue tasks first', () => {
@@ -97,7 +104,7 @@ test('filters and summarizes plan-actual comparisons for the construction view o
     { projectId: 5, comparisonStatus: 'suspected_other_cycle', actualStartDate: '2026-07-04', startVarianceDays: 80, endVarianceDays: 80, plannedBoiler: 'B-4', plannedSteam: 50, actualSteam: 45 },
   ];
 
-  const constructionRows = filterComparisonForView(comparisons, filterProjectsForView(projects, 'construction'));
+  const constructionRows = filterComparisonForView(comparisons, filterProjectsForView(projects, 'construction', '2026-07-26'));
   assert.deepEqual(constructionRows.map((row) => row.projectId), [1, 2]);
 
   const result = summarizeComparisonForView(constructionRows);

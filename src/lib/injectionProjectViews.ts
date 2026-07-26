@@ -5,17 +5,19 @@ type ViewProject = {
   plannedTransferDate?: string | null;
 };
 
+export type BusinessDate = string | Date;
+
 export type ConstructionDashboardProject = ViewProject & { id: number };
 export type SoakTransferDashboardProject = ConstructionDashboardProject & { soakStartDate?: string | null };
-export type ConstructionDashboard = {
-  projects: ConstructionDashboardProject[];
-  rows: ViewComparisonRow[];
+export type ConstructionDashboard<TProject extends ConstructionDashboardProject = ConstructionDashboardProject, TRow extends ViewComparisonRow = ViewComparisonRow> = {
+  projects: TProject[];
+  rows: TRow[];
   kpis: { active: number; cumulativeSteam: number; dailySteam: null; delayed: number; missingData: number };
   boilerSteamTotals: { boiler: string; plannedSteam: number; actualSteam: number }[];
   statusDistribution: { status: string; count: number }[];
 };
-export type SoakTransferDashboard = {
-  projects: SoakTransferDashboardProject[];
+export type SoakTransferDashboard<TProject extends SoakTransferDashboardProject = SoakTransferDashboardProject> = {
+  projects: TProject[];
   kpis: { soaking: number; pendingTransfer: number; overdue: number; averageSoakDays: number | null; missingSoakDate: number };
   durationDistribution: { label: string; count: number }[];
   statusDistribution: { status: string; count: number }[];
@@ -28,7 +30,7 @@ export function getInjectionProjectView(tab: string): InjectionProjectView {
   return 'plan';
 }
 
-export function filterProjectsForView<T extends ViewProject>(projects: T[], view: InjectionProjectView, today = new Date().toISOString().slice(0, 10)) {
+export function filterProjectsForView<T extends ViewProject>(projects: T[], view: InjectionProjectView, today: BusinessDate) {
   if (view === 'plan') return projects;
 
   const statuses = view === 'construction' ? new Set(['pending', 'injecting']) : new Set(['soaking', 'pendingTransfer']);
@@ -38,19 +40,36 @@ export function filterProjectsForView<T extends ViewProject>(projects: T[], view
   return filtered.sort((left, right) => Number(isOverdue(right, today)) - Number(isOverdue(left, today)));
 }
 
-export function isOverdue(project: ViewProject, today = new Date().toISOString().slice(0, 10)) {
-  return Boolean(project.plannedTransferDate && project.plannedTransferDate < today);
+function validDate(value: BusinessDate | null | undefined): string | null {
+  const date = value instanceof Date ? (Number.isFinite(value.getTime()) ? value.toISOString().slice(0, 10) : null) : value;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const time = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === date ? date : null;
+}
+
+function dateTime(value: BusinessDate | null | undefined): number | null {
+  const date = validDate(value);
+  return date ? Date.parse(`${date}T00:00:00Z`) : null;
+}
+
+export function isOverdue(project: ViewProject, today: BusinessDate) {
+  const plannedTransferDate = validDate(project.plannedTransferDate);
+  const currentDate = validDate(today);
+  return Boolean(plannedTransferDate && currentDate && plannedTransferDate < currentDate);
 }
 
 export type ViewComparisonRow = {
   projectId: number;
+  wellNo?: string;
   comparisonStatus: string;
   actualStartDate?: string | null;
   startVarianceDays?: number | null;
   endVarianceDays?: number | null;
   plannedBoiler?: string | null;
+  actualBoiler?: string | null;
   plannedSteam?: number | null;
   actualSteam?: number | null;
+  completionRate?: number | null;
 };
 
 type ComparisonProject = { id: number };
@@ -117,8 +136,8 @@ function statusDistribution(items: { lifecycleStatus?: string; comparisonStatus?
   return [...counts.entries()].map(([status, count]) => ({ status, count }));
 }
 
-export function buildConstructionDashboard<T extends ConstructionDashboardProject, R extends ViewComparisonRow>(projects: T[], comparisonRows: R[]): ConstructionDashboard {
-  const constructionProjects = filterProjectsForView(projects, 'construction');
+export function buildConstructionDashboard<T extends ConstructionDashboardProject, R extends ViewComparisonRow>(projects: T[], comparisonRows: R[], today: BusinessDate): ConstructionDashboard<T, R> {
+  const constructionProjects = filterProjectsForView(projects, 'construction', today);
   const rows = filterComparisonForView(comparisonRows, constructionProjects);
   const rowsByProject = new Map(rows.map((row) => [row.projectId, row]));
   return {
@@ -132,21 +151,15 @@ export function buildConstructionDashboard<T extends ConstructionDashboardProjec
       missingData: constructionProjects.filter((project) => rowsByProject.get(project.id)?.actualSteam == null).length,
     },
     boilerSteamTotals: boilerSteamTotals(rows),
-    statusDistribution: statusDistribution(rows, 'comparisonStatus'),
+    statusDistribution: statusDistribution(constructionProjects, 'lifecycleStatus'),
   };
 }
 
-function validDate(value: string | null | undefined): number | null {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const time = Date.parse(`${value}T00:00:00Z`);
-  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value ? time : null;
-}
-
-export function buildSoakTransferDashboard<T extends SoakTransferDashboardProject>(projects: T[], today = new Date().toISOString().slice(0, 10)): SoakTransferDashboard {
+export function buildSoakTransferDashboard<T extends SoakTransferDashboardProject>(projects: T[], today: BusinessDate): SoakTransferDashboard<T> {
   const soakTransferProjects = filterProjectsForView(projects, 'soakTransfer', today);
-  const todayTime = validDate(today);
+  const todayTime = dateTime(today);
   const soakDays = soakTransferProjects.flatMap((project) => {
-    const soakStartTime = validDate(project.soakStartDate);
+    const soakStartTime = dateTime(project.soakStartDate);
     return soakStartTime == null || todayTime == null ? [] : [Math.floor((todayTime - soakStartTime) / 86400000)];
   });
   const durationDistribution = [

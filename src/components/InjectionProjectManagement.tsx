@@ -6,7 +6,7 @@ import { filterComparisonForView, filterProjectsForView, isOverdue, summarizeCom
 type Project = {
   id: number; projectNo: string; wellNo: string; block: string; processType: string; plannedTransferDate: string; owner: string;
   plannedSteam?: number | null; remark?: string; unit?: string | null; boiler?: string | null; plannedStartDate?: string | null;
-  plannedEndDate?: string | null; gasSupport?: string | null; scheduleStatus?: string | null; sourceImportId?: number | null;
+  plannedEndDate?: string | null; gasSupport?: string | null; scheduleStatus?: string | null; sourceImportId?: number | null; soakStartDate?: string | null;
   planStatus: string; lifecycleStatus: string;
 };
 type ImportBatch = { id: number; planMonth: string; fileName: string; sheetName: string | null; status: string; validCount: number; pendingCount: number; invalidCount: number; totalPlannedSteam: number; createdAt: string; confirmedAt: string | null; previousComparison?: { added: number; modified: number; removed: number } | null };
@@ -43,10 +43,11 @@ export function InjectionProjectManagement({ view = 'plan', initialProjectId, on
   const action = async (project: Project, endpoint: string, body: Record<string, string>) => { const response = await fetch(`/api/injection-projects/${project.id}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const payload = await response.json(); if (!payload.success) { setError(payload.message); return; } void load(); };
   const upload = async (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; setError(''); setUploading(true); try { const data = new FormData(); data.append('file', file); const response = await fetch('/api/injection-project-imports/preview', { method: 'POST', body: data }); const payload = await response.json(); if (!payload.success) throw new Error(payload.message); setPreview(payload.data); setPreviewRows([...(payload.data.rows || []), ...(payload.data.pendingRows || []), ...(payload.data.invalidRows || [])]); void load(); } catch (cause: any) { setError(cause.message || '计划表解析失败'); } finally { setUploading(false); event.target.value = ''; } };
   const confirmPreview = async () => { if (!preview || !window.confirm(`确认以 ${preview.fileName} 覆盖 ${preview.planMonth} 的月度计划？`)) return; const response = await fetch(`/api/injection-project-imports/${preview.id}/confirm`, { method: 'POST' }); const payload = await response.json(); if (!payload.success) { setError(payload.message); return; } setPreview({ ...preview, ...payload.data }); void load(); };
-  const viewProjects = useMemo(() => filterProjectsForView(projects, view), [projects, view]);
+  const businessToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  const viewProjects = useMemo(() => filterProjectsForView(projects, view, businessToday), [projects, view, businessToday]);
   const hasInitialProjectOutsideView = Boolean(projectLocationId && projects.some((project) => String(project.id) === projectLocationId) && !viewProjects.some((project) => String(project.id) === projectLocationId));
   const filteredProjects = useMemo(() => filterProjectsByInitialId(viewProjects, projectLocationId).filter((project) => (!filters.unit || project.unit === filters.unit) && (!filters.boiler || project.boiler === filters.boiler) && (!filters.planStatus || project.planStatus === filters.planStatus) && (!filters.lifecycleStatus || project.lifecycleStatus === filters.lifecycleStatus)), [viewProjects, filters, projectLocationId]);
-  const overdueProjects = useMemo(() => viewProjects.filter((project) => isOverdue(project)), [viewProjects]);
+  const overdueProjects = useMemo(() => viewProjects.filter((project) => isOverdue(project, businessToday)), [viewProjects, businessToday]);
   const timelineGroups = useMemo(() => Object.entries(filteredProjects.filter((project) => project.boiler && project.plannedStartDate && project.plannedEndDate).reduce<Record<string, Project[]>>((result, project) => { (result[project.boiler!] ||= []).push(project); return result; }, {})), [filteredProjects]);
   const options = (key: 'unit' | 'boiler' | 'planStatus' | 'lifecycleStatus') => [...new Set(projects.map((project) => project[key]).filter(Boolean))] as string[];
   const comparisonDate = (start: string | null, end: string | null) => start || end ? `${start || '--'} 至 ${end || '--'}` : '--';
