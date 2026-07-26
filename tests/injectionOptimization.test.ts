@@ -18,3 +18,22 @@ test('wires the injection optimization page exactly once', () => {
   assert.equal(importMatches.length, 1);
   assert.equal(renderMatches.length, 1);
 });
+
+test('isolates forecast and recommendation failures so one failed request does not blank the other result', () => {
+  const source = readFileSync(new URL('../src/components/InjectionOptimization.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /scenarioError/);
+  assert.match(source, /recommendationError/);
+  assert.match(source, /loadScenarioForecast/);
+  assert.match(source, /loadRecommendations/);
+  assert.match(source, /\\u751f\\u4ea7\\u6e90 Well \\u63a5\\u53e3\\u6682\\u4e0d\\u53ef\\u7528/);
+  assert.match(source, /\\u91cd\\u8bd5\\u9884\\u6d4b/);
+  assert.match(source, /\\u91cd\\u8bd5\\u63a8\\u8350/);
+  assert.doesNotMatch(source, /setData\(null\)|setRecommendations\(null\)/);
+  assert.doesNotMatch(source, /\{error \?/);
+});
+
+test('disables HMR for the Vite middleware server instead of reconnecting to a stale port', () => {
+  const source = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  assert.match(source, /server:\s*\{\s*middlewareMode:\s*true,\s*hmr:\s*false\s*\}/);
+});
