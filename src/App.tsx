@@ -28,6 +28,7 @@ import {
   LogIn,
   Thermometer,
   Target,
+  GitBranch,
   MapPinned
 } from 'lucide-react';
 import { cn } from './lib/utils';
@@ -1980,6 +1981,7 @@ const sidebarIconMap: Record<SidebarIcon, LucideIcon> = {
   Droplets,
   Filter,
   Target,
+  GitBranch,
   MessageSquare,
 };
 
