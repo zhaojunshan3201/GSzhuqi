@@ -26,6 +26,23 @@ const deviationStatuses = new Set<ComparisonStatus>(['early', 'delayed', 'not_st
 
 export type InjectionChartSeries = { name: string; data: number[]; color: string };
 
+export type InjectionProjectFilters = { planMonth: string; unit: string; boiler: string; planStatus: string; lifecycleStatus: string; comparisonStatus: string };
+type FilterableInjectionProject = { id: number; unit?: string | null; boiler?: string | null; planStatus: string; lifecycleStatus: string; sourceImportId?: number | null };
+type FilterablePlanImport = { id: number; planMonth: string };
+type FilterableComparisonRow = { projectId: number; comparisonStatus: string };
+
+export function filterInjectionProjects<T extends FilterableInjectionProject>(projects: T[], imports: FilterablePlanImport[], comparisonRows: FilterableComparisonRow[], filters: InjectionProjectFilters, initialProjectId?: string) {
+  const planMonthByImportId = new Map(imports.map((item) => [item.id, item.planMonth]));
+  const comparisonStatusByProjectId = new Map(comparisonRows.map((row) => [row.projectId, row.comparisonStatus]));
+  return filterProjectsByInitialId(projects, initialProjectId).filter((project) =>
+    (!filters.planMonth || planMonthByImportId.get(project.sourceImportId ?? -1) === filters.planMonth)
+    && (!filters.unit || project.unit === filters.unit)
+    && (!filters.boiler || project.boiler === filters.boiler)
+    && (!filters.planStatus || project.planStatus === filters.planStatus)
+    && (!filters.lifecycleStatus || project.lifecycleStatus === filters.lifecycleStatus)
+    && (!filters.comparisonStatus || comparisonStatusByProjectId.get(project.id) === filters.comparisonStatus));
+}
+
 export function hasInjectionChartData(labels: string[], series: InjectionChartSeries[]) {
   return labels.length > 0 && series.some((item) => item.data.length > 0);
 }
@@ -59,7 +76,7 @@ export function InjectionProjectManagement({ view = 'plan', initialProjectId, on
   const [projects, setProjects] = useState<Project[]>([]); const [imports, setImports] = useState<ImportBatch[]>([]); const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null); const [comparisonView, setComparisonView] = useState<'deviation' | 'all'>('deviation'); const [error, setError] = useState('');
   const [form, setForm] = useState({ wellNo: '', block: '', processType: '', plannedTransferDate: '', owner: '' });
   const [preview, setPreview] = useState<ImportBatch | null>(null); const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]); const [uploading, setUploading] = useState(false); const [importHistoryExpanded, setImportHistoryExpanded] = useState(false); const inputRef = useRef<HTMLInputElement>(null);
-  const [filters, setFilters] = useState({ planMonth: '', unit: '', boiler: '', planStatus: '', lifecycleStatus: '', comparisonStatus: '' });
+  const [filters, setFilters] = useState<InjectionProjectFilters>({ planMonth: '', unit: '', boiler: '', planStatus: '', lifecycleStatus: '', comparisonStatus: '' });
   const [projectLocationId, setProjectLocationId] = useState(initialProjectId);
   useEffect(() => { setProjectLocationId(initialProjectId); }, [initialProjectId]);
   const load = () => Promise.all([
@@ -74,8 +91,8 @@ export function InjectionProjectManagement({ view = 'plan', initialProjectId, on
   const businessToday = formatShanghaiBusinessDate(new Date());
   const viewProjects = useMemo(() => filterProjectsForView(projects, view, businessToday), [projects, view, businessToday]);
   const hasInitialProjectOutsideView = Boolean(projectLocationId && projects.some((project) => String(project.id) === projectLocationId) && !viewProjects.some((project) => String(project.id) === projectLocationId));
-  const filteredProjects = useMemo(() => filterProjectsByInitialId(viewProjects, projectLocationId).filter((project) => (!filters.unit || project.unit === filters.unit) && (!filters.boiler || project.boiler === filters.boiler) && (!filters.planStatus || project.planStatus === filters.planStatus) && (!filters.lifecycleStatus || project.lifecycleStatus === filters.lifecycleStatus)), [viewProjects, filters, projectLocationId]);
-  const overdueProjects = useMemo(() => viewProjects.filter((project) => isOverdue(project, businessToday)), [viewProjects, businessToday]);
+  const filteredProjects = useMemo(() => filterInjectionProjects(viewProjects, imports, comparisonResult?.rows || [], filters, projectLocationId), [viewProjects, imports, comparisonResult, filters, projectLocationId]);
+  const overdueProjects = useMemo(() => filteredProjects.filter((project) => isOverdue(project, businessToday)), [filteredProjects, businessToday]);
   const timelineGroups = useMemo(() => Object.entries(filteredProjects.filter((project) => project.boiler && project.plannedStartDate && project.plannedEndDate).reduce<Record<string, Project[]>>((result, project) => { (result[project.boiler!] ||= []).push(project); return result; }, {})), [filteredProjects]);
   const options = (key: 'unit' | 'boiler' | 'planStatus' | 'lifecycleStatus') => [...new Set(projects.map((project) => project[key]).filter(Boolean))] as string[];
   const comparisonDate = (start: string | null, end: string | null) => start || end ? `${start || '--'} 至 ${end || '--'}` : '--';
