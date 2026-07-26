@@ -40,7 +40,6 @@ import { InjectionProductionCockpit } from './components/InjectionProductionCock
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
 import { ChannelingProjectManagement } from './components/ChannelingProjectManagement';
 import { InjectionOptimization } from './components/InjectionOptimization';
-import { InjectionOptimization } from './components/InjectionOptimization';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { nextProjectLocationId } from './lib/injectionStatusMapNavigation';
 import { getInjectionProjectView } from './lib/injectionProjectViews';
@@ -6134,7 +6133,6 @@ export default function App() {
         <main className="app-content">
               {activeTab === 'injectionOptimization' && <InjectionOptimization />}
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
-              {activeTab === 'injectionOptimization' && <InjectionOptimization />}
               {activeTab === 'channelingProjectManagement' && <ChannelingProjectManagement role={user?.role || 'guest'} />}
               {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
