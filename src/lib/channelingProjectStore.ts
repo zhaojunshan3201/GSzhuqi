@@ -58,7 +58,7 @@ export async function listChannelingProjects(db: DatabaseLike, options: { block?
   const where = options.block ? ' WHERE block = ?' : ''; return (await db.all(`SELECT * FROM channeling_projects${where} ORDER BY updated_at DESC, id DESC`, options.block ? [options.block] : [])).map(project);
 }
 export async function createChannelingRelation(db: DatabaseLike, input: ChannelingRelationInput): Promise<ChannelingRelation> {
-  validateRelation(input); if (!await db.get('SELECT id FROM channeling_projects WHERE id = ?', [input.projectId])) throw new Error('Project not found');
+  validateRelation(input); if (input.source === 'suspected' && input.status !== 'suspected') throw new Error('suspected relations must be created as suspected'); if (!await db.get('SELECT id FROM channeling_projects WHERE id = ?', [input.projectId])) throw new Error('Project not found');
   const now = new Date().toISOString(); const values = [input.projectId, input.injectionWell.trim(), input.productionWell.trim(), input.reservoirLayer.trim(), input.impactLevel, input.confidence, input.status, input.source, input.evidence.trim(), input.effectiveStartDate, input.effectiveEndDate, input.owner.trim(), now, now];
   const result = await db.run('INSERT INTO channeling_relations (project_id, injection_well, production_well, reservoir_layer, impact_level, confidence, status, source, evidence, effective_start_date, effective_end_date, owner, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', values);
   return relation(await db.get('SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id WHERE r.id = ?', [result.lastID]));

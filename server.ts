@@ -37,6 +37,7 @@ import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHan
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
 import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingProjects, listChannelingRelations, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
+import { confirmChannelingRelationImport, createChannelingRelationPreview, initChannelingRelationImportTables, listChannelingRelationImports, parseChannelingRelationRows } from "./src/lib/channelingRelationImport.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -1007,6 +1008,7 @@ async function initLocalDb() {
   await initMeasureWellSelectionTables(localDb);
   await initInjectionProjectTables(localDb);
   await initChannelingProjectTables(localDb);
+  await initChannelingRelationImportTables(localDb);
   await initMonthlyInjectionPlanImportTables(localDb);
   await initExternalTransferTables(localDb);
 
@@ -3085,6 +3087,8 @@ async function startServer() {
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
   });
   const monthlyInjectionPlanUploadMiddleware = handleMeasureImportUpload(monthlyInjectionPlanUpload);
+  const channelingRelationImportUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES } });
+  const channelingRelationImportUploadMiddleware = handleMeasureImportUpload(channelingRelationImportUpload);
   const wellMapDailyUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MEASURE_IMPORT_FILE_LIMIT_BYTES },
@@ -3561,6 +3565,29 @@ app.post("/api/register", async (req, res) => {
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-projects/:id/relation-imports/preview", channelingRelationImportUploadMiddleware, async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try {
+      const file = (req as express.Request & { file?: { originalname: string; buffer: Buffer } }).file;
+      if (!file) return res.status(400).json({ success: false, message: "Excel file is required" });
+      if (!/\.xlsx?$/i.test(file.originalname)) return res.status(400).json({ success: false, message: "only .xlsx and .xls files are supported" });
+      const data = await createChannelingRelationPreview(localDb, projectId, decodeUploadedFileName(file.originalname), parseChannelingRelationRows(XLSX.read(file.buffer, { type: "buffer" })));
+      res.status(201).json({ success: true, data });
+    } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.get("/api/channeling-projects/:id/relation-imports", async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { res.json({ success: true, data: await listChannelingRelationImports(localDb, projectId) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-relation-imports/:id/confirm", async (req, res) => {
+    const importId = Number(req.params.id);
+    if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId) }); }
+    catch (error: any) { const status = error.message === "channeling relation import not found" ? 404 : error.message === "only preview imports can be confirmed" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-relations/:id", async (req, res) => {
     const id = Number(req.params.id);
