@@ -965,6 +965,15 @@ async function initLocalDb() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS injection_operation_adjustment_audits (
+      audit_id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      adjusted_at TEXT NOT NULL,
+      original_json TEXT NOT NULL,
+      new_json TEXT NOT NULL,
+      reason TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS dashboard_summary_daily (
       rq TEXT NOT NULL,
       scope_type TEXT NOT NULL,
@@ -3521,32 +3530,44 @@ app.post("/api/register", async (req, res) => {
     } catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
   });
 
+  const requireOperationAdmin = (req: express.Request, res: express.Response) => {
+    const user = authenticatedUser(req);
+    if (!user) { res.status(401).json({ success: false, message: "\u9700\u8981\u8ba4\u8bc1" }); return null; }
+    if (user.role !== "admin") { res.status(403).json({ success: false, message: "\u9700\u8981\u7ba1\u7406\u5458\u6743\u9650" }); return null; }
+    return user;
+  };
+  const operationBlock = (req: express.Request) => typeof req.query.block === "string" && req.query.block.trim() ? req.query.block.trim() : null;
+  const buildOperationInput = async (block: string | null): Promise<InjectionOperationOptimizerInput> => {
+    const where = block ? " AND block = ?" : "";
+    const historyRows = await localDb.all(`SELECT oil FROM production WHERE oil IS NOT NULL${where} ORDER BY rq DESC LIMIT 180`, block ? [block] : []);
+    const metrics = await localDb.get(`SELECT SUM(estimated_loss) AS channelingLoss, SUM(occupied_production) AS occupancyLoss, AVG(CASE WHEN before_metric IS NOT NULL AND after_metric IS NOT NULL THEN after_metric - before_metric END) AS plannedGain FROM channeling_projects${block ? " WHERE block = ?" : ""}`, block ? [block] : []);
+    const plannedGain = Number.isFinite(metrics?.plannedGain) ? Math.max(0, metrics.plannedGain) : null;
+    const forecast = buildInjectionScenarioForecast({ historicalDailyOil: historyRows.reverse().map((row: any) => row.oil), plannedGain, optimizedGain: plannedGain === null ? null : plannedGain * 1.25, riskConstrainedGain: plannedGain === null ? null : plannedGain * 0.75, channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null, occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null });
+    const gain = forecast.scenarios.find((scenario) => scenario.id === "currentPlan")?.points[0]?.gain ?? null;
+    return { constraints: { boilerSteamCapacity: 1200, maxConcurrentWells: 2, maxChannelingRisk: 0.5, oilPrice: 500, steamUnitCost: 20 }, candidates: [
+      { id: "stable", name: "\u7a33\u4ea7\u4f18\u5148", wellOrder: ["\u5f85\u786e\u8ba4\u6ce8\u4e95 1"], staggerDays: 3, steamVolume: 900, pressure: 11, steamRate: 18, soakDays: 6, convertToProductionDay: 7, boiler: "\u9505\u7089 B-1", grossIncrementalOil: gain, productionVolatility: 0.15, channelingRisk: 0.15 },
+      { id: "balanced", name: "\u5e73\u8861\u6536\u76ca", wellOrder: ["\u5f85\u786e\u8ba4\u6ce8\u4e95 1", "\u5f85\u786e\u8ba4\u6ce8\u4e95 2"], staggerDays: 2, steamVolume: 1100, pressure: 12, steamRate: 20, soakDays: 5, convertToProductionDay: 6, boiler: "\u9505\u7089 B-1", grossIncrementalOil: gain === null ? null : gain * 1.15, productionVolatility: 0.25, channelingRisk: 0.25 },
+      { id: "risk", name: "\u98ce\u9669\u7ea6\u675f", wellOrder: ["\u5f85\u786e\u8ba4\u6ce8\u4e95 1"], staggerDays: 5, steamVolume: 750, pressure: 10, steamRate: 16, soakDays: 7, convertToProductionDay: 8, boiler: "\u9505\u7089 B-1", grossIncrementalOil: gain === null ? null : gain * 0.8, productionVolatility: 0.1, channelingRisk: 0.1 },
+    ], channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null, occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null, confidence: forecast.confidence, similarCaseEvidence: ["\u53c2\u6570\u4e3a\u89c4\u5219/\u6848\u4f8b\u63a8\u8350\uff1b\u5f85\u786e\u8ba4\u6ce8\u4e95\u987b\u7531\u6280\u672f\u4eba\u5458\u66ff\u6362\u540e\u6267\u884c"] };
+  };
   app.get("/api/injection-operation-recommendations", async (req, res) => {
-    try {
-      const block = typeof req.query.block === "string" && req.query.block.trim() ? req.query.block.trim() : null;
-      const where = block ? " AND block = ?" : "";
-      const historyRows = await localDb.all(`SELECT oil FROM production WHERE oil IS NOT NULL${where} ORDER BY rq DESC LIMIT 180`, block ? [block] : []);
-      const metrics = await localDb.get(`SELECT SUM(estimated_loss) AS channelingLoss, SUM(occupied_production) AS occupancyLoss, AVG(CASE WHEN before_metric IS NOT NULL AND after_metric IS NOT NULL THEN after_metric - before_metric END) AS plannedGain FROM channeling_projects${block ? " WHERE block = ?" : ""}`, block ? [block] : []);
-      const plannedGain = Number.isFinite(metrics?.plannedGain) ? Math.max(0, metrics.plannedGain) : null;
-      const forecast = buildInjectionScenarioForecast({ historicalDailyOil: historyRows.reverse().map((row: any) => row.oil), plannedGain, optimizedGain: plannedGain === null ? null : plannedGain * 1.25, riskConstrainedGain: plannedGain === null ? null : plannedGain * 0.75, channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null, occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null });
-      const gain = forecast.scenarios.find((scenario) => scenario.id === "currentPlan")?.points[0]?.gain ?? null;
-      const input: InjectionOperationOptimizerInput = {
-        constraints: { boilerSteamCapacity: 1200, maxConcurrentWells: 2, maxChannelingRisk: 0.5, oilPrice: 500, steamUnitCost: 20 },
-        candidates: [
-          { id: "stable", name: "????", wellOrder: ["????? 1"], staggerDays: 3, steamVolume: 900, pressure: 11, steamRate: 18, soakDays: 6, convertToProductionDay: 7, boiler: "?? B-1", grossIncrementalOil: gain, productionVolatility: 0.15, channelingRisk: 0.15 },
-          { id: "balanced", name: "????", wellOrder: ["????? 1", "????? 2"], staggerDays: 2, steamVolume: 1100, pressure: 12, steamRate: 20, soakDays: 5, convertToProductionDay: 6, boiler: "?? B-1", grossIncrementalOil: gain === null ? null : gain * 1.15, productionVolatility: 0.25, channelingRisk: 0.25 },
-          { id: "risk", name: "????", wellOrder: ["????? 1"], staggerDays: 5, steamVolume: 750, pressure: 10, steamRate: 16, soakDays: 7, convertToProductionDay: 8, boiler: "?? B-1", grossIncrementalOil: gain === null ? null : gain * 0.8, productionVolatility: 0.1, channelingRisk: 0.1 },
-        ], channelingLoss: Number.isFinite(metrics?.channelingLoss) ? metrics.channelingLoss : null, occupancyLoss: Number.isFinite(metrics?.occupancyLoss) ? metrics.occupancyLoss : null, confidence: forecast.confidence, similarCaseEvidence: ["?????/?????????????????????"],
-      };
-      res.json({ success: true, data: buildInjectionOperationRecommendations(input), input });
-    } catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
+    try { res.json({ success: true, data: buildInjectionOperationRecommendations(await buildOperationInput(operationBlock(req))) }); }
+    catch (error: any) { res.status(500).json({ success: false, message: error.message }); }
   });
-
-  app.post("/api/injection-operation-recommendations/evaluate", (req, res) => {
-    const input = req.body as InjectionOperationOptimizerInput;
-    if (!input?.constraints || !Array.isArray(input.candidates)) { res.status(400).json({ success: false, message: "?????????" }); return; }
-    if ((input.adjustments ?? []).some((adjustment) => !adjustment.reason?.trim())) { res.status(400).json({ success: false, message: "??????????" }); return; }
-    res.json({ success: true, data: buildInjectionOperationRecommendations(input) });
+  app.post("/api/injection-operation-recommendations/:planId/adjustments", async (req, res) => {
+    const actor = requireOperationAdmin(req, res); if (!actor) return;
+    const planId = req.params.planId;
+    const body = req.body as { reason?: unknown; patch?: unknown };
+    const allowed = new Set(["staggerDays", "steamVolume", "pressure", "steamRate", "soakDays", "convertToProductionDay"]);
+    if (!body || typeof body.reason !== "string" || !body.reason.trim() || !body.patch || typeof body.patch !== "object" || Object.keys(body.patch).some((key) => !allowed.has(key)) || Object.values(body.patch as Record<string, unknown>).some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0)) { res.status(400).json({ success: false, message: "\u8c03\u6574\u5408\u540c\u65e0\u6548" }); return; }
+    const input = await buildOperationInput(operationBlock(req));
+    const original = input.candidates.find((candidate) => candidate.id === planId);
+    if (!original) { res.status(404).json({ success: false, message: "\u65b9\u6848\u4e0d\u5b58\u5728" }); return; }
+    const updated = { ...original, ...(body.patch as object) };
+    const auditId = crypto.randomUUID(); const adjustedAt = new Date().toISOString();
+    await localDb.run("INSERT INTO injection_operation_adjustment_audits (audit_id, plan_id, actor, adjusted_at, original_json, new_json, reason) VALUES (?, ?, ?, ?, ?, ?, ?)", [auditId, planId, actor.username, adjustedAt, JSON.stringify(original), JSON.stringify(updated), body.reason.trim()]);
+    input.adjustments = [{ planId, reason: body.reason.trim(), patch: body.patch as any }];
+    res.status(201).json({ success: true, data: buildInjectionOperationRecommendations(input), audit: { auditId, actor: actor.username, adjustedAt, reason: body.reason.trim(), original, updated } });
   });
 
   app.get("/api/injection-production/cockpit", async (_req, res) => {

@@ -21,6 +21,7 @@ export type InjectionOperation = {
   productionVolatility: number | null;
   channelingRisk: number | null;
   concurrentWells?: number;
+  boilerDailyCapacity?: number;
 };
 
 export type OperationAdjustment = {
@@ -51,7 +52,7 @@ export type RecommendedOperation = {
   adjustments: OperationAdjustment[];
 };
 
-export type InjectionOperationRecommendationResult = { recommendations: RecommendedOperation[]; rejected: Array<{ id: string; reason: string }> };
+export type InjectionOperationRecommendationResult = { recommendations: RecommendedOperation[]; rejected: Array<{ id: string; reason: string }>; constraints: OperationConstraints };
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
@@ -82,12 +83,18 @@ export function buildInjectionOperationRecommendations(input: InjectionOperation
     return [{ id: operation.id, name: operation.name, operation, score, confidence, metrics: { grossIncrementalOil: operation.grossIncrementalOil, channelingLoss: finite(input.channelingLoss) ? input.channelingLoss : null, occupancyLoss: finite(input.occupancyLoss) ? input.occupancyLoss : null, netIncrementalOil, productionVolatility: finite(operation.productionVolatility) ? operation.productionVolatility : null, channelingRisk: finite(operation.channelingRisk) ? operation.channelingRisk : null, steamCost, incrementalRevenue, netBenefit }, evidence, assumptions, adjustments: applied }];
   });
   recommendations.sort((left, right) => (right.score ?? -Infinity) - (left.score ?? -Infinity) || right.confidence - left.confidence || left.name.localeCompare(right.name));
-  return { recommendations: recommendations.slice(0, 3), rejected };
+  return { recommendations: recommendations.slice(0, 3), rejected, constraints: input.constraints };
 }
 
 function constraintViolation(operation: InjectionOperation, constraints: OperationConstraints): string | null {
-  if (operation.steamVolume > constraints.boilerSteamCapacity) return `锅炉能力超限：${operation.steamVolume} > ${constraints.boilerSteamCapacity}`;
-  if ((operation.concurrentWells ?? operation.wellOrder.length) > constraints.maxConcurrentWells) return `并行注井数超限：${operation.concurrentWells ?? operation.wellOrder.length} > ${constraints.maxConcurrentWells}`;
-  if (finite(operation.channelingRisk) && operation.channelingRisk > constraints.maxChannelingRisk) return `注窜风险超限：${operation.channelingRisk} > ${constraints.maxChannelingRisk}`;
+  if (!finite(operation.productionVolatility)) return "\u751f\u4ea7\u6ce2\u52a8\u7f3a\u5931\uff0c\u4e0d\u53ef\u63a8\u8350";
+  if (!finite(operation.channelingRisk)) return "\u6ce8\u7a9c\u98ce\u9669\u7f3a\u5931\uff0c\u4e0d\u53ef\u63a8\u8350";
+  if (operation.channelingRisk > constraints.maxChannelingRisk) return `\u6ce8\u7a9c\u98ce\u9669\u8d85\u9650\uff1a${operation.channelingRisk} > ${constraints.maxChannelingRisk}`;
+  const concurrent = operation.concurrentWells ?? (operation.staggerDays > 0 ? 1 : operation.wellOrder.length);
+  if (concurrent > constraints.maxConcurrentWells) return `\u5b9e\u9645\u5e76\u53d1\u6ce8\u4e95\u6570\u8d85\u9650\uff1a${concurrent} > ${constraints.maxConcurrentWells}`;
+  const dailyLoad = concurrent * operation.steamRate;
+  const dailyCapacity = operation.boilerDailyCapacity ?? constraints.boilerSteamCapacity;
+  if (dailyLoad > dailyCapacity) return `\u9505\u7089\u5b9e\u9645\u6392\u91cf\u8d85\u9650\uff1a${dailyLoad} > ${dailyCapacity}`;
+  if (operation.steamVolume > constraints.boilerSteamCapacity) return `\u9505\u7089\u6ce8\u6c7d\u91cf\u8d85\u9650\uff1a${operation.steamVolume} > ${constraints.boilerSteamCapacity}`;
   return null;
 }

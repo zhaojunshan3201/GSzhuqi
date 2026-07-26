@@ -57,3 +57,14 @@ test('does not substitute unknown losses with zero and reduces confidence', () =
 });
 
 
+
+
+test('rejects unknown critical risk and calculates staggered boiler concurrency from rate', () => {
+  const result = buildInjectionOperationRecommendations({ constraints: constraint, channelingLoss: 1, occupancyLoss: 1, confidence: 0.8, candidates: [
+    { id: 'unknown-risk', name: 'unknown', wellOrder: ['J-1'], staggerDays: 1, steamVolume: 700, pressure: 10, steamRate: 10, soakDays: 5, convertToProductionDay: 6, boiler: 'B-1', grossIncrementalOil: 10, productionVolatility: 0.1, channelingRisk: null },
+    { id: 'parallel', name: 'parallel', wellOrder: ['J-1', 'J-2', 'J-3'], staggerDays: 0, steamVolume: 700, pressure: 10, steamRate: 500, soakDays: 5, convertToProductionDay: 6, boiler: 'B-1', grossIncrementalOil: 10, productionVolatility: 0.1, channelingRisk: 0.1 },
+  ] });
+  assert.equal(result.recommendations.length, 0);
+  assert.match(result.rejected[0].reason, /risk|\u98ce\u9669/);
+  assert.match(result.rejected[1].reason, /concurrency|\u5e76\u53d1/);
+});
