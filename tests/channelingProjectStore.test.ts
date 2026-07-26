@@ -69,3 +69,10 @@ test('updates a relation and reports missing project or relation', async () => {
     await assert.rejects(() => updateChannelingRelation(db, 404, { status: 'released' }), /Relation not found/);
   });
 });
+
+test('rejects invalid relation list enum filters instead of silently returning no rows', async () => {
+  await withStore(async (db) => {
+    await assert.rejects(() => listChannelingRelations(db, { status: 'invalid' }), /status/);
+    await assert.rejects(() => listChannelingRelations(db, { source: 'invalid' }), /source/);
+  });
+});

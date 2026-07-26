@@ -3542,18 +3542,21 @@ app.post("/api/register", async (req, res) => {
     try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
-  app.get("/api/channeling-project-relations", async (req, res) => {
+  app.get("/api/channeling-projects/:id/relations", async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try {
-      const projectId = typeof req.query.projectId === "string" ? Number(req.query.projectId) : undefined;
-      if (projectId !== undefined && (!Number.isInteger(projectId) || projectId <= 0)) throw new Error("projectId is invalid");
+      if (!await localDb.get("SELECT id FROM channeling_projects WHERE id = ?", [projectId])) return res.status(404).json({ success: false, message: "Project not found" });
       res.json({ success: true, data: await listChannelingRelations(localDb, { projectId, status: typeof req.query.status === "string" ? req.query.status : undefined, source: typeof req.query.source === "string" ? req.query.source : undefined, block: typeof req.query.block === "string" ? req.query.block : undefined }) });
     } catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
-  app.post("/api/channeling-project-relations", async (req, res) => {
-    try { res.status(201).json({ success: true, data: await createChannelingRelation(localDb, req.body) }); }
+  app.post("/api/channeling-projects/:id/relations", async (req, res) => {
+    const projectId = Number(req.params.id);
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    try { res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
     catch (error: any) { res.status(error.message === "Project not found" ? 404 : 400).json({ success: false, message: error.message }); }
   });
-  app.patch("/api/channeling-project-relations/:id", async (req, res) => {
+  app.patch("/api/channeling-relations/:id", async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try { res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }

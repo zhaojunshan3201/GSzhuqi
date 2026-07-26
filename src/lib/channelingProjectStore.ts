@@ -64,6 +64,8 @@ export async function createChannelingRelation(db: DatabaseLike, input: Channeli
   return relation(await db.get('SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id WHERE r.id = ?', [result.lastID]));
 }
 export async function listChannelingRelations(db: DatabaseLike, options: { projectId?: number; status?: string; source?: string; block?: string } = {}): Promise<ChannelingRelation[]> {
+  if (options.status !== undefined && !statuses.has(options.status as RelationStatus)) throw new Error('status is invalid');
+  if (options.source !== undefined && !sources.has(options.source as RelationSource)) throw new Error('source is invalid');
   const clauses: string[] = []; const params: unknown[] = [];
   for (const [column, value] of [['r.project_id', options.projectId], ['r.status', options.status], ['r.source', options.source], ['p.block', options.block]] as const) if (value !== undefined) { clauses.push(`${column} = ?`); params.push(value); }
   return (await db.all(`SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id${clauses.length ? ` WHERE ${clauses.join(' AND ')}` : ''} ORDER BY r.updated_at DESC, r.id DESC`, params)).map(relation);
