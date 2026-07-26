@@ -19,8 +19,8 @@ const expectedNavigation: Array<{
   {
     key: 'injection',
     label: '注汽管理',
-    tabs: ['channelingProjectManagement', 'injectionOptimization', 'measureWellSelection', 'injectionPlan', 'injectionConstruction', 'injectionSoakTransfer', 'measures', 'measureAnalysis', 'injectionOperationReports'],
-    labels: ['注窜项目台账', '注汽优化预测', '选井决策', '方案与计划', '施工监控', '焖井转抽', '生产响应', '效果评价', '运行报告'],
+    tabs: ['measureWellSelection', 'injectionPlan', 'injectionConstruction', 'injectionSoakTransfer', 'measures', 'measureAnalysis', 'injectionOptimization', 'injectionOperationReports', 'channelingProjectManagement'],
+    labels: ['选井决策', '方案与计划', '施工监控', '焖井转抽', '生产响应', '效果评价', '注汽优化预测', '运行报告', '注窜项目台账'],
   },
   {
     key: 'analysis',
@@ -52,6 +52,15 @@ test('organizes sidebar groups in the injection workflow order', () => {
     })),
     expectedNavigation,
   );
+});
+
+test('uses GitBranch for the channeling project management icon', () => {
+  const injectionGroup = sidebarNavigationGroups.find((group) => group.key === 'injection');
+  const channelingProjectManagement = injectionGroup?.items.find(
+    (item) => item.tab === 'channelingProjectManagement',
+  );
+
+  assert.equal(channelingProjectManagement?.icon, 'GitBranch');
 });
 
 test('assigns every visible injection workflow tab to its sidebar group', () => {
