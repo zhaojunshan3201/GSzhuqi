@@ -73,6 +73,7 @@ export function buildInjectionOperationReport(input: InjectionOperationReportInp
   const periodOil = production.some((row) => finite(row.oil)) ? production.reduce((sum, row) => sum + (finite(row.oil) ? row.oil : 0), 0) : null;
   const missingData: string[] = [];
   if (!production.length) missingData.push('生产日报缺失，周期油量未计算');
+  else if (new Set(production.map((row) => row.date)).size < span + 1) missingData.push('\u751f\u4ea7\u65e5\u62a5\u8986\u76d6\u4e0d\u5168\uff0c\u5468\u671f\u6cb9\u91cf\u4ec5\u6c47\u603b\u5df2\u91c7\u96c6\u65e5\u671f');
   if (input.channelingProjects.some((project) => !finite(project.occupiedProduction))) missingData.push('部分项目占产损失待补全，未按 0 处理');
   if (input.kind === 'retrospective' && input.channelingProjects.some((project) => !finite(project.afterMetric))) missingData.push('部分项目效果验证指标待补全，复盘结论不下定论');
   if (!input.recommendations.length) missingData.push('推荐方案数据缺失，未生成替代方案');

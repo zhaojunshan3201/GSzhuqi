@@ -3559,12 +3559,14 @@ app.post("/api/register", async (req, res) => {
     const kind = typeof req.query.type === "string" ? req.query.type : "daily";
     if (!(["daily", "weekly", "retrospective"] as const).includes(kind as InjectionOperationReportKind)) throw new Error("\u62a5\u544a\u7c7b\u578b\u65e0\u6548");
     const date = typeof req.query.date === "string" ? req.query.date : new Date().toISOString().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) throw new Error("\u62a5\u544a\u65e5\u671f\u65e0\u6548");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || formatUtcDate(parseIsoDate(date)) !== date) throw new Error("\u62a5\u544a\u65e5\u671f\u65e0\u6548");
     return { kind: kind as InjectionOperationReportKind, date, block: operationBlock(req) };
   };
   const buildOperationReport = async (req: express.Request) => {
     const options = operationReportOptions(req);
-    const rows = await localDb.all(`SELECT rq, oil, liquid, water_cut, jh, block FROM production WHERE rq <= ?${options.block ? " AND block = ?" : ""} ORDER BY rq DESC LIMIT 30`, options.block ? [options.date, options.block] : [options.date]);
+    const span = options.kind === "daily" ? 0 : options.kind === "weekly" ? 6 : 29;
+    const start = shiftDateDays(options.date, -span);
+    const rows = await localDb.all(`SELECT rq, SUM(oil) AS oil, SUM(liquid) AS liquid, CASE WHEN SUM(liquid) > 0 THEN SUM(liquid * water_cut) / SUM(liquid) ELSE AVG(water_cut) END AS water_cut FROM production WHERE rq >= ? AND rq <= ?${options.block ? " AND block = ?" : ""} GROUP BY rq ORDER BY rq`, options.block ? [start, options.date, options.block] : [start, options.date]);
     const recommendations = buildInjectionOperationRecommendations(await buildOperationInput(options.block)).recommendations;
     return buildInjectionOperationReport({
       ...options,
