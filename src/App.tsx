@@ -38,6 +38,7 @@ import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
+import { InjectionOperationReports } from './components/InjectionOperationReports';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
 import { nextProjectLocationId } from './lib/injectionStatusMapNavigation';
 import { getInjectionProjectView } from './lib/injectionProjectViews';
@@ -6090,6 +6091,7 @@ export default function App() {
           {activeTab === 'pumpDeepAnalysis' && '检泵分析'}
           {activeTab === 'waterLab' && '含水化验'}
           {activeTab === 'productionForecast' && '产量预测'}
+          {activeTab === 'injectionOperationReports' && '运行报告'}
           {activeTab === 'runtimeLogs' && '运行日志'}
           </h2>
           </div>
@@ -6115,6 +6117,7 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
+              {activeTab === 'injectionOperationReports' && <InjectionOperationReports />}
               {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 if (shouldApplyCockpitMeasureFilters(tab)) {

@@ -19,8 +19,8 @@ const expectedNavigation: Array<{
   {
     key: 'injection',
     label: '注汽管理',
-    tabs: ['measureWellSelection', 'injectionPlan', 'injectionConstruction', 'injectionSoakTransfer', 'measures', 'measureAnalysis'],
-    labels: ['选井决策', '方案与计划', '施工监控', '焖井转抽', '生产响应', '效果评价'],
+    tabs: ['measureWellSelection', 'injectionPlan', 'injectionConstruction', 'injectionSoakTransfer', 'measures', 'measureAnalysis', 'injectionOperationReports'],
+    labels: ['选井决策', '方案与计划', '施工监控', '焖井转抽', '生产响应', '效果评价', '运行报告'],
   },
   {
     key: 'analysis',
