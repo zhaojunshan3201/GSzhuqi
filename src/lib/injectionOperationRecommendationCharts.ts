@@ -83,6 +83,9 @@ export function buildRecommendationBenefitWaterfallOption(plan: ChartPlan | null
   const steamCost = plan ? -value(plan.metrics.steamCost)! : null;
   const net = [gross, channeling, occupancy, steamCost].every(finite) ? gross! + channeling! + occupancy! + steamCost! : null;
   const rows = [gross, channeling, occupancy, steamCost, net];
+  const bases = gross === null || channeling === null || occupancy === null || steamCost === null
+    ? [null, null, null, null, null]
+    : [0, gross, gross + channeling, gross + channeling + occupancy, 0];
   return withAccessibility('推荐方案收益损失瀑布图', {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 48, right: 24, top: 26, bottom: 35, containLabel: true },
@@ -124,4 +127,5 @@ export function buildRecommendationRiskStabilityOption(plans: ChartPlanList): EC
     }],
   }, data.length > 0);
 }
+
 
