@@ -6,7 +6,7 @@ import test from 'node:test';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
-import { createInjectionProject, initInjectionProjectTables, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from '../src/lib/injectionProjectStore.ts';
+import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from '../src/lib/injectionProjectStore.ts';
 
 async function withStore(run: (db: any) => Promise<void>) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'injection-project-store-'));
@@ -66,4 +66,15 @@ test('migrates an existing project table by adding monthly-plan columns', async 
     const columns = (await db.all('PRAGMA table_info(injection_projects)')).map((column: any) => column.name);
     for (const column of ['unit', 'boiler', 'planned_start_date', 'planned_end_date', 'gas_support', 'schedule_status', 'source_import_id']) assert.ok(columns.includes(column));
   } finally { await db.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('returns the soaking transition date with listed projects', async () => {
+  await withStore(async (db) => {
+    const project = await createInjectionProject(db, draft());
+    await updatePlanStatus(db, project.id, 'issued');
+    await transitionInjectionProject(db, project.id, 'injecting', '2026-07-01');
+    await transitionInjectionProject(db, project.id, 'soaking', '2026-07-02');
+
+    assert.equal((await listInjectionProjects(db))[0].soakStartDate, '2026-07-02');
+  });
 });

@@ -37,11 +37,24 @@ test('renders runtime details outside the header and uses button navigation', ()
   assert.match(appSource, /const SidebarItem[\s\S]*?<button[\s\S]*?type="button"/);
 });
 
-test('renders the standalone runtime log navigation item after navigation groups', () => {
+test('renders runtime logs only through the grouped sidebar navigation', () => {
   const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
-  assert.match(
-    appSource,
-    /\{sidebarNavigationGroups\.map\([\s\S]*?\}\)\}\s*<SidebarItem[\s\S]*?icon=\{sidebarIconMap\[runtimeLogNavigationItem\.icon\]\}[\s\S]*?label=\{runtimeLogNavigationItem\.label\}[\s\S]*?active=\{activeTab === runtimeLogNavigationItem\.tab\}[\s\S]*?onClick=\{\(\) => setActiveTab\(runtimeLogNavigationItem\.tab\)\}/,
-  );
+  assert.match(appSource, /\{sidebarNavigationGroups\.map\(/);
+  assert.doesNotMatch(appSource, /runtimeLogNavigationItem/);
+});
+
+test('renders each injection workflow tab with its title and project management view', () => {
+  const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+
+  for (const [tab, title] of [
+    ['injectionPlan', '\u65b9\u6848\u4e0e\u8ba1\u5212'],
+    ['injectionConstruction', '\u65bd\u5de5\u76d1\u63a7'],
+    ['injectionSoakTransfer', '\u7116\u4e95\u8f6c\u62bd'],
+  ]) {
+    assert.match(appSource, new RegExp(`activeTab === '${tab}' && '${title}'`));
+  }
+
+  assert.match(appSource, /getInjectionProjectView\(activeTab\)/);
+  assert.match(appSource, /<InjectionProjectManagement view=\{injectionProjectView\}/);
 });

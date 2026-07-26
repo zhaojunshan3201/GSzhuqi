@@ -2,7 +2,7 @@ export type LifecycleStatus = 'pending' | 'injecting' | 'soaking' | 'pendingTran
 export type PlanStatus = 'draft' | 'issued' | 'cancelled' | 'closed';
 export type DatabaseLike = { exec(sql: string): Promise<void>; run(sql: string, params?: unknown[]): Promise<{ lastID?: number }>; get(sql: string, params?: unknown[]): Promise<any>; all(sql: string, params?: unknown[]): Promise<any[]> };
 export type ProjectInput = { wellNo: string; block: string; processType: string; plannedTransferDate: string; owner: string; plannedSteam?: number | null; plannedPressure?: number | null; plannedRate?: number | null; remark?: string; unit?: string | null; boiler?: string | null; plannedStartDate?: string | null; plannedEndDate?: string | null; gasSupport?: string | null; scheduleStatus?: string | null; sourceImportId?: number | null };
-export type InjectionProject = ProjectInput & { id: number; projectNo: string; planStatus: PlanStatus; lifecycleStatus: LifecycleStatus; createdAt: string; updatedAt: string };
+export type InjectionProject = ProjectInput & { id: number; projectNo: string; planStatus: PlanStatus; lifecycleStatus: LifecycleStatus; soakStartDate: string | null; createdAt: string; updatedAt: string };
 
 const nextStatuses: Record<LifecycleStatus, LifecycleStatus | null> = { pending: 'injecting', injecting: 'soaking', soaking: 'pendingTransfer', pendingTransfer: 'producing', producing: 'closed', closed: null };
 
@@ -35,7 +35,7 @@ function validate(input: ProjectInput) {
 }
 
 function toProject(row: any): InjectionProject {
-  return { id: row.id, projectNo: row.project_no, wellNo: row.well_no, block: row.block, processType: row.process_type, plannedTransferDate: row.planned_transfer_date, owner: row.owner, plannedSteam: row.planned_steam, plannedPressure: row.planned_pressure, plannedRate: row.planned_rate, remark: row.remark || '', unit: row.unit, boiler: row.boiler, plannedStartDate: row.planned_start_date, plannedEndDate: row.planned_end_date, gasSupport: row.gas_support, scheduleStatus: row.schedule_status, sourceImportId: row.source_import_id, planStatus: row.plan_status, lifecycleStatus: row.lifecycle_status, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, projectNo: row.project_no, wellNo: row.well_no, block: row.block, processType: row.process_type, plannedTransferDate: row.planned_transfer_date, owner: row.owner, plannedSteam: row.planned_steam, plannedPressure: row.planned_pressure, plannedRate: row.planned_rate, remark: row.remark || '', unit: row.unit, boiler: row.boiler, plannedStartDate: row.planned_start_date, plannedEndDate: row.planned_end_date, gasSupport: row.gas_support, scheduleStatus: row.schedule_status, sourceImportId: row.source_import_id, soakStartDate: row.soak_start_date ?? null, planStatus: row.plan_status, lifecycleStatus: row.lifecycle_status, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 export async function createInjectionProject(db: DatabaseLike, input: ProjectInput): Promise<InjectionProject> {
@@ -62,9 +62,14 @@ export async function transitionInjectionProject(db: DatabaseLike, id: number, t
 }
 
 export async function listInjectionProjects(db: DatabaseLike, options: { includeSuperseded?: boolean } = {}): Promise<InjectionProject[]> {
+  const fields = `SELECT p.*, (
+    SELECT t.actual_date FROM injection_project_transitions t
+    WHERE t.project_id = p.id AND t.to_status = 'soaking'
+    ORDER BY t.id DESC LIMIT 1
+  ) AS soak_start_date FROM injection_projects p`;
   const sql = options.includeSuperseded
-    ? 'SELECT * FROM injection_projects ORDER BY updated_at DESC, id DESC'
-    : "SELECT * FROM injection_projects WHERE schedule_status IS NULL OR schedule_status != 'superseded' OR lifecycle_status != 'pending' ORDER BY updated_at DESC, id DESC";
+    ? `${fields} ORDER BY p.updated_at DESC, p.id DESC`
+    : `${fields} WHERE p.schedule_status IS NULL OR p.schedule_status != 'superseded' OR p.lifecycle_status != 'pending' ORDER BY p.updated_at DESC, p.id DESC`;
   return (await db.all(sql)).map(toProject);
 }
 

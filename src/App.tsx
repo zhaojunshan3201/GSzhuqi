@@ -39,7 +39,9 @@ import { ExternalTransferTracking } from './components/ExternalTransferTracking'
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
-import { getSidebarGroupKey, runtimeLogNavigationItem, sidebarNavigationGroups } from './lib/sidebarNavigation';
+import { nextProjectLocationId } from './lib/injectionStatusMapNavigation';
+import { getInjectionProjectView } from './lib/injectionProjectViews';
+import { getSidebarGroupKey, sidebarNavigationGroups } from './lib/sidebarNavigation';
 import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavigation';
 import type { LucideIcon } from 'lucide-react';
 import { AxonLandingPage } from './components/AxonLandingPage';
@@ -2166,6 +2168,8 @@ export default function App() {
   const [showAccessLogin, setShowAccessLogin] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [activeTab, _setActiveTab] = useState<SidebarTab>('dashboard');
+  // Task 5 consumes this selected project when the plan view gains drill-down support.
+  const [injectionPlanProjectId, setInjectionPlanProjectId] = useState<number | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   const mobileSidebarButtonRef = useRef<HTMLButtonElement>(null);
@@ -2178,7 +2182,10 @@ export default function App() {
       else appMainRef.current?.focus();
     });
   };
-  const setActiveTab = (tab: SidebarTab) => {
+  const setActiveTab = (tab: SidebarTab, { preserveProjectLocation = false }: { preserveProjectLocation?: boolean } = {}) => {
+    if (!preserveProjectLocation && ['injectionPlan', 'injectionConstruction', 'injectionSoakTransfer'].includes(tab)) {
+      setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'workflow-tab' }));
+    }
     _setActiveTab(tab);
     if (shouldCloseMobileDrawer(isMobileViewport, mobileSidebarOpen)) {
       closeMobileSidebar({ restoreFocus: false });
@@ -5693,6 +5700,7 @@ export default function App() {
           : '本地缓存待检查';
 
   const runtimeSyncStatus = getRuntimeSyncStatus(syncStatus, syncing);
+  const injectionProjectView = getInjectionProjectView(activeTab);
 
   const showDashboardSkeleton = activeTab === 'dashboard' && dashboardBootstrapLoading && !dashboardBootstrapLoaded;
 
@@ -6010,13 +6018,6 @@ export default function App() {
             </div>
           );
         })}
-        <SidebarItem
-          icon={sidebarIconMap[runtimeLogNavigationItem.icon]}
-          label={runtimeLogNavigationItem.label}
-          active={activeTab === runtimeLogNavigationItem.tab}
-          onClick={() => setActiveTab(runtimeLogNavigationItem.tab)}
-        />
-
         <div className="mt-auto border-t border-white/10 pt-4">
         <div className="px-5 py-3 flex items-center gap-3 text-gray-400">
         <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-inner">
@@ -6071,13 +6072,16 @@ export default function App() {
           {activeTab === 'externalTransferTracking' && '外输跟踪'}
           {activeTab === 'dashboard' && '系统概览'}
           {activeTab === 'injectionProductionCockpit' && '注采驾驶舱'}
-          {activeTab === 'oilWellMap' && '油井位图'}
+          {activeTab === 'oilWellMap' && '注采状态地图'}
           {activeTab === 'block' && '区块生产动态生成器'}
           {activeTab === 'well' && '单井精细化动态分析'}
           {activeTab === 'analysis' && '重点情况分析与建议'}
           {activeTab === 'comparison' && '对比分析'}
           {activeTab === 'measureWellSelection' && '措施选井'}
           {activeTab === 'injectionProjectManagement' && '注汽项目管理'}
+          {activeTab === 'injectionPlan' && '方案与计划'}
+          {activeTab === 'injectionConstruction' && '施工监控'}
+          {activeTab === 'injectionSoakTransfer' && '焖井转抽'}
           {activeTab === 'measures' && '措施跟踪'}
           {activeTab === 'measureAnalysis' && '措施分析'}
           {activeTab === 'wellTemperature' && '井温监控'}
@@ -6111,7 +6115,7 @@ export default function App() {
         </header>
         <main className="app-content">
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
-              {activeTab === 'injectionProjectManagement' && <InjectionProjectManagement />}
+              {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 if (shouldApplyCockpitMeasureFilters(tab)) {
                   setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
@@ -6123,7 +6127,16 @@ export default function App() {
                 }
                 setActiveTab(tab);
               }} />}
-              {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} />}
+              {activeTab === 'oilWellMap' && <OilWellMap isAdmin={user?.role === 'admin'} onNavigate={(tab, filters) => {
+                if (tab === 'injectionPlan') {
+                  setInjectionPlanProjectId((current) => filters.projectId == null ? nextProjectLocationId(current, { type: 'clear' }) : nextProjectLocationId(current, { type: 'map-project', projectId: filters.projectId }));
+                  setActiveTab(tab, { preserveProjectLocation: true });
+                } else {
+                  setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }));
+                  setMeasureQuery((current) => ({ ...current, keyword: filters.keyword ?? '' }));
+                  setActiveTab(tab);
+                }
+              }} />}
               {activeTab === 'externalTransferTracking' && <ExternalTransferTracking />}
               {activeTab === 'runtimeLogs' && (
                 <div className="page-stack">

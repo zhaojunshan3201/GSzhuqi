@@ -32,6 +32,8 @@ import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelec
 import { parseProducingWellsWorkbook, validateWellMapMarkerInput } from "./src/lib/oilWellMap.ts";
 import { getExternalTransferUpload, initExternalTransferTables, replaceExternalTransferUpload } from "./src/lib/externalTransferStore.ts";
 import { buildInjectionProductionCockpit } from "./src/lib/injectionProductionCockpit.ts";
+import { buildInjectionStatusMap } from "./src/lib/injectionStatusMap.ts";
+import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHandler.ts";
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
@@ -3446,6 +3448,11 @@ app.post("/api/register", async (req, res) => {
       res.status(500).json({ success: false, message: err?.message || "注采状态地图数据加载失败" });
     }
   });
+
+  app.get("/api/injection-status-map", createInjectionStatusMapHandler({
+    buildMap: (options) => buildInjectionStatusMap(localDb, options),
+    today: () => new Date().toISOString().slice(0, 10),
+  }));
 
   app.post("/api/injection-project-imports/preview", monthlyInjectionPlanUploadMiddleware, async (req, res) => {
     try {

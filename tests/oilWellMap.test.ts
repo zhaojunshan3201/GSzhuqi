@@ -81,3 +81,8 @@ test('maps each injection lifecycle to a stable color', () => {
   assert.equal(resolveInjectionLifecycleColor('producing'), '#16a34a');
   assert.equal(resolveInjectionLifecycleColor('needsData'), '#94a3b8');
 });
+
+test('uses stable colors for pending and closed injection lifecycle states', () => {
+  assert.equal(resolveInjectionLifecycleColor('pending'), '#64748b');
+  assert.equal(resolveInjectionLifecycleColor('closed'), '#475569');
+});
