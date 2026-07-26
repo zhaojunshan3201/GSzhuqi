@@ -45,7 +45,7 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_FILE = path.join(__dirname, "production.db");
+const DB_FILE = process.env.LOCAL_DB_FILE || path.join(__dirname, "production.db");
 const WELL_MAP_DATA_DIR = [
   path.resolve(__dirname, "..", "..", "井位图"),
   path.resolve(__dirname, "..", "..", "..", "..", "井位图"),
@@ -3542,25 +3542,32 @@ app.post("/api/register", async (req, res) => {
     try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
     catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   });
+  const allowedRelationPatchFields = new Set(["injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
+  const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") ? 400 : 500;
+  const forceChannelingTestError = (req: any) => {
+    if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-error") === "1") throw new Error("forced channeling runtime error");
+  };
   app.get("/api/channeling-projects/:id/relations", async (req, res) => {
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try {
+      forceChannelingTestError(req);
       if (!await localDb.get("SELECT id FROM channeling_projects WHERE id = ?", [projectId])) return res.status(404).json({ success: false, message: "Project not found" });
       res.json({ success: true, data: await listChannelingRelations(localDb, { projectId, status: typeof req.query.status === "string" ? req.query.status : undefined, source: typeof req.query.source === "string" ? req.query.source : undefined, block: typeof req.query.block === "string" ? req.query.block : undefined }) });
-    } catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+    } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-projects/:id/relations", async (req, res) => {
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
-    try { res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
-    catch (error: any) { res.status(error.message === "Project not found" ? 404 : 400).json({ success: false, message: error.message }); }
+    try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-relations/:id", async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
-    try { res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }
-    catch (error: any) { res.status(error.message === "Relation not found" ? 404 : 400).json({ success: false, message: error.message }); }
+    if (!req.body || typeof req.body !== "object" || Object.keys(req.body || {}).some((key) => !allowedRelationPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported relation patch field" });
+    try { forceChannelingTestError(req); res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }
+    catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
 
   app.get("/api/dashboard/bootstrap", async (req, res) => {
