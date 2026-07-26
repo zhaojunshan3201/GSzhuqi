@@ -24,6 +24,22 @@ const importText: Record<string, string> = { preview: '待确认', confirmed: '�
 const comparisonStatusText: Record<ComparisonStatus, string> = { not_started: '\u672a\u6267\u884c', in_progress: '\u6267\u884c\u4e2d', on_schedule: '\u6309\u8ba1\u5212', early: '\u63d0\u524d', delayed: '\u6ede\u540e', incomplete: '\u6570\u636e\u4e0d\u5b8c\u6574', suspected_other_cycle: '\u7591\u4f3c\u975e\u672c\u8f6e' };
 const deviationStatuses = new Set<ComparisonStatus>(['early', 'delayed', 'not_started', 'suspected_other_cycle']);
 
+export type InjectionChartSeries = { name: string; data: number[]; color: string };
+
+export function hasInjectionChartData(labels: string[], series: InjectionChartSeries[]) {
+  return labels.length > 0 && series.some((item) => item.data.length > 0);
+}
+
+export function getInjectionChartOption(title: string, labels: string[], series: InjectionChartSeries[]) {
+  const hasData = hasInjectionChartData(labels, series);
+  return {
+    title: { text: title, left: 'center', textStyle: { fontSize: 14 } }, aria: { enabled: true, description: `${title}\u56fe\u8868` }, tooltip: { trigger: 'axis' }, legend: series.length > 1 ? { bottom: 0 } : undefined,
+    grid: { left: 36, right: 20, top: 48, bottom: series.length > 1 ? 38 : 28 }, xAxis: { type: 'category', data: labels, axisLabel: { interval: 0 } }, yAxis: { type: 'value', minInterval: 1 },
+    series: series.map((item) => ({ name: item.name, type: 'bar', data: item.data, itemStyle: { color: item.color }, barMaxWidth: 38 })),
+    graphic: hasData ? undefined : { type: 'text', left: 'center', top: 'middle', style: { text: '\u6682\u65e0\u7b26\u5408\u7b5b\u9009\u6761\u4ef6\u7684\u6570\u636e', fill: '#64748b', fontSize: 14 } },
+  };
+}
+
 export function getInjectionDashboardRenderMode(view: InjectionProjectView) {
   return {
     planExecution: view === 'plan',
@@ -71,11 +87,7 @@ export function InjectionProjectManagement({ view = 'plan', initialProjectId, on
   const comparisons = useMemo(() => filteredComparisonRows.filter((row) => comparisonView === 'all' || deviationStatuses.has(row.comparisonStatus)).sort((a, b) => Number(b.comparisonStatus === 'delayed') - Number(a.comparisonStatus === 'delayed') || a.wellNo.localeCompare(b.wellNo)), [comparisonView, filteredComparisonRows]);
   const constructionDashboard = useMemo(() => buildConstructionDashboard(filteredProjects, filteredComparisonRows, businessToday), [filteredProjects, filteredComparisonRows, businessToday]);
   const soakTransferDashboard = useMemo(() => buildSoakTransferDashboard(filteredProjects, businessToday), [filteredProjects, businessToday]);
-  const chartOption = (title: string, labels: string[], series: Array<{ name: string; data: number[]; color: string }>) => ({
-    title: { text: title, left: 'center', textStyle: { fontSize: 14 } }, tooltip: { trigger: 'axis' }, legend: series.length > 1 ? { bottom: 0 } : undefined,
-    grid: { left: 36, right: 20, top: 48, bottom: series.length > 1 ? 38 : 28 }, xAxis: { type: 'category', data: labels, axisLabel: { interval: 0 } }, yAxis: { type: 'value', minInterval: 1 },
-    series: series.map((item) => ({ name: item.name, type: 'bar', data: item.data, itemStyle: { color: item.color }, barMaxWidth: 38 })),
-  });
+  const chartOption = getInjectionChartOption;
 
   return <div className="page-stack">
     <section className="app-card p-5"><h3 className="text-xl font-bold">{viewTitle}</h3><p className="mt-1 text-sm text-slate-500">{isPlan ? '\u7edf\u4e00\u7ba1\u7406\u6ce8\u6c7d\u65b9\u6848\u3001\u8ba1\u5212\u548c\u6267\u884c\u8fdb\u5ea6\u3002' : isConstruction ? '\u805a\u7126\u5f85\u6ce8\u6c7d\u548c\u6ce8\u6c7d\u4e2d\u7684\u65bd\u5de5\u9879\u76ee\u3002' : '\u805a\u7126\u7116\u4e95\u4e0e\u5f85\u8f6c\u62bd\u9879\u76ee\uff0c\u903e\u671f\u5f85\u529e\u4f18\u5148\u3002'}</p></section>
