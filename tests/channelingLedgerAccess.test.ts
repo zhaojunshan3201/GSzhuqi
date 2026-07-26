@@ -19,7 +19,7 @@ test("channeling APIs restrict mutating actions to technical, operation, or admi
   assert.match(server, /const channelingRole =/);
   assert.match(server, /requireChannelingOperator/);
   assert.match(server, /requireChannelingAdmin/);
-  assert.doesNotMatch(server, /crypto\.randomBytes\(32\)/);
+  assert.match(server, /crypto\.randomBytes\(32\)/);
   assert.match(server, /AUTH_TOKEN_SECRET/);
   assert.match(server, /app\.delete\("\/api\/channeling-projects\/:id"/);
   assert.match(server, /app\.delete\("\/api\/channeling-relations\/:id"/);

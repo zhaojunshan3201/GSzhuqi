@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -10,7 +11,7 @@ const relation = { injectionWell: '×¢A-1', productionWell: '²ÉA-2', reservoirLay
 test('channeling endpoints enforce request contracts over HTTP', { timeout: 30000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channeling-api-'));
   const port = 38000 + Math.floor(Math.random() * 1000);
-  const serverOptions = { cwd: process.cwd(), env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: path.join(directory, 'test.db'), CHANNELING_TEST_FORCE_ERROR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] as const };
+  const serverOptions = { cwd: process.cwd(), env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: path.join(directory, 'test.db'), CHANNELING_TEST_FORCE_ERROR: '1', AUTH_TOKEN_SECRET: 'channeling-integration-test-secret' }, stdio: ['ignore', 'pipe', 'pipe'] as const };
   let child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], serverOptions);
   try {
     await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('server did not start')), 15000); child.stdout.on('data', (data) => { if (String(data).includes('Server running')) { clearTimeout(timer); resolve(); } }); child.once('error', reject); child.once('exit', (code) => reject(new Error(`server exited ${code}`))); });
@@ -19,6 +20,10 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     assert.equal(unauthenticated.status, 401);
     const forgedHeader = await request('/api/channeling-projects', { method: 'POST', headers: { 'x-channeling-role': 'admin' }, body: JSON.stringify({ projectName: 'forged', block: 'A', owner: 'tester' }) });
     assert.equal(forgedHeader.status, 401);
+    const forgedPayload = Buffer.from(JSON.stringify({ username: 'attacker', role: 'admin' })).toString('base64url');
+    const forgedToken = `${forgedPayload}.${createHmac('sha256', 'oil-system-local-auth-v1').update(forgedPayload).digest('base64url')}`;
+    const forgedTokenResponse = await request('/api/channeling-projects', { method: 'POST', headers: { authorization: `Bearer ${forgedToken}` }, body: JSON.stringify({ projectName: 'forged-token', block: 'A', owner: 'tester' }) });
+    assert.equal(forgedTokenResponse.status, 401);
     const login = await request('/api/login', { method: 'POST', body: JSON.stringify({ username: 'admin', password: '123456' }) });
     assert.equal(login.status, 200);
     const token = (await login.json() as any).token;

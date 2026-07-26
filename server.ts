@@ -67,7 +67,33 @@ const MEASURE_IMPORT_FILE_LIMIT_BYTES = 50 * 1024 * 1024;
 const WATER_CUT_FORMULA_VERSION = "2026-04-14-v4";
 const GAS_FORMULA_VERSION = "2026-04-14-v2";
 const LOCAL_ONLY_MODE = process.env.LOCAL_ONLY === "true";
-const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || "oil-system-local-auth-v1";
+function resolveAuthTokenSecret() {
+  const configuredSecret = process.env.AUTH_TOKEN_SECRET?.trim();
+  if (configuredSecret) return configuredSecret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUTH_TOKEN_SECRET is required in production");
+  }
+
+  const secretFile = process.env.AUTH_TOKEN_SECRET_FILE || path.join(__dirname, ".auth-token-secret");
+  try {
+    const persistedSecret = fs.readFileSync(secretFile, "utf8").trim();
+    if (persistedSecret) return persistedSecret;
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
+  const generatedSecret = crypto.randomBytes(32).toString("base64url");
+  try {
+    fs.writeFileSync(secretFile, `${generatedSecret}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    return generatedSecret;
+  } catch (error: any) {
+    if (error?.code !== "EEXIST") throw error;
+    const persistedSecret = fs.readFileSync(secretFile, "utf8").trim();
+    if (persistedSecret) return persistedSecret;
+    throw new Error(`AUTH_TOKEN_SECRET_FILE is empty: ${secretFile}`);
+  }
+}
+const AUTH_TOKEN_SECRET = resolveAuthTokenSecret();
 type AuthenticatedUser = { username: string; role: string };
 function issueAuthToken(user: AuthenticatedUser) {
   const payload = Buffer.from(JSON.stringify(user)).toString("base64url");
