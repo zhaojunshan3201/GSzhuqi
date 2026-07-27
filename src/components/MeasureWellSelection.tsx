@@ -1,7 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
+import { requestJson } from '../lib/requestJson';
 
-type ApiResponse<T> = { success: boolean; data?: T; message?: string };
 type SourceStatus = { sourceType: 'stage' | 'daily'; sourceFile: string; importedAt: string; rowCount: number; skippedRowCount?: number; errorMessages?: string[] };
 type ScorePart = { score: number; value: number | null; maxScore: number };
 type Candidate = { wellNo: string; score: number; oilSteamRatio: number; stageOil: number; qualityReasons: string[]; scoreBreakdown: { oilSteamRatio: ScorePart; stageOil: ScorePart; stability: ScorePart; dailyCompleteness: ScorePart } };
@@ -12,13 +12,6 @@ type Plan = { id: number; month: string; maxWells: number; generatedAt: string; 
 type LegacyWell = { wellName: string; block: string; station: string | null; score: number };
 type LegacyDetail = { curves: Array<{ round: number; points: Array<{ day: number; oil: number }> }> };
 type Similar = { matches: Array<{ wellName: string; block: string | null; score: number; confidence: number }> };
-
-async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, options);
-  const payload = await response.json() as ApiResponse<T>;
-  if (!response.ok || !payload.success || payload.data === undefined) throw new Error(payload.message ?? '请求失败');
-  return payload.data;
-}
 
 function nextMonth(): string {
   const date = new Date();
