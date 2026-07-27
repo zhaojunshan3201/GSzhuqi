@@ -57,6 +57,34 @@ test('replaces only the current source snapshot and preserves the other source',
   });
 });
 
+test('serializes reads after a source replacement so they never observe an empty snapshot', async () => {
+  await withStore(async (db) => {
+    await replaceSelectionSource(db, 'stage', '阶段产油.xlsx', [stageRow('A', 1)]);
+
+    const replacing = replaceSelectionSource(db, 'stage', '阶段产油-更新.xlsx', [stageRow('B', 1)]);
+    const rowsAfterReplacementRequest = listStageRows(db);
+    await replacing;
+
+    assert.deepEqual((await rowsAfterReplacementRequest).map((row) => row.wellNo), ['B']);
+  });
+});
+
+test('keeps the last duplicate natural-key row from each imported source batch', async () => {
+  await withStore(async (db) => {
+    await replaceSelectionSource(db, 'stage', '阶段产油.xlsx', [
+      stageRow('A', 1),
+      { ...stageRow('A', 1), steamVolume: 1200, stageOil: 600 },
+    ]);
+    await replaceSelectionSource(db, 'daily', '注汽日数据.xlsx', [
+      dailyRow('A', '2026-01-01'),
+      { ...dailyRow('A', '2026-01-01'), dailySteam: 180 },
+    ]);
+
+    assert.deepEqual((await listStageRows(db)).map((row) => [row.wellNo, row.cycleNo, row.steamVolume]), [['A', 1, 1200]]);
+    assert.deepEqual((await listDailyRows(db)).map((row) => [row.wellNo, row.recordDate, row.dailySteam]), [['A', '2026-01-01', 180]]);
+  });
+});
+
 test('initializes the injection selection source and plan tables with required indexes', async () => {
   await withStore(async (db) => {
     const tables = await db.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('injection_selection_imports', 'injection_stage_rows', 'injection_daily_rows', 'injection_selection_plans', 'injection_selection_plan_items') ORDER BY name");

@@ -14,6 +14,7 @@ function queueWrite<T>(db: Database, operation: () => Promise<T>): Promise<T> {
 }
 
 export async function initInjectionSelectionTables(db: Database): Promise<void> {
+  await db.exec('PRAGMA foreign_keys = ON;');
   await db.exec(`
     CREATE TABLE IF NOT EXISTS injection_selection_imports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +39,7 @@ export async function initInjectionSelectionTables(db: Database): Promise<void> 
       stage_water REAL,
       oil_steam_ratio REAL,
       raw_json TEXT NOT NULL,
+      UNIQUE(import_id, well_no, cycle_no),
       FOREIGN KEY(import_id) REFERENCES injection_selection_imports(id)
     );
     CREATE TABLE IF NOT EXISTS injection_daily_rows (
@@ -58,6 +60,7 @@ export async function initInjectionSelectionTables(db: Database): Promise<void> 
       carbon_dioxide INTEGER NOT NULL DEFAULT 0,
       remarks_json TEXT NOT NULL DEFAULT '[]',
       raw_json TEXT NOT NULL,
+      UNIQUE(import_id, well_no, record_date),
       FOREIGN KEY(import_id) REFERENCES injection_selection_imports(id)
     );
     CREATE TABLE IF NOT EXISTS injection_selection_plans (
@@ -115,23 +118,38 @@ export function replaceSelectionSource(db: Database, source: SelectionSourceType
 }
 
 export async function listStageRows(db: Database): Promise<StageOilRow[]> {
-  const rows = await db.all('SELECT * FROM injection_stage_rows ORDER BY well_no ASC, start_date DESC, cycle_no DESC');
-  return rows.map(toStageRow);
+  return queueWrite(db, async () => {
+    const rows = await db.all('SELECT * FROM injection_stage_rows ORDER BY well_no ASC, start_date DESC, cycle_no DESC');
+    return rows.map(toStageRow);
+  });
 }
 
 export async function listDailyRows(db: Database): Promise<DailyInjectionRow[]> {
-  const rows = await db.all('SELECT * FROM injection_daily_rows ORDER BY well_no ASC, record_date ASC');
-  return rows.map(toDailyRow);
+  return queueWrite(db, async () => {
+    const rows = await db.all('SELECT * FROM injection_daily_rows ORDER BY well_no ASC, record_date ASC');
+    return rows.map(toDailyRow);
+  });
 }
 
 async function insertStageRow(db: Database, importId: number, row: StageOilRow): Promise<void> {
-  await db.run(`INSERT INTO injection_stage_rows (import_id, well_no, cycle_no, start_date, end_date, steam_volume, temperature, pressure, dryness, production_hours, stage_oil, stage_water, oil_steam_ratio, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+  await db.run(`INSERT INTO injection_stage_rows (import_id, well_no, cycle_no, start_date, end_date, steam_volume, temperature, pressure, dryness, production_hours, stage_oil, stage_water, oil_steam_ratio, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(import_id, well_no, cycle_no) DO UPDATE SET
+      start_date = excluded.start_date, end_date = excluded.end_date, steam_volume = excluded.steam_volume,
+      temperature = excluded.temperature, pressure = excluded.pressure, dryness = excluded.dryness,
+      production_hours = excluded.production_hours, stage_oil = excluded.stage_oil,
+      stage_water = excluded.stage_water, oil_steam_ratio = excluded.oil_steam_ratio, raw_json = excluded.raw_json`, [
     importId, row.wellNo, row.cycleNo, row.startDate, row.endDate, row.steamVolume, row.temperature, row.pressure, row.dryness, row.productionHours, row.stageOil, row.stageWater, row.oilSteamRatio, JSON.stringify(row),
   ]);
 }
 
 async function insertDailyRow(db: Database, importId: number, row: DailyInjectionRow): Promise<void> {
-  await db.run(`INSERT INTO injection_daily_rows (import_id, well_no, record_date, boiler_no, production_hours, flow, daily_steam, design_steam, cumulative_steam, pressure, dryness, temperature, nitrogen, carbon_dioxide, remarks_json, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+  await db.run(`INSERT INTO injection_daily_rows (import_id, well_no, record_date, boiler_no, production_hours, flow, daily_steam, design_steam, cumulative_steam, pressure, dryness, temperature, nitrogen, carbon_dioxide, remarks_json, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(import_id, well_no, record_date) DO UPDATE SET
+      boiler_no = excluded.boiler_no, production_hours = excluded.production_hours, flow = excluded.flow,
+      daily_steam = excluded.daily_steam, design_steam = excluded.design_steam,
+      cumulative_steam = excluded.cumulative_steam, pressure = excluded.pressure, dryness = excluded.dryness,
+      temperature = excluded.temperature, nitrogen = excluded.nitrogen, carbon_dioxide = excluded.carbon_dioxide,
+      remarks_json = excluded.remarks_json, raw_json = excluded.raw_json`, [
     importId, row.wellNo, row.recordDate, row.boilerNo, row.productionHours, row.flow, row.dailySteam, row.designSteam, row.cumulativeSteam, row.pressure, row.dryness, row.temperature, Number(row.gasFlags.nitrogen), Number(row.gasFlags.carbonDioxide), JSON.stringify(row.remarks), JSON.stringify(row),
   ]);
 }
