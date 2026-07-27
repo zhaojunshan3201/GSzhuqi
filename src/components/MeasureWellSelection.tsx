@@ -1,210 +1,115 @@
-import { ChangeEvent, useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 
-type Grade = 'recommended' | 'candidate' | 'not_recommended' | 'incomplete';
-type Well = { wellName: string; block: string; station: string | null; score: number; grade: Grade };
-type Cycle = {
-  round: number;
-  transferDate: string;
-  designSteam?: number | null;
-  actualSteam?: number | null;
-  maxPressure?: number | null;
-  rate?: number | null;
-  injectN2?: boolean | null;
-  boiler?: string | null;
-  peakOil?: number | null;
-  oilSeeingDays?: number | null;
-  cycleOil?: number | null;
-};
-type Detail = {
-  cycles: Cycle[];
-  curves: Array<{ round: number; transferDate: string; oilSeeingDay: number | null; points: Array<{ day: number; oil: number }> }>;
-};
-type SimilarMatch = {
-  wellName: string;
-  block: string | null;
-  score: number;
-  completeness: number;
-  confidence: number;
-  scoreBreakdown: Record<string, { score: number | null; max: number; reason: string }>;
-  caseEffect: { production: number | null; cycleOil: number | null; declineRate: number | null };
-};
-type SimilarWells = {
-  matches: SimilarMatch[];
-  parameterRanges: Record<string, { min: number; max: number; median: number; count: number }>;
-};
 type ApiResponse<T> = { success: boolean; data?: T; message?: string };
-
-const gradeLabel: Record<Grade, string> = {
-  recommended: '建议注汽',
-  candidate: '备选井',
-  not_recommended: '不建议',
-  incomplete: '数据待补全',
-};
+type SourceStatus = { sourceType: 'stage' | 'daily'; sourceFile: string; importedAt: string; rowCount: number };
+type Candidate = { wellNo: string; score: number; oilSteamRatio: number; stageOil: number; qualityReasons: string[] };
+type PlanDecision = 'included' | 'locked' | 'excluded';
+type PlanItem = { id: number; rankNo: number; wellNo: string; score: number; suggestedSteam: number | null; recommendedBoiler: string | null; nitrogen: boolean; carbonDioxide: boolean; oilSteamRatio: number; stageOil: number; decision: PlanDecision; manualNote: string | null };
+type Plan = { id: number; month: string; maxWells: number; generatedAt: string; items: PlanItem[] };
+type LegacyWell = { wellName: string; block: string; station: string | null; score: number };
+type LegacyDetail = { curves: Array<{ round: number; points: Array<{ day: number; oil: number }> }> };
+type Similar = { matches: Array<{ wellName: string; block: string | null; score: number; confidence: number }> };
 
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
   const payload = await response.json() as ApiResponse<T>;
-  if (!response.ok || !payload.success || payload.data === undefined) {
-    throw new Error(payload.message ?? '请求失败');
-  }
+  if (!response.ok || !payload.success || payload.data === undefined) throw new Error(payload.message ?? '请求失败');
   return payload.data;
 }
 
+function nextMonth(): string {
+  const date = new Date();
+  return `${date.getFullYear() + (date.getMonth() === 11 ? 1 : 0)}-${String((date.getMonth() + 1) % 12 + 1).padStart(2, '0')}`;
+}
+
 export function MeasureWellSelection() {
-  const [wells, setWells] = useState<Well[]>([]);
-  const [selected, setSelected] = useState<Well | null>(null);
-  const [detail, setDetail] = useState<Detail | null>(null);
-  const [similar, setSimilar] = useState<SimilarWells | null>(null);
-  const [similarLoading, setSimilarLoading] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [recalculating, setRecalculating] = useState(false);
+  const [sources, setSources] = useState<SourceStatus[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [month, setMonth] = useState(nextMonth);
+  const [busySource, setBusySource] = useState<'stage' | 'daily' | null>(null);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [savingId, setSavingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [legacyWells, setLegacyWells] = useState<LegacyWell[]>([]);
+  const [selectedLegacy, setSelectedLegacy] = useState<LegacyWell | null>(null);
+  const [detail, setDetail] = useState<LegacyDetail | null>(null);
+  const [similar, setSimilar] = useState<Similar | null>(null);
 
-  const refreshWells = async () => {
-    setLoading(true);
+  const sourceByType = useMemo(() => new Map(sources.map((source) => [source.sourceType, source])), [sources]);
+  const refreshSources = async () => setSources((await requestJson<{ sources: SourceStatus[] }>('/api/injection-selection/data-status')).sources);
+  const refreshLegacy = async () => {
     try {
-      const data = await requestJson<Well[]>('/api/measure-well-selection/wells');
-      setWells(data);
-      setSelected((current) => data.find((item) => item.wellName === current?.wellName && item.block === current?.block) ?? data[0] ?? null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '加载选井数据失败');
-    } finally {
-      setLoading(false);
-    }
+      const wells = await requestJson<LegacyWell[]>('/api/measure-well-selection/wells');
+      setLegacyWells(wells);
+      setSelectedLegacy((current) => wells.find((well) => well.wellName === current?.wellName && well.block === current?.block) ?? wells[0] ?? null);
+    } catch { /* 新数据功能不依赖历史展示接口 */ }
   };
 
-  useEffect(() => { void refreshWells(); }, []);
-
+  useEffect(() => { void refreshSources().catch(showError); void refreshLegacy(); }, []);
   useEffect(() => {
-    if (!selected) {
-      setDetail(null);
-      return;
-    }
-    let active = true;
-    setDetailLoading(true);
-    setDetail(null);
-    const query = new URLSearchParams({ block: selected.block });
-    void requestJson<Detail>(`/api/measure-well-selection/wells/${encodeURIComponent(selected.wellName)}?${query}`)
-      .then((data) => { if (active) setDetail(data); })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : '加载井详情失败'); })
-      .finally(() => { if (active) setDetailLoading(false); });
-    return () => { active = false; };
-  }, [selected]);
+    if (!selectedLegacy) { setDetail(null); setSimilar(null); return; }
+    const block = new URLSearchParams({ block: selectedLegacy.block });
+    void requestJson<LegacyDetail>(`/api/measure-well-selection/wells/${encodeURIComponent(selectedLegacy.wellName)}?${block}`).then(setDetail).catch(() => setDetail(null));
+    void requestJson<Similar>(`/api/measure-well-selection/wells/${encodeURIComponent(selectedLegacy.wellName)}/similar?${block}`).then(setSimilar).catch(() => setSimilar(null));
+  }, [selectedLegacy]);
 
-  useEffect(() => {
-    if (!selected) { setSimilar(null); return; }
-    let active = true;
-    setSimilarLoading(true);
-    const query = new URLSearchParams({ block: selected.block });
-    void requestJson<SimilarWells>(`/api/measure-well-selection/wells/${encodeURIComponent(selected.wellName)}/similar?${query}`)
-      .then((data) => { if (active) setSimilar(data); })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : '加载同类井失败'); })
-      .finally(() => { if (active) setSimilarLoading(false); });
-    return () => { active = false; };
-  }, [selected]);
-
-  const importWorkbook = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  function showError(cause: unknown) { setError(cause instanceof Error ? cause.message : '操作失败'); }
+  async function upload(source: 'stage' | 'daily', event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.target.value = '';
     if (!file) return;
-    setImporting(true);
-    setError(null);
-    setImportMessage(null);
+    setBusySource(source); setError(null); setMessage(null);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const result = await requestJson<{ importedCount: number; skippedRows?: Array<{ row: number; reason: string }>; wellCount?: number }>(
-        '/api/measure-well-selection/import',
-        { method: 'POST', body: formData },
-      );
-      await refreshWells();
-      const skipped = result.skippedRows?.length ? `，跳过 ${result.skippedRows.length} 行` : '';
-      setImportMessage(`已导入 ${result.importedCount} 条轮次数据${skipped}，当前 ${result.wellCount ?? wells.length} 口井已评分。`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Excel 导入失败');
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const recalculate = async () => {
-    setRecalculating(true);
-    setError(null);
+      const body = new FormData(); body.append('file', file);
+      const endpoint = source === 'stage' ? '/api/injection-selection/import/stage' : '/api/injection-selection/import/daily';
+      const result = await requestJson<{ rows: unknown[]; skippedRows: unknown[] }>(endpoint, { method: 'POST', body });
+      await refreshSources();
+      setMessage(`${source === 'stage' ? '阶段产油' : '注汽日数据'}已导入 ${result.rows.length} 行${result.skippedRows.length ? `，跳过 ${result.skippedRows.length} 行` : ''}。`);
+    } catch (cause) { showError(cause); } finally { setBusySource(null); }
+  }
+  async function rebuild() {
+    setRebuilding(true); setError(null);
     try {
-      await requestJson<unknown>('/api/measure-well-selection/recalculate', { method: 'POST' });
-      await refreshWells();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '重新计算评分失败');
-    } finally {
-      setRecalculating(false);
-    }
-  };
-
-  const chartOption = {
-    tooltip: { trigger: 'axis' },
-    legend: { top: 8 },
-    grid: { left: 54, right: 24, top: 46, bottom: 38 },
-    xAxis: { type: 'value', min: -30, max: 180, name: '转抽后天数', axisLabel: { formatter: '{value}天' } },
-    yAxis: { type: 'value', name: '日产油' },
-    series: (detail?.curves ?? []).map((curve, index) => ({
-      name: `第${curve.round}轮`, type: 'line', showSymbol: false, connectNulls: false,
-      data: curve.points.map((point) => [point.day, point.oil]),
-      markLine: {
-        silent: true,
-        data: [
-          { xAxis: 0, label: { formatter: '转抽日' } },
-          ...(curve.oilSeeingDay === null ? [] : [{ xAxis: curve.oilSeeingDay, label: { formatter: '见油日' } }]),
-        ],
-        lineStyle: { type: 'dashed', color: ['#2563eb', '#16a34a', '#ea580c'][index] },
-      },
-    })),
-  };
+      const result = await requestJson<{ candidates: Candidate[] }>('/api/injection-selection/rebuild', { method: 'POST' });
+      setCandidates(result.candidates); setMessage(`已重建 ${result.candidates.length} 口候选井。`);
+    } catch (cause) { showError(cause); } finally { setRebuilding(false); }
+  }
+  async function generatePlan() {
+    setGenerating(true); setError(null);
+    try {
+      const created = await requestJson<Plan>('/api/injection-selection/plans', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ month }) });
+      setPlan(created); setMessage(`已生成 ${created.month} 注汽计划（${created.items.length}/${created.maxWells} 口）。`);
+    } catch (cause) { showError(cause); } finally { setGenerating(false); }
+  }
+  async function patchItem(item: PlanItem, patch: Partial<Pick<PlanItem, 'suggestedSteam' | 'recommendedBoiler' | 'decision' | 'manualNote'>>) {
+    if (!plan) return;
+    setSavingId(item.id); setError(null);
+    try {
+      const updated = await requestJson<Plan>(`/api/injection-selection/plans/${plan.id}/items/${item.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
+      setPlan(updated);
+    } catch (cause) { showError(cause); } finally { setSavingId(null); }
+  }
+  const chartOption = { tooltip: { trigger: 'axis' }, xAxis: { type: 'value', name: '转抽后天数' }, yAxis: { type: 'value', name: '日产油' }, series: (detail?.curves ?? []).map((curve) => ({ name: `第${curve.round}轮`, type: 'line', showSymbol: false, data: curve.points.map((point) => [point.day, point.oil]) })) };
 
   return <div className="page-stack animate-in fade-in duration-300">
-    <div className="app-card p-6 flex flex-wrap items-center justify-between gap-4">
-      <div>
-        <h3 className="text-lg font-bold text-slate-900">措施选井</h3>
-        <p className="mt-1 text-sm text-slate-500">导入历史注汽数据后自动评分，点击井号查看近三轮曲线与参数。</p>
+    <section className="app-card p-6">
+      <h3 className="text-lg font-bold text-slate-900">措施选井注汽选井</h3>
+      <p className="mt-1 text-sm text-slate-500">导入单位数据库导出的阶段产油和注汽日数据，重建候选井后生成每月最多 30 口井的可执行注汽计划。</p>
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
+        {(['stage', 'daily'] as const).map((source) => { const stage = source === 'stage'; const status = sourceByType.get(source); return <div key={source} className="rounded border border-slate-200 p-4">
+          <b>{stage ? '阶段产油' : '注汽日数据'}</b><p className="mt-1 text-xs text-slate-500">{status ? `${status.sourceFile} · ${status.rowCount} 行 · ${new Date(status.importedAt).toLocaleString()}` : '尚未导入'}</p>
+          <label className="mt-3 inline-block cursor-pointer rounded bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><input className="sr-only" type="file" accept=".xlsx,.xls" disabled={busySource !== null} onChange={(event) => void upload(source, event)} />{busySource === source ? '导入中…' : `导入${stage ? '阶段产油' : '注汽日数据'}`}</label>
+        </div>; })}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="cursor-pointer rounded bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
-          {importing ? '导入中…' : '导入 Excel'}
-          <input className="sr-only" type="file" accept=".xlsx,.xls" disabled={importing} onChange={(event) => void importWorkbook(event)} />
-        </label>
-        <button onClick={() => void recalculate()} disabled={recalculating || importing} className="rounded border border-emerald-600 px-4 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50">
-          {recalculating ? '重新计算中…' : '重新计算评分'}
-        </button>
-      </div>
-    </div>
-    {error && <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-    {importMessage && <div className="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{importMessage}</div>}
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.7fr)]">
-      <section className="app-card overflow-hidden">
-        <div className="app-card-header"><h4 className="font-bold text-slate-800">选井列表（{wells.length}）</h4><p className="mt-1 text-sm text-slate-500">按综合评分排序，点击井号同页查看。</p></div>
-        <div className="max-h-[650px] overflow-y-auto">
-          {loading ? <div className="p-6 text-sm text-slate-400">加载中…</div>
-            : wells.length === 0 ? <div className="p-6 text-sm text-slate-500">暂无评分数据，请先导入 Excel。</div>
-              : wells.map((well) => <button key={`${well.block}-${well.wellName}`} onClick={() => setSelected(well)} className={`flex w-full items-center justify-between border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${selected?.wellName === well.wellName && selected.block === well.block ? 'bg-emerald-50' : ''}`}>
-                <span><b>{well.wellName}</b><small className="ml-2 text-slate-400">{well.block} · {well.station ?? '未设置井站'}</small></span>
-                <span className="text-right"><b className="text-emerald-700">{well.score.toFixed(1)}</b><small className="ml-2 text-slate-500">{gradeLabel[well.grade]}</small></span>
-              </button>)}
-        </div>
-      </section>
-      <section className="space-y-6">
-        <div className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">{selected ? `${selected.wellName}近三轮日产油曲线` : '近三轮日产油曲线'}</h4><p className="mt-1 text-sm text-slate-500">以转抽日为第 0 天，展示转抽前 30 天与后 180 天。</p></div>{detailLoading ? <div className="flex h-[330px] items-center justify-center text-sm text-slate-400">加载详情中…</div> : <ReactECharts option={chartOption} style={{ height: 330 }} />}</div>
-        <div className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">近三轮注汽参数</h4></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr>{['轮次', '转抽时间', '注汽量', '最高压力', '排量', 'N2', '锅炉', '峰值产油', '见油天数', '周期产油', '油汽比'].map((name) => <th key={name} className="px-3 py-3 font-semibold">{name}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{detail?.cycles.map((cycle) => <tr key={`${cycle.transferDate}-${cycle.round}`}><td className="px-3 py-3">{cycle.round}</td><td className="px-3 py-3">{cycle.transferDate}</td><td className="px-3 py-3">{cycle.actualSteam ?? cycle.designSteam ?? '--'}</td><td className="px-3 py-3">{cycle.maxPressure ?? '--'}</td><td className="px-3 py-3">{cycle.rate ?? '--'}</td><td className="px-3 py-3">{cycle.injectN2 === null || cycle.injectN2 === undefined ? '--' : cycle.injectN2 ? '是' : '否'}</td><td className="px-3 py-3">{cycle.boiler ?? '--'}</td><td className="px-3 py-3">{cycle.peakOil ?? '--'}</td><td className="px-3 py-3">{cycle.oilSeeingDays ?? '--'}</td><td className="px-3 py-3">{cycle.cycleOil ?? '--'}</td><td className="px-3 py-3">{cycle.actualSteam && cycle.cycleOil != null ? (cycle.cycleOil / cycle.actualSteam).toFixed(3) : '--'}</td></tr>)}{!detailLoading && selected && detail?.cycles.length === 0 && <tr><td className="px-3 py-5 text-slate-400" colSpan={11}>暂无轮次参数。</td></tr>}</tbody></table></div></div>
-        <div className="app-card overflow-hidden">
-          <div className="app-card-header"><h4 className="font-bold text-slate-800">同类注汽井（Top 10）</h4><p className="mt-1 text-sm text-slate-500">评分由区块、层系、井型、工艺、生产/递减、注汽方案、风险与效果组成；缺失字段不计分并降低置信度。</p></div>
-          {similarLoading ? <div className="p-5 text-sm text-slate-400">加载同类井中…</div> : !similar?.matches.length ? <div className="p-5 text-sm text-slate-500">暂无可比较的同类井数据。</div> : <>
-            <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-3">井号</th><th className="px-3 py-3">综合相似度</th><th className="px-3 py-3">完整度/置信度</th><th className="px-3 py-3">案例效果</th><th className="px-3 py-3">评分依据</th></tr></thead><tbody className="divide-y divide-slate-100">{similar.matches.map((match) => <tr key={`${match.block}-${match.wellName}`}><td className="px-3 py-3 font-semibold">{match.wellName}<small className="ml-2 text-slate-400">{match.block ?? '--'}</small></td><td className="px-3 py-3 text-emerald-700">{match.score.toFixed(1)}</td><td className="px-3 py-3">{(match.completeness * 100).toFixed(0)}% / {(match.confidence * 100).toFixed(0)}%</td><td className="px-3 py-3">峰值 {match.caseEffect.production ?? '--'}；周期油 {match.caseEffect.cycleOil ?? '--'}</td><td className="px-3 py-3 text-xs text-slate-500">{Object.entries(match.scoreBreakdown).filter(([, part]) => part.score !== null).map(([name, part]) => `${name} ${part.score?.toFixed(1)}/${part.max}`).join('，')}</td></tr>)}</tbody></table></div>
-            <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">参数范围：{Object.entries(similar.parameterRanges).map(([name, range]) => `${name} ${range.min}–${range.max}（中位 ${range.median}，${range.count} 例）`).join('；')}</div>
-          </>}
-        </div>
-      </section>
-    </div>
+      <div className="mt-5 flex flex-wrap items-end gap-3"><button className="rounded border border-emerald-600 px-4 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50" disabled={rebuilding} onClick={() => void rebuild()}>{rebuilding ? '重建中…' : '重建候选井'}</button><label className="text-sm font-semibold">目标月份<input className="ml-2 rounded border border-slate-300 px-2 py-2" type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></label><button className="rounded bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50" disabled={generating || !month} onClick={() => void generatePlan()}>{generating ? '生成中…' : '生成注汽计划'}</button></div>
+    </section>
+    {error && <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}{message && <div className="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div>}
+    <section className="app-card overflow-hidden"><div className="app-card-header flex flex-wrap items-center justify-between gap-2"><div><h4 className="font-bold text-slate-800">候选井与月度注汽计划</h4><p className="mt-1 text-sm text-slate-500">油汽比优先排序；计划最多 30 口井。氮气和二氧化碳标记来自历史注汽日数据备注。</p></div>{plan && <a className="rounded border border-emerald-600 px-3 py-2 text-sm font-bold text-emerald-700" href={`/api/injection-selection/plans/${plan.id}.xlsx`}>导出 Excel</a>}</div>
+      {!plan ? <div className="p-5 text-sm text-slate-500">{candidates.length ? `已重建 ${candidates.length} 口候选井，请选择目标月份生成注汽计划。` : '请先导入两份数据并重建候选井。'}</div> : <div className="overflow-x-auto"><table className="w-full min-w-[1180px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr>{['顺序','井号','评分','油汽比','阶段产油','建议注汽量','推荐锅炉','氮气','二氧化碳','人工决定','备注'].map((name) => <th key={name} className="px-3 py-3">{name}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{plan.items.map((item) => <tr key={item.id}><td className="px-3 py-3">{item.rankNo}</td><td className="px-3 py-3 font-semibold">{item.wellNo}</td><td className="px-3 py-3">{item.score.toFixed(1)}</td><td className="px-3 py-3">{item.oilSteamRatio.toFixed(3)}</td><td className="px-3 py-3">{item.stageOil}</td><td className="px-3 py-3"><input aria-label={`${item.wellNo}建议注汽量`} className="w-24 rounded border px-2 py-1" type="number" defaultValue={item.suggestedSteam ?? ''} onBlur={(event) => void patchItem(item, { suggestedSteam: event.target.value === '' ? null : Number(event.target.value) })} /></td><td className="px-3 py-3"><input aria-label={`${item.wellNo}推荐锅炉`} className="w-28 rounded border px-2 py-1" defaultValue={item.recommendedBoiler ?? ''} onBlur={(event) => void patchItem(item, { recommendedBoiler: event.target.value || null })} /></td><td className="px-3 py-3">{item.nitrogen ? '是' : '否'}</td><td className="px-3 py-3">{item.carbonDioxide ? '是' : '否'}</td><td className="px-3 py-3"><select aria-label={`${item.wellNo}人工决定`} className="rounded border px-2 py-1" value={item.decision} onChange={(event) => void patchItem(item, { decision: event.target.value as PlanDecision })}><option value="included">纳入</option><option value="locked">锁定</option><option value="excluded">剔除</option></select></td><td className="px-3 py-3"><input aria-label={`${item.wellNo}备注`} className="rounded border px-2 py-1" defaultValue={item.manualNote ?? ''} onBlur={(event) => void patchItem(item, { manualNote: event.target.value || null })} />{savingId === item.id && <small className="ml-1 text-slate-400">保存中…</small>}</td></tr>)}</tbody></table></div>}
+    </section>
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.7fr)]"><section className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">历史选井列表</h4></div><div className="max-h-[360px] overflow-y-auto">{legacyWells.map((well) => <button key={`${well.block}-${well.wellName}`} className="flex w-full justify-between border-b px-4 py-3 text-left hover:bg-slate-50" onClick={() => setSelectedLegacy(well)}><span>{well.wellName}<small className="ml-2 text-slate-400">{well.block}</small></span><b>{well.score.toFixed(1)}</b></button>)}{!legacyWells.length && <div className="p-4 text-sm text-slate-400">暂无历史曲线数据。</div>}</div></section><section className="space-y-6"><div className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">历史近三轮日产油曲线</h4></div><ReactECharts option={chartOption} style={{ height: 300 }} /></div><div className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">同类井</h4></div><div className="p-4 text-sm text-slate-600">{similar?.matches.length ? similar.matches.map((match) => <div key={`${match.block}-${match.wellName}`} className="border-b py-2">{match.wellName} · {match.block ?? '--'} · 相似度 {match.score.toFixed(1)} · 置信度 {(match.confidence * 100).toFixed(0)}%</div>) : '暂无可比较的同类井数据。'}</div></div></section></div>
   </div>;
 }
