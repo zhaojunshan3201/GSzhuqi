@@ -88,3 +88,21 @@ test('detects gas flags case-insensitively across all remarks', () => {
   assert.deepEqual(detectGasFlags(['co2']), { nitrogen: false, carbonDioxide: true });
   assert.deepEqual(detectGasFlags([]), { nitrogen: false, carbonDioxide: false });
 });
+
+test('keeps the calendar day for fractional Excel serial dates', () => {
+  const result = parseStageOilWorkbook(workbookWithRows([
+    ['井号', '周期序号', '开注汽日期', '周期注汽量', '阶段产油'],
+    ['A', 1, 45299.75, 100, 20],
+  ]));
+  assert.equal(result.rows[0].startDate, '2024-01-08');
+});
+
+test('uses the local calendar date from Date cells', () => {
+  const workbook = workbookWithRows([
+    ['\u4e95\u53f7', '\u65e5\u671f'],
+    ['A', null],
+  ]);
+  workbook.Sheets.Sheet1.B2 = { t: 'd', v: new Date(2024, 0, 8, 0, 0, 0) };
+  const result = parseDailyInjectionWorkbook(workbook);
+  assert.equal(result.rows[0].recordDate, '2024-01-08');
+});

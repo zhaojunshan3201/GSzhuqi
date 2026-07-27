@@ -174,9 +174,9 @@ function optionalDate(value: Cell, name: string): ValueResult<string> {
   return date ? { value: date } : { value: null, error: `${name}格式无效` };
 }
 function normalizeDate(value: Cell): string | null {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return dateString(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate());
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return dateString(value.getFullYear(), value.getMonth() + 1, value.getDate());
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const date = new Date(Date.UTC(1899, 11, 30) + Math.round(value) * 86_400_000);
+    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000);
     return dateString(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
   }
   const match = /^(\d{4})\s*[年\/-]\s*(\d{1,2})\s*[月\/-]\s*(\d{1,2})\s*日?$/.exec(text(value));
