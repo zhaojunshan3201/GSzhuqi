@@ -21,3 +21,11 @@ test('patches editable plan item fields to persist manual updates', () => {
   assert.match(component, /method:\s*'PATCH'/);
   for (const field of ['suggestedSteam', 'recommendedBoiler', 'decision', 'manualNote']) assert.match(component, new RegExp(field));
 });
+
+
+test('requires both sources and a successful rebuild before plan generation, while showing decision evidence', () => {
+  const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
+  for (const value of ['bothSourcesReady', 'rebuildComplete', 'excluded', 'qualityReasons', 'scoreBreakdown', 'skippedRowCount', 'errorMessages']) assert.match(component, new RegExp(value));
+  assert.match(component, /disabled=\{rebuilding \|\| !bothSourcesReady\}/);
+  assert.match(component, /disabled=\{generating \|\| !month \|\| !bothSourcesReady \|\| !rebuildComplete\}/);
+});

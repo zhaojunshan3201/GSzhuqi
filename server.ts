@@ -3456,11 +3456,11 @@ async function startServer() {
       const workbook = XLSX.read(file.buffer, { type: "buffer" });
       if (source === "stage") {
         const parsed = parseStageOilWorkbook(workbook);
-        await replaceSelectionSource(localDb, "stage", file.originalname, parsed.rows);
+        await replaceSelectionSource(localDb, "stage", file.originalname, parsed.rows, { skippedRowCount: parsed.skippedRows.length, errorMessages: parsed.skippedRows.map((row) => `? ${row.rowNumber} ??${row.reason}`) });
         res.json({ success: true, data: parsed });
       } else {
         const parsed = parseDailyInjectionWorkbook(workbook);
-        await replaceSelectionSource(localDb, "daily", file.originalname, parsed.rows);
+        await replaceSelectionSource(localDb, "daily", file.originalname, parsed.rows, { skippedRowCount: parsed.skippedRows.length, errorMessages: parsed.skippedRows.map((row) => `? ${row.rowNumber} ??${row.reason}`) });
         res.json({ success: true, data: parsed });
       }
     } catch (error: any) {

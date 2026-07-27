@@ -12,6 +12,7 @@ import {
   initInjectionSelectionTables,
   listDailyRows,
   listStageRows,
+  listSelectionSourceStatus,
   replaceSelectionSource,
   getPlan,
   savePlan,
@@ -178,5 +179,16 @@ test('saves an auditable active plan and supersedes the prior plan for the same 
     assert.equal(active?.items[0].decision, 'locked');
     assert.deepEqual(active?.items[0].source.latestCycle, stageRow('A', 2));
     assert.equal((await db.get('SELECT status FROM injection_selection_plans WHERE id = ?', [first.id]))?.status, 'superseded');
+  });
+});
+
+
+test('persists skipped rows and validation messages with a source snapshot', async () => {
+  await withStore(async (db) => {
+    await replaceSelectionSource(db, 'stage', 'stage.xlsx', [stageRow('A', 1)], { skippedRowCount: 2, errorMessages: ['row 3: invalid'] });
+    assert.deepEqual(await listSelectionSourceStatus(db), [{
+      sourceType: 'stage', sourceFile: 'stage.xlsx', rowCount: 1,
+      skippedRowCount: 2, errorMessages: ['row 3: invalid'], importedAt: (await listSelectionSourceStatus(db))[0].importedAt,
+    }]);
   });
 });

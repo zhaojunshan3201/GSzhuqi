@@ -22,7 +22,9 @@ export function initInjectionSelectionTables(db: Database): Promise<void> {
       source_type TEXT NOT NULL CHECK(source_type IN ('stage', 'daily')),
       source_file TEXT NOT NULL,
       imported_at TEXT NOT NULL,
-      row_count INTEGER NOT NULL DEFAULT 0
+      row_count INTEGER NOT NULL DEFAULT 0,
+      skipped_row_count INTEGER NOT NULL DEFAULT 0,
+      error_messages_json TEXT NOT NULL DEFAULT '[]'
     );
     CREATE TABLE IF NOT EXISTS injection_stage_rows (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,6 +92,9 @@ export function initInjectionSelectionTables(db: Database): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_injection_daily_rows_well_date ON injection_daily_rows(well_no, record_date);
     CREATE INDEX IF NOT EXISTS idx_injection_selection_plan_items_rank ON injection_selection_plan_items(plan_id, rank_no);
     `);
+    const importColumns = await db.all('PRAGMA table_info(injection_selection_imports)');
+    if (!importColumns.some((column: any) => column.name === 'skipped_row_count')) await db.exec('ALTER TABLE injection_selection_imports ADD COLUMN skipped_row_count INTEGER NOT NULL DEFAULT 0');
+    if (!importColumns.some((column: any) => column.name === 'error_messages_json')) await db.exec("ALTER TABLE injection_selection_imports ADD COLUMN error_messages_json TEXT NOT NULL DEFAULT '[]'");
     await db.exec('BEGIN TRANSACTION');
     try {
       await db.exec(`
@@ -114,9 +119,10 @@ export function initInjectionSelectionTables(db: Database): Promise<void> {
   });
 }
 
-export function replaceSelectionSource(db: Database, source: 'stage', sourceFile: string, rows: readonly StageOilRow[]): Promise<void>;
-export function replaceSelectionSource(db: Database, source: 'daily', sourceFile: string, rows: readonly DailyInjectionRow[]): Promise<void>;
-export function replaceSelectionSource(db: Database, source: SelectionSourceType, sourceFile: string, rows: readonly (StageOilRow | DailyInjectionRow)[]): Promise<void> {
+export type SelectionImportSummary = { skippedRowCount?: number; errorMessages?: string[] };
+export function replaceSelectionSource(db: Database, source: 'stage', sourceFile: string, rows: readonly StageOilRow[], summary?: SelectionImportSummary): Promise<void>;
+export function replaceSelectionSource(db: Database, source: 'daily', sourceFile: string, rows: readonly DailyInjectionRow[], summary?: SelectionImportSummary): Promise<void>;
+export function replaceSelectionSource(db: Database, source: SelectionSourceType, sourceFile: string, rows: readonly (StageOilRow | DailyInjectionRow)[], summary: SelectionImportSummary = {}): Promise<void> {
   return queueWrite(db, async () => {
     await db.exec('BEGIN TRANSACTION');
     try {
@@ -124,8 +130,8 @@ export function replaceSelectionSource(db: Database, source: SelectionSourceType
       await db.run(`DELETE FROM ${rowTable} WHERE import_id IN (SELECT id FROM injection_selection_imports WHERE source_type = ?)`, [source]);
       await db.run('DELETE FROM injection_selection_imports WHERE source_type = ?', [source]);
       const imported = await db.run(
-        'INSERT INTO injection_selection_imports (source_type, source_file, imported_at, row_count) VALUES (?, ?, ?, ?)',
-        [source, sourceFile, new Date().toISOString(), rows.length],
+        'INSERT INTO injection_selection_imports (source_type, source_file, imported_at, row_count, skipped_row_count, error_messages_json) VALUES (?, ?, ?, ?, ?, ?)',
+        [source, sourceFile, new Date().toISOString(), rows.length, summary.skippedRowCount ?? 0, JSON.stringify(summary.errorMessages ?? [])],
       );
       if (source === 'stage') {
         for (const row of rows as readonly StageOilRow[]) await insertStageRow(db, imported.lastID!, row);
@@ -203,6 +209,8 @@ export type SelectionSourceStatus = {
   sourceFile: string;
   importedAt: string;
   rowCount: number;
+  skippedRowCount: number;
+  errorMessages: string[];
 };
 
 export function savePlan(db: Database, plan: import('./injectionSelectionPlanner.ts').MonthlyPlan): Promise<StoredMonthlyPlan> {
@@ -261,8 +269,8 @@ export function updatePlanItem(db: Database, planId: number, itemId: number, pat
 
 export function listSelectionSourceStatus(db: Database): Promise<SelectionSourceStatus[]> {
   return queueWrite(db, async () => {
-    const rows = await db.all("SELECT source_type, source_file, imported_at, row_count FROM injection_selection_imports ORDER BY source_type");
-    return rows.map((row: any) => ({ sourceType: row.source_type as SelectionSourceType, sourceFile: row.source_file, importedAt: row.imported_at, rowCount: row.row_count }));
+    const rows = await db.all("SELECT source_type, source_file, imported_at, row_count, skipped_row_count, error_messages_json FROM injection_selection_imports ORDER BY source_type");
+    return rows.map((row: any) => ({ sourceType: row.source_type as SelectionSourceType, sourceFile: row.source_file, importedAt: row.imported_at, rowCount: row.row_count, skippedRowCount: row.skipped_row_count ?? 0, errorMessages: JSON.parse(row.error_messages_json ?? '[]') }));
   });
 }
 
