@@ -24,8 +24,8 @@ async function withDatabase(run: (db: any) => Promise<void>) {
         cumulative_oil_gain REAL,
         evaluation TEXT
       );
-      CREATE TABLE measure_well_cycles (well_name TEXT, actual_steam REAL, cycle_oil REAL);
-      CREATE TABLE measure_well_imports (imported_at TEXT);
+      CREATE TABLE injection_stage_rows (well_no TEXT, steam_volume REAL, stage_oil REAL);
+      CREATE TABLE injection_selection_imports (source_type TEXT, imported_at TEXT);
     `);
     await run(db);
   } finally {
@@ -62,13 +62,23 @@ test('returns null and a needs-data alert instead of a fake zero', async () => {
   });
 });
 
+test('calculates the oil-steam ratio from new stage rows without legacy cycles', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_stage_rows (well_no, steam_volume, stage_oil) VALUES ('A-1', 100, 50)`);
+
+    const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
+
+    assert.equal(result.metrics.oilSteamRatio, 0.5);
+  });
+});
+
 test('calculates production metrics and creates overdue and low-efficiency alerts', async () => {
   await withDatabase(async (db) => {
     await db.run(`INSERT INTO measure_tracking VALUES (1, 'A-1', 'A', '生产', '2026-07-01', 2, 10, 'D')`);
     await db.run(`INSERT INTO measure_tracking VALUES (2, 'B-1', 'B', '焖井', '2026-06-01', NULL, NULL, NULL)`);
     await db.run(`INSERT INTO measure_tracking VALUES (3, 'C-1', 'C', '转注', '2026-07-10', NULL, NULL, NULL)`);
-    await db.run(`INSERT INTO measure_well_cycles (actual_steam, cycle_oil) VALUES (100, 20)`);
-    await db.run(`INSERT INTO measure_well_cycles (actual_steam, cycle_oil) VALUES (300, 90)`);
+    await db.run(`INSERT INTO injection_stage_rows (well_no, steam_volume, stage_oil) VALUES ('A-1', 100, 20)`);
+    await db.run(`INSERT INTO injection_stage_rows (well_no, steam_volume, stage_oil) VALUES ('B-1', 300, 90)`);
 
     const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
 
@@ -84,7 +94,7 @@ test('calculates production metrics and creates overdue and low-efficiency alert
 test('reports a failed production source without also marking it normal', async () => {
   await withDatabase(async (db) => {
     await db.run(`INSERT INTO production VALUES ('A-1', '2026-07-20', 1)`);
-    await db.run(`INSERT INTO measure_well_imports VALUES ('2026-07-21T08:00:00Z')`);
+    await db.run(`INSERT INTO injection_selection_imports VALUES ('stage', '2026-07-21T08:00:00Z')`);
 
     const result = await buildInjectionProductionCockpit(db, {
       now: '2026-07-25', syncStatus: { lastSyncStatus: 'error' },
@@ -94,6 +104,19 @@ test('reports a failed production source without also marking it normal', async 
     assert.deepEqual(production, {
       source: 'production', status: 'failed', updatedAt: '2026-07-20', message: '生产数据同步失败',
     });
+  });
+});
+
+test('uses the stage import timestamp for selection data freshness', async () => {
+  await withDatabase(async (db) => {
+    await db.run(`INSERT INTO injection_selection_imports VALUES ('daily', '2026-07-24T08:00:00Z')`);
+    await db.run(`INSERT INTO injection_selection_imports VALUES ('stage', '2026-07-21T08:00:00Z')`);
+
+    const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
+
+    const selection = result.dataFreshness.find((item) => item.source === 'selection');
+    assert.equal(selection?.status, 'normal');
+    assert.equal(selection?.updatedAt, '2026-07-21T08:00:00Z');
   });
 });
 
@@ -122,11 +145,11 @@ test('aggregates finite production performance and valid cycle ratios by block',
     await db.run(`INSERT INTO measure_tracking VALUES (3, 'A-2', 'A', '生产', '2026-07-21', 'bad', 5, 'B')`);
     await db.run(`INSERT INTO measure_tracking VALUES (4, 'B-1', 'B', '生产', '2026-07-22', 'bad', 'bad', 'A')`);
     await db.run(`INSERT INTO measure_tracking VALUES (5, 'C-1', 'C', '正注', '2026-07-23', 7, 20, 'A')`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 100, 20)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-2', 50, 10)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('B-1', 0, 10)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('C-1', 100, 50)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('missing', 100, 100)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('A-1', 100, 20)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('A-2', 50, 10)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('B-1', 0, 10)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('C-1', 100, 50)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('missing', 100, 100)`);
 
     const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
 
@@ -162,12 +185,12 @@ test('keeps valid production values when another value or evaluation is missing'
 test('uses valid paired cycles for consistently rounded global and trimmed-block ratios', async () => {
   await withDatabase(async (db) => {
     await db.run(`INSERT INTO measure_tracking VALUES (1, ' A-1 ', 'A', '生产', '2026-07-20', 2, 5, 'A')`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 100, 0)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES (' A-1 ', 100, 30)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 100, NULL)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', NULL, 40)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', '   ', 20)`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 50, '   ')`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('A-1', 100, 0)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES (' A-1 ', 100, 30)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('A-1', 100, NULL)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('A-1', NULL, 40)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('A-1', '   ', 20)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('A-1', 50, '   ')`);
 
     const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
 
@@ -181,7 +204,7 @@ test('uses valid paired cycles for consistently rounded global and trimmed-block
 test('keeps zero cycle oil for block ratio while preserving the global null convention', async () => {
   await withDatabase(async (db) => {
     await db.run(`INSERT INTO measure_tracking VALUES (1, 'A-1', 'A', '生产', '2026-07-20', 2, 5, 'A')`);
-    await db.run(`INSERT INTO measure_well_cycles VALUES ('A-1', 100, 0)`);
+    await db.run(`INSERT INTO injection_stage_rows VALUES ('A-1', 100, 0)`);
 
     const result = await buildInjectionProductionCockpit(db, { now: '2026-07-25' });
 
