@@ -1,6 +1,7 @@
 import type { Database } from 'sqlite';
 
 import type { DailyInjectionRow, StageOilRow } from './injectionSelectionData.ts';
+import { decodeUploadedFileName } from './uploadFileName.ts';
 
 export type SelectionSourceType = 'stage' | 'daily';
 
@@ -270,7 +271,7 @@ export function updatePlanItem(db: Database, planId: number, itemId: number, pat
 export function listSelectionSourceStatus(db: Database): Promise<SelectionSourceStatus[]> {
   return queueWrite(db, async () => {
     const rows = await db.all("SELECT source_type, source_file, imported_at, row_count, skipped_row_count, error_messages_json FROM injection_selection_imports ORDER BY source_type");
-    return rows.map((row: any) => ({ sourceType: row.source_type as SelectionSourceType, sourceFile: row.source_file, importedAt: row.imported_at, rowCount: row.row_count, skippedRowCount: row.skipped_row_count ?? 0, errorMessages: JSON.parse(row.error_messages_json ?? '[]') }));
+    return rows.map((row: any) => ({ sourceType: row.source_type as SelectionSourceType, sourceFile: decodeUploadedFileName(row.source_file), importedAt: row.imported_at, rowCount: row.row_count, skippedRowCount: row.skipped_row_count ?? 0, errorMessages: JSON.parse(row.error_messages_json ?? '[]') }));
   });
 }
 

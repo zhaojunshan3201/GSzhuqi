@@ -192,3 +192,12 @@ test('persists skipped rows and validation messages with a source snapshot', asy
     }]);
   });
 });
+
+
+test('decodes a legacy multer-encoded source file name when listing source status', async () => {
+  await withStore(async (db) => {
+    const garbled = Buffer.from('????.xlsx', 'utf8').toString('latin1');
+    await replaceSelectionSource(db, 'stage', garbled, [stageRow('A', 1)]);
+    assert.equal((await listSelectionSourceStatus(db))[0].sourceFile, '????.xlsx');
+  });
+});
