@@ -113,5 +113,7 @@ test('selected-well reference preserves null chart points and exposes all requir
   const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
   assert.match(component, /data: cycle\.points\.map\(\(point\) => \[point\.day, point\.oil\]\)/);
   assert.doesNotMatch(component, /point\.oil \?\? 0/);
+  assert.match(component, /table-fixed/);
+  assert.match(component, /text-center/);
   for (const token of ['missingReasons', 'similarWells', 'cycle.metrics.stageOil', 'cycle.metrics.oilSteamRatio', 'cycle.metrics.steamVolume']) assert.ok(component.includes(token));
 });
