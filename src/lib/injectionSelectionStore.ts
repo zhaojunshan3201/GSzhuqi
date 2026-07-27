@@ -184,3 +184,116 @@ function toStageRow(row: any): StageOilRow {
 function toDailyRow(row: any): DailyInjectionRow {
   return { wellNo: row.well_no, recordDate: row.record_date, boilerNo: row.boiler_no, productionHours: row.production_hours, flow: row.flow, dailySteam: row.daily_steam, designSteam: row.design_steam, cumulativeSteam: row.cumulative_steam, pressure: row.pressure, dryness: row.dryness, temperature: row.temperature, gasFlags: { nitrogen: Boolean(row.nitrogen), carbonDioxide: Boolean(row.carbon_dioxide) }, remarks: JSON.parse(row.remarks_json) };
 }
+
+export type StoredMonthlyPlan = import('./injectionSelectionPlanner.ts').MonthlyPlan & {
+  id: number;
+  generatedAt: string;
+  status: 'active' | 'superseded';
+};
+
+export type PlanItemPatch = {
+  decision?: import('./injectionSelectionPlanner.ts').PlanDecision;
+  manualNote?: string | null;
+  suggestedSteam?: number | null;
+  recommendedBoiler?: string | null;
+};
+
+export type SelectionSourceStatus = {
+  sourceType: SelectionSourceType;
+  sourceFile: string;
+  importedAt: string;
+  rowCount: number;
+};
+
+export function savePlan(db: Database, plan: import('./injectionSelectionPlanner.ts').MonthlyPlan): Promise<StoredMonthlyPlan> {
+  return queueWrite(db, async () => {
+    await db.exec('BEGIN TRANSACTION');
+    try {
+      await db.run("UPDATE injection_selection_plans SET status = 'superseded' WHERE plan_month = ? AND status = 'active'", [plan.month]);
+      const generatedAt = new Date().toISOString();
+      const created = await db.run(
+        "INSERT INTO injection_selection_plans (plan_month, generated_at, max_wells, status) VALUES (?, ?, ?, 'active')",
+        [plan.month, generatedAt, plan.maxWells],
+      );
+      const planId = created.lastID!;
+      for (const item of plan.items) {
+        await db.run(`INSERT INTO injection_selection_plan_items
+          (plan_id, rank_no, well_no, score, suggested_steam, recommended_boiler, nitrogen, carbon_dioxide, source_json, decision, manual_note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+          planId, item.rankNo, item.wellNo, item.score, item.suggestedSteam, item.recommendedBoiler,
+          Number(item.nitrogen), Number(item.carbonDioxide), JSON.stringify(item.source), item.decision, item.manualNote,
+        ]);
+      }
+      await db.exec('COMMIT');
+      return (await getPlanByIdUnlocked(db, planId))!;
+    } catch (error) {
+      await db.exec('ROLLBACK');
+      throw error;
+    }
+  });
+}
+
+export function getPlan(db: Database, month: string): Promise<StoredMonthlyPlan | undefined> {
+  return queueWrite(db, async () => {
+    const row = await db.get("SELECT id FROM injection_selection_plans WHERE plan_month = ? AND status = 'active' ORDER BY generated_at DESC, id DESC LIMIT 1", [month]);
+    return row ? getPlanByIdUnlocked(db, row.id) : undefined;
+  });
+}
+
+export function getPlanById(db: Database, planId: number): Promise<StoredMonthlyPlan | undefined> {
+  return queueWrite(db, () => getPlanByIdUnlocked(db, planId));
+}
+
+export function updatePlanItem(db: Database, planId: number, itemId: number, patch: PlanItemPatch): Promise<StoredMonthlyPlan | undefined> {
+  return queueWrite(db, async () => {
+    const existing = await db.get('SELECT id FROM injection_selection_plan_items WHERE id = ? AND plan_id = ?', [itemId, planId]);
+    if (!existing) return undefined;
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (patch.decision !== undefined) { fields.push('decision = ?'); values.push(patch.decision); }
+    if (patch.manualNote !== undefined) { fields.push('manual_note = ?'); values.push(patch.manualNote); }
+    if (patch.suggestedSteam !== undefined) { fields.push('suggested_steam = ?'); values.push(patch.suggestedSteam); }
+    if (patch.recommendedBoiler !== undefined) { fields.push('recommended_boiler = ?'); values.push(patch.recommendedBoiler); }
+    if (fields.length) await db.run(`UPDATE injection_selection_plan_items SET ${fields.join(', ')} WHERE id = ? AND plan_id = ?`, [...values, itemId, planId]);
+    return getPlanByIdUnlocked(db, planId);
+  });
+}
+
+export function listSelectionSourceStatus(db: Database): Promise<SelectionSourceStatus[]> {
+  return queueWrite(db, async () => {
+    const rows = await db.all("SELECT source_type, source_file, imported_at, row_count FROM injection_selection_imports ORDER BY source_type");
+    return rows.map((row: any) => ({ sourceType: row.source_type as SelectionSourceType, sourceFile: row.source_file, importedAt: row.imported_at, rowCount: row.row_count }));
+  });
+}
+
+async function getPlanByIdUnlocked(db: Database, planId: number): Promise<StoredMonthlyPlan | undefined> {
+  const plan = await db.get('SELECT id, plan_month, generated_at, max_wells, status FROM injection_selection_plans WHERE id = ?', [planId]);
+  if (!plan) return undefined;
+  const itemRows = await db.all('SELECT id, rank_no, well_no, score, suggested_steam, recommended_boiler, nitrogen, carbon_dioxide, source_json, decision, manual_note FROM injection_selection_plan_items WHERE plan_id = ? ORDER BY rank_no ASC', [planId]);
+  return {
+    id: plan.id,
+    month: plan.plan_month,
+    generatedAt: plan.generated_at,
+    maxWells: plan.max_wells,
+    status: plan.status,
+    items: itemRows.map((row: any) => {
+      const source = JSON.parse(row.source_json);
+      return {
+        id: row.id,
+        rankNo: row.rank_no,
+        wellNo: row.well_no,
+        score: row.score,
+        suggestedSteam: row.suggested_steam,
+        recommendedBoiler: row.recommended_boiler,
+        nitrogen: Boolean(row.nitrogen),
+        carbonDioxide: Boolean(row.carbon_dioxide),
+        oilSteamRatio: source.oilSteamRatio,
+        stageOil: source.stageOil,
+        scoreBreakdown: source.scoreBreakdown,
+        decision: row.decision,
+        manualNote: row.manual_note,
+        source,
+      };
+    }),
+  } as StoredMonthlyPlan;
+}

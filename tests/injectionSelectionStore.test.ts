@@ -7,11 +7,14 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
 import type { DailyInjectionRow, StageOilRow } from '../src/lib/injectionSelectionData.ts';
+import type { MonthlyPlan } from '../src/lib/injectionSelectionPlanner.ts';
 import {
   initInjectionSelectionTables,
   listDailyRows,
   listStageRows,
   replaceSelectionSource,
+  getPlan,
+  savePlan,
 } from '../src/lib/injectionSelectionStore.ts';
 
 async function withStore(run: (db: any) => Promise<void>) {
@@ -133,5 +136,47 @@ test('initializes the injection selection source and plan tables with required i
       'idx_injection_selection_plan_items_rank',
       'idx_injection_stage_rows_well_date',
     ]);
+  });
+});
+
+
+function plan(month: string, decision: 'included' | 'locked' | 'excluded' = 'included'): MonthlyPlan {
+  return {
+    month,
+    maxWells: 30,
+    items: [{
+      rankNo: 1, wellNo: 'A', score: 88, suggestedSteam: 1200, recommendedBoiler: '炉-1',
+      nitrogen: true, carbonDioxide: false, oilSteamRatio: 0.5, stageOil: 600,
+      scoreBreakdown: {
+        oilSteamRatio: { score: 50, value: 0.5, maxScore: 60 },
+        stageOil: { score: 20, value: 600, maxScore: 20 },
+        stability: { score: 8, value: 0.8, maxScore: 10 },
+        dailyCompleteness: { score: 10, value: 1, maxScore: 10 },
+      },
+      decision, manualNote: '现场确认',
+      source: {
+        wellNo: 'A', score: 88, latestCycle: stageRow('A', 2), validCycles: [stageRow('A', 2)],
+        qualityReasons: [], oilSteamRatio: 0.5, stageOil: 600,
+        scoreBreakdown: {
+          oilSteamRatio: { score: 50, value: 0.5, maxScore: 60 },
+          stageOil: { score: 20, value: 600, maxScore: 20 },
+          stability: { score: 8, value: 0.8, maxScore: 10 },
+          dailyCompleteness: { score: 10, value: 1, maxScore: 10 },
+        },
+      },
+    }],
+  };
+}
+
+test('saves an auditable active plan and supersedes the prior plan for the same month', async () => {
+  await withStore(async (db) => {
+    const first = await savePlan(db, plan('2026-08'));
+    const replacement = await savePlan(db, plan('2026-08', 'locked'));
+
+    const active = await getPlan(db, '2026-08');
+    assert.equal(active?.id, replacement.id);
+    assert.equal(active?.items[0].decision, 'locked');
+    assert.deepEqual(active?.items[0].source.latestCycle, stageRow('A', 2));
+    assert.equal((await db.get('SELECT status FROM injection_selection_plans WHERE id = ?', [first.id]))?.status, 'superseded');
   });
 });
