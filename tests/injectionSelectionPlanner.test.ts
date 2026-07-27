@@ -56,6 +56,7 @@ function candidate(wellNo: string, score: number): SelectionCandidate {
     score,
     latestCycle: cycle,
     validCycles: [cycle],
+    qualityReasons: [],
     oilSteamRatio: 0.5,
     stageOil: 500,
     scoreBreakdown: {
@@ -82,4 +83,35 @@ test('exports transparent rows with manual decisions', () => {
   assert.equal(row['目标月份'], '2026-08');
   assert.equal(row['人工决定'], 'locked');
   assert.match(String(row['评分依据']), /油汽比/);
+});
+
+test('uses the newest valid cycle while retaining invalid-cycle quality reasons', () => {
+  const candidates = buildSelectionCandidates([
+    stage('A', 2, '2026-02-01', null, 700),
+    stage('A', 1, '2026-01-01', 1000, 500),
+  ], []);
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].latestCycle.cycleNo, 1);
+  assert.match(candidates[0].qualityReasons[0], /周期注汽量/);
+});
+
+test('does not assign boiler effects to cycles with a missing end date and retains a quality reason', () => {
+  const stages = [stage('A', 1, '2026-01-01', 1000, 800)];
+  const dailyRows = [daily('A', '2026-01-02', '炉-未证实')];
+  const candidates = buildSelectionCandidates(stages, dailyRows);
+
+  assert.equal(buildBoilerEffects(stages, dailyRows).has('炉-未证实'), false);
+  assert.match(candidates[0].qualityReasons[0], /停注汽日期/);
+});
+
+test('does not count negative daily parameters as complete data', () => {
+  const incompleteDaily = daily('A', '2026-01-02', '炉-1');
+  incompleteDaily.dailySteam = -1;
+  incompleteDaily.pressure = -1;
+  incompleteDaily.dryness = -1;
+  incompleteDaily.temperature = -1;
+
+  const [candidate] = buildSelectionCandidates([stage('A', 1, '2026-01-01', 1000, 500)], [incompleteDaily]);
+  assert.equal(candidate.scoreBreakdown.dailyCompleteness.score, 0);
 });

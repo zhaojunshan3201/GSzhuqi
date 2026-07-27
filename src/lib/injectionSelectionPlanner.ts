@@ -11,6 +11,7 @@ export type SelectionCandidate = {
   score: number;
   latestCycle: StageOilRow;
   validCycles: StageOilRow[];
+  qualityReasons: string[];
   oilSteamRatio: number;
   stageOil: number;
   scoreBreakdown: {
@@ -55,28 +56,37 @@ export type MonthlyPlan = {
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const positive = (value: unknown): value is number => finite(value) && value > 0;
+const nonNegative = (value: unknown): value is number => finite(value) && value >= 0;
 
 export function buildSelectionCandidates(stageRows: readonly StageOilRow[], dailyRows: readonly DailyInjectionRow[]): SelectionCandidates {
   const rowsByWell = groupByWell(stageRows);
-  const eligible: Array<{ wellNo: string; latestCycle: StageOilRow; validCycles: StageOilRow[]; oilSteamRatio: number; stageOil: number; stability: number; dailyCompleteness: number }> = [];
+  const eligible: Array<{ wellNo: string; latestCycle: StageOilRow; validCycles: StageOilRow[]; qualityReasons: string[]; oilSteamRatio: number; stageOil: number; stability: number; dailyCompleteness: number }> = [];
   const excluded: ExcludedSelectionWell[] = [];
 
   for (const [wellNo, rows] of rowsByWell) {
     const sortedRows = sortCycles(rows);
-    const latestCycle = sortedRows[0];
-    const invalidReason = invalidCycleReason(latestCycle);
-    if (invalidReason) {
-      excluded.push({ wellNo, latestCycle, reason: invalidReason });
+    const invalidRows = sortedRows.flatMap((row) => {
+      const reason = invalidCycleReason(row);
+      return reason ? [`\u5468\u671f ${row.cycleNo}\uff1a${reason}`] : [];
+    });
+    const validCycles = sortedRows.filter((row) => !invalidCycleReason(row));
+    if (!validCycles.length) {
+      excluded.push({ wellNo, latestCycle: sortedRows[0], reason: invalidRows.join('\uff1b') });
       continue;
     }
 
-    const validCycles = sortedRows.filter((row) => !invalidCycleReason(row));
+    const latestCycle = validCycles[0];
+    const qualityReasons = [
+      ...invalidRows,
+      ...validCycles.filter((row) => !row.endDate).map((row) => `\u5468\u671f ${row.cycleNo}\uff1a\u7f3a\u5c11\u505c\u6ce8\u6c7d\u65e5\u671f\uff0c\u672a\u7eb3\u5165\u9505\u7089\u6548\u679c`),
+    ];
     const oilSteamRatio = cycleOilSteamRatio(latestCycle)!;
     const stageOil = latestCycle.stageOil;
     eligible.push({
       wellNo,
       latestCycle,
       validCycles,
+      qualityReasons,
       oilSteamRatio,
       stageOil,
       stability: ratioStability(validCycles),
@@ -98,6 +108,7 @@ export function buildSelectionCandidates(stageRows: readonly StageOilRow[], dail
       wellNo: item.wellNo,
       latestCycle: item.latestCycle,
       validCycles: item.validCycles,
+      qualityReasons: item.qualityReasons,
       oilSteamRatio: item.oilSteamRatio,
       stageOil: item.stageOil,
       scoreBreakdown,
@@ -113,7 +124,7 @@ export function buildBoilerEffects(stageRows: readonly StageOilRow[], dailyRows:
   const dailyByWell = groupByWell(dailyRows);
   for (const stage of stageRows) {
     const ratio = cycleOilSteamRatio(stage);
-    if (ratio === null) continue;
+    if (ratio === null || !stage.endDate) continue;
     const boilers = new Set((dailyByWell.get(stage.wellNo) ?? [])
       .filter((daily) => daily.boilerNo && isDuringCycle(daily.recordDate, stage))
       .map((daily) => daily.boilerNo!));
@@ -211,7 +222,7 @@ function ratioStability(cycles: readonly StageOilRow[]): number {
 function dailyDataCompleteness(rows: readonly DailyInjectionRow[]): number {
   if (!rows.length) return 0;
   const fields = ['dailySteam', 'pressure', 'dryness', 'temperature'] as const;
-  const filled = rows.reduce((total, row) => total + fields.filter((field) => finite(row[field])).length, 0);
+  const filled = rows.reduce((total, row) => total + fields.filter((field) => nonNegative(row[field])).length, 0);
   return filled / (rows.length * fields.length);
 }
 
@@ -232,7 +243,7 @@ function bestBoiler(effects: ReadonlyMap<string, number>): string | null {
 function aggregateGasFlags(rows: readonly DailyInjectionRow[]): GasFlags {
   return rows.reduce<GasFlags>((flags, row) => ({ nitrogen: flags.nitrogen || row.gasFlags.nitrogen, carbonDioxide: flags.carbonDioxide || row.gasFlags.carbonDioxide }), { nitrogen: false, carbonDioxide: false });
 }
-function isDuringCycle(date: string, cycle: StageOilRow): boolean { return date >= cycle.startDate && date <= (cycle.endDate ?? cycle.startDate); }
+function isDuringCycle(date: string, cycle: StageOilRow): boolean { return Boolean(cycle.endDate) && date >= cycle.startDate && date <= cycle.endDate!; }
 function scoreEvidence(parts: SelectionCandidate['scoreBreakdown']): string {
   return `油汽比 ${parts.oilSteamRatio.value ?? '-'}（${parts.oilSteamRatio.score}/${parts.oilSteamRatio.maxScore}）；阶段产油 ${parts.stageOil.value ?? '-'}（${parts.stageOil.score}/${parts.stageOil.maxScore}）；稳定性 ${parts.stability.value ?? '-'}（${parts.stability.score}/${parts.stability.maxScore}）；日数据完整性 ${parts.dailyCompleteness.value ?? '-'}（${parts.dailyCompleteness.score}/${parts.dailyCompleteness.maxScore}）`;
 }
