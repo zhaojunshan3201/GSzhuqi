@@ -13,9 +13,10 @@ function queueWrite<T>(db: Database, operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
-export async function initInjectionSelectionTables(db: Database): Promise<void> {
-  await db.exec('PRAGMA foreign_keys = ON;');
-  await db.exec(`
+export function initInjectionSelectionTables(db: Database): Promise<void> {
+  return queueWrite(db, async () => {
+    await db.exec('PRAGMA foreign_keys = ON;');
+    await db.exec(`
     CREATE TABLE IF NOT EXISTS injection_selection_imports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       source_type TEXT NOT NULL CHECK(source_type IN ('stage', 'daily')),
@@ -88,7 +89,29 @@ export async function initInjectionSelectionTables(db: Database): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_injection_stage_rows_well_date ON injection_stage_rows(well_no, start_date DESC, cycle_no DESC);
     CREATE INDEX IF NOT EXISTS idx_injection_daily_rows_well_date ON injection_daily_rows(well_no, record_date);
     CREATE INDEX IF NOT EXISTS idx_injection_selection_plan_items_rank ON injection_selection_plan_items(plan_id, rank_no);
-  `);
+    `);
+    await db.exec('BEGIN TRANSACTION');
+    try {
+      await db.exec(`
+        DELETE FROM injection_stage_rows
+        WHERE id NOT IN (
+          SELECT MAX(id) FROM injection_stage_rows GROUP BY import_id, well_no, cycle_no
+        );
+        DELETE FROM injection_daily_rows
+        WHERE id NOT IN (
+          SELECT MAX(id) FROM injection_daily_rows GROUP BY import_id, well_no, record_date
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_injection_stage_rows_import_well_cycle
+          ON injection_stage_rows(import_id, well_no, cycle_no);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_injection_daily_rows_import_well_date
+          ON injection_daily_rows(import_id, well_no, record_date);
+      `);
+      await db.exec('COMMIT');
+    } catch (error) {
+      await db.exec('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 export function replaceSelectionSource(db: Database, source: 'stage', sourceFile: string, rows: readonly StageOilRow[]): Promise<void>;

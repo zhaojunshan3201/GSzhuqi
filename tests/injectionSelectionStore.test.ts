@@ -26,6 +26,22 @@ async function withStore(run: (db: any) => Promise<void>) {
   }
 }
 
+async function withLegacyStore(run: (db: any) => Promise<void>) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'legacy-injection-selection-store-'));
+  const db = await open({ filename: path.join(directory, 'test.db'), driver: sqlite3.Database });
+  try {
+    await db.exec(`
+      CREATE TABLE injection_selection_imports (id INTEGER PRIMARY KEY AUTOINCREMENT, source_type TEXT, source_file TEXT, imported_at TEXT, row_count INTEGER);
+      CREATE TABLE injection_stage_rows (id INTEGER PRIMARY KEY AUTOINCREMENT, import_id INTEGER, well_no TEXT, cycle_no INTEGER, start_date TEXT);
+      CREATE TABLE injection_daily_rows (id INTEGER PRIMARY KEY AUTOINCREMENT, import_id INTEGER, well_no TEXT, record_date TEXT);
+    `);
+    await run(db);
+  } finally {
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 function stageRow(wellNo: string, cycleNo: number): StageOilRow {
   return {
     wellNo, cycleNo, startDate: '2026-01-01', endDate: '2026-01-10', steamVolume: 1000,
@@ -82,6 +98,22 @@ test('keeps the last duplicate natural-key row from each imported source batch',
 
     assert.deepEqual((await listStageRows(db)).map((row) => [row.wellNo, row.cycleNo, row.steamVolume]), [['A', 1, 1200]]);
     assert.deepEqual((await listDailyRows(db)).map((row) => [row.wellNo, row.recordDate, row.dailySteam]), [['A', '2026-01-01', 180]]);
+  });
+});
+
+test('migrates legacy row tables by deduplicating rows before enforcing natural keys', async () => {
+  await withLegacyStore(async (db) => {
+    await db.exec(`
+      INSERT INTO injection_stage_rows (import_id, well_no, cycle_no, start_date) VALUES (1, 'A', 1, '2026-01-01'), (1, 'A', 1, '2026-02-01');
+      INSERT INTO injection_daily_rows (import_id, well_no, record_date) VALUES (1, 'A', '2026-01-01'), (1, 'A', '2026-01-01');
+    `);
+
+    await initInjectionSelectionTables(db);
+
+    assert.deepEqual(await db.all('SELECT start_date FROM injection_stage_rows'), [{ start_date: '2026-02-01' }]);
+    assert.equal((await db.get('SELECT COUNT(*) AS count FROM injection_daily_rows'))?.count, 1);
+    await assert.rejects(db.run("INSERT INTO injection_stage_rows (import_id, well_no, cycle_no, start_date) VALUES (1, 'A', 1, '2026-03-01')"));
+    await assert.rejects(db.run("INSERT INTO injection_daily_rows (import_id, well_no, record_date) VALUES (1, 'A', '2026-01-01')"));
   });
 });
 
