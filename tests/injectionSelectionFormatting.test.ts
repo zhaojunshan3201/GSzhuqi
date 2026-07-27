@@ -14,6 +14,13 @@ test('formats legacy selection import errors', () => {
   );
 });
 
+test('trims legacy selection import errors before formatting', () => {
+  assert.equal(
+    formatSelectionImportError('  ? 1178 ??  阶段产油不能为空  '),
+    '第 1178 行：阶段产油不能为空',
+  );
+});
+
 test('keeps already formatted selection import errors unchanged', () => {
   assert.equal(
     formatSelectionImportError('第 8 行：井号不能为空'),

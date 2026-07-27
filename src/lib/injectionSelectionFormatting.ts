@@ -17,9 +17,9 @@ export function selectionSourceLabel(source: SelectionSourceType): string {
 }
 
 export function formatSelectionImportError(message: string): string {
-  const legacyError = message.match(/^\?\s*(\d+)\s*\?\?(.*)$/);
+  const legacyError = message.trim().match(/^\?\s*(\d+)\s*\?\?(.*)$/);
   return legacyError
-    ? `第 ${legacyError[1]} 行：${legacyError[2]}`
+    ? `第 ${legacyError[1]} 行：${legacyError[2].trim()}`
     : message;
 }
 
