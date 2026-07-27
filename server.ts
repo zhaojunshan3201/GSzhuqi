@@ -30,6 +30,7 @@ import {
   upsertSelectionCycles,
   type SelectionFilter,
 } from "./src/lib/measureWellSelectionStore.ts";
+import { initInjectionSelectionTables } from "./src/lib/injectionSelectionStore.ts";
 import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts";
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
@@ -1068,6 +1069,7 @@ async function initLocalDb() {
 
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
+  await initInjectionSelectionTables(localDb);
   await initInjectionProjectTables(localDb);
   await initChannelingProjectTables(localDb);
   await initChannelingRelationImportTables(localDb);
