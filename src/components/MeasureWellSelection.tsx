@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { formatSelectionImportError, formatSelectionScoreBreakdown, selectionSourceLabel } from '../lib/injectionSelectionFormatting';
 import { requestJson } from '../lib/requestJson';
@@ -13,6 +13,14 @@ type Plan = { id: number; month: string; maxWells: number; generatedAt: string; 
 type LegacyWell = { wellName: string; block: string; station: string | null; score: number };
 type LegacyDetail = { curves: Array<{ round: number; points: Array<{ day: number; oil: number }> }> };
 type Similar = { matches: Array<{ wellName: string; block: string | null; score: number; confidence: number }> };
+
+type SelectedWellReference = { wellNo: string; cycles: Array<{ cycleNo: number; stopInjectionDate: string; metrics: { stageOil: number; oilSteamRatio: number; steamVolume: number }; points: Array<{ day: number; oil: number | null }>; missingReason: string | null }>; similarWells: Array<{ wellNo: string; similarity: number; score: number; oilSteamRatio: number; stageOil: number }>; missingReasons: string[] };
+const selectedReferenceText = { title: '\u5df2\u9009\u4e95\u6548\u679c\u53c2\u8003', x: '\u505c\u6ce8\u6c7d\u540e\u5929\u6570', y: '\u65e5\u4ea7\u6cb9', noSimilar: '\u5f53\u524d\u5019\u9009\u4e95\u4e2d\u6ca1\u6709\u53ef\u6bd4\u8f83\u7684\u540c\u7c7b\u4e95\u3002', selected: '\u5df2\u9009\u4e95', loading: '\u6b63\u5728\u52a0\u8f7d', round: '\u8f6e\u6b21', date: '\u505c\u6ce8\u6c7d\u65e5\u671f', stageOil: '\u9636\u6bb5\u4ea7\u6cb9', ratio: '\u6cb9\u6c7d\u6bd4', steam: '\u5468\u671f\u6ce8\u6c7d\u91cf', similar: '\u540c\u7c7b\u4e95', well: '\u4e95\u53f7', similarity: '\u76f8\u4f3c\u5ea6', score: '\u8bc4\u5206' };
+export function SelectedWellReferencePanel({ planItems, selectedWellNo, reference, onWellChange }: { planItems: PlanItem[]; selectedWellNo: string; reference: SelectedWellReference | null; onWellChange?: (wellNo: string) => void }) {
+  const items = planItems.filter((item) => item.decision === 'included' || item.decision === 'locked');
+  const option = { xAxis: { type: 'value', name: selectedReferenceText.x, min: 10, max: 310 }, yAxis: { type: 'value', name: selectedReferenceText.y }, series: (reference?.cycles ?? []).map((cycle) => ({ name: `\u7b2c${cycle.cycleNo}\u8f6e\uff08${cycle.stopInjectionDate}\uff09`, type: 'line', showSymbol: false, data: cycle.points.map((point) => [point.day, point.oil]) })) };
+  return <section className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">{selectedReferenceText.title}</h4><label>{selectedReferenceText.selected} <select value={selectedWellNo} onChange={(event) => onWellChange?.(event.target.value)}>{items.map((item) => <option key={item.id} value={item.wellNo}>{item.wellNo}</option>)}</select></label></div>{!reference ? <div className="p-4">{selectedReferenceText.loading}</div> : <div className="p-4 space-y-4">{reference.missingReasons.map((reason) => <div key={reason} className="text-amber-800">{reason}</div>)}{reference.cycles.length > 0 && <><>{typeof window === 'undefined' ? <div>{selectedReferenceText.x} {selectedReferenceText.y}</div> : <ReactECharts option={option} style={{ height: 300 }} />}</><table className="w-full text-sm"><thead><tr><th>{selectedReferenceText.round}</th><th>{selectedReferenceText.date}</th><th>{selectedReferenceText.stageOil}</th><th>{selectedReferenceText.ratio}</th><th>{selectedReferenceText.steam}</th></tr></thead><tbody>{reference.cycles.map((cycle) => <tr key={cycle.cycleNo}><td>{cycle.cycleNo}</td><td>{cycle.stopInjectionDate}</td><td>{cycle.metrics.stageOil}</td><td>{cycle.metrics.oilSteamRatio}</td><td>{cycle.metrics.steamVolume}</td></tr>)}</tbody></table></>}<h5>{selectedReferenceText.similar}</h5>{reference.similarWells.length ? <table className="w-full text-sm"><thead><tr><th>{selectedReferenceText.well}</th><th>{selectedReferenceText.similarity}</th><th>{selectedReferenceText.score}</th><th>{selectedReferenceText.ratio}</th><th>{selectedReferenceText.stageOil}</th></tr></thead><tbody>{reference.similarWells.map((well) => <tr key={well.wellNo}><td>{well.wellNo}</td><td>{well.similarity.toFixed(1)}</td><td>{well.score.toFixed(1)}</td><td>{well.oilSteamRatio.toFixed(3)}</td><td>{well.stageOil}</td></tr>)}</tbody></table> : <p>{selectedReferenceText.noSimilar}</p>}</div>}</section>;
+}
 
 export function SelectionImportStatusLine({ source }: { source: SourceStatus }) {
   return <div>
@@ -47,6 +55,9 @@ export function MeasureWellSelection() {
   const [savingId, setSavingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [selectedReferenceWell, setSelectedReferenceWell] = useState('');
+  const [selectedWellReference, setSelectedWellReference] = useState<SelectedWellReference | null>(null);
+  const referenceRequestSequence = useRef(0);
   const [legacyWells, setLegacyWells] = useState<LegacyWell[]>([]);
   const [selectedLegacy, setSelectedLegacy] = useState<LegacyWell | null>(null);
   const [detail, setDetail] = useState<LegacyDetail | null>(null);
@@ -70,6 +81,23 @@ export function MeasureWellSelection() {
     void requestJson<LegacyDetail>(`/api/measure-well-selection/wells/${encodeURIComponent(selectedLegacy.wellName)}?${block}`).then(setDetail).catch(() => setDetail(null));
     void requestJson<Similar>(`/api/measure-well-selection/wells/${encodeURIComponent(selectedLegacy.wellName)}/similar?${block}`).then(setSimilar).catch(() => setSimilar(null));
   }, [selectedLegacy]);
+
+  const selectablePlanItems = useMemo(() => plan?.items.filter((item) => item.decision === 'included' || item.decision === 'locked') ?? [], [plan]);
+  useEffect(() => { if (!selectablePlanItems.some((item) => item.wellNo === selectedReferenceWell)) setSelectedReferenceWell(selectablePlanItems[0]?.wellNo ?? ''); }, [selectablePlanItems, selectedReferenceWell]);
+  useEffect(() => {
+    const requestSequence = ++referenceRequestSequence.current;
+    setSelectedWellReference(null);
+    if (!plan || !selectedReferenceWell) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ wellNo: selectedReferenceWell });
+    void requestJson<SelectedWellReference>(`/api/injection-selection/plans/${plan.id}/reference?${params}`, { signal: controller.signal }).then((reference) => {
+      if (referenceRequestSequence.current === requestSequence) setSelectedWellReference(reference);
+    }).catch((cause) => {
+      if (controller.signal.aborted || referenceRequestSequence.current !== requestSequence) return;
+      setSelectedWellReference(null); showError(cause);
+    });
+    return () => controller.abort();
+  }, [plan?.id, selectedReferenceWell]);
 
   function showError(cause: unknown) { setError(cause instanceof Error ? cause.message : '操作失败'); }
   async function upload(source: 'stage' | 'daily', event: ChangeEvent<HTMLInputElement>) {
@@ -125,10 +153,11 @@ export function MeasureWellSelection() {
     </section>
     {!bothSourcesReady && <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{'\u8bf7\u5148\u5bfc\u5165\u9636\u6bb5\u4ea7\u6cb9\u548c\u6ce8\u6c7d\u65e5\u6570\u636e\uff0c\u624d\u80fd\u91cd\u5efa\u5019\u9009\u4e95\u3002'}</div>}{bothSourcesReady && !rebuildComplete && <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{'\u4e24\u4efd\u6570\u636e\u5df2\u9f50\u5168\uff0c\u8bf7\u6210\u529f\u91cd\u5efa\u5019\u9009\u4e95\u540e\u518d\u751f\u6210\u6ce8\u6c7d\u8ba1\u5212\u3002'}</div>}
     {error && <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}{message && <div className="rounded border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div>}
+    {plan && selectablePlanItems.length > 0 && <SelectedWellReferencePanel planItems={plan.items} selectedWellNo={selectedReferenceWell} reference={selectedWellReference} onWellChange={setSelectedReferenceWell} />}
     <section className="app-card overflow-hidden"><div className="app-card-header flex flex-wrap items-center justify-between gap-2"><div><h4 className="font-bold text-slate-800">候选井与月度注汽计划</h4><SelectionScoringExplanation /></div>{plan && <a className="rounded border border-emerald-600 px-3 py-2 text-sm font-bold text-emerald-700" href={`/api/injection-selection/plans/${plan.id}.xlsx`}>导出 Excel</a>}</div>
       {!plan ? <div className="p-5 text-sm text-slate-500">{candidates.length ? `已重建 ${candidates.length} 口候选井,请选择目标月份生成注汽计划。` : '请先导入两份数据并重建候选井。'}</div> : <div className="overflow-x-auto"><table className="w-full min-w-[1180px] text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-3 py-3">{'\u8bc4\u5206\u4f9d\u636e'}</th>{['顺序','井号','评分','油汽比','阶段产油','建议注汽量','推荐锅炉','氮气','二氧化碳','人工决定','备注'].map((name) => <th key={name} className="px-3 py-3">{name}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{plan.items.map((item) => <tr key={item.id}><td className="px-3 py-3 text-xs text-slate-600"><SelectionScoreBreakdownText scoreBreakdown={item.scoreBreakdown} /></td><td className="px-3 py-3">{item.rankNo}</td><td className="px-3 py-3 font-semibold">{item.wellNo}</td><td className="px-3 py-3">{item.score.toFixed(1)}</td><td className="px-3 py-3">{item.oilSteamRatio.toFixed(3)}</td><td className="px-3 py-3">{item.stageOil}</td><td className="px-3 py-3"><input aria-label={`${item.wellNo}建议注汽量`} className="w-24 rounded border px-2 py-1" type="number" defaultValue={item.suggestedSteam ?? ''} onBlur={(event) => void patchItem(item, { suggestedSteam: event.target.value === '' ? null : Number(event.target.value) })} /></td><td className="px-3 py-3"><input aria-label={`${item.wellNo}推荐锅炉`} className="w-28 rounded border px-2 py-1" defaultValue={item.recommendedBoiler ?? ''} onBlur={(event) => void patchItem(item, { recommendedBoiler: event.target.value || null })} /></td><td className="px-3 py-3">{item.nitrogen ? '是' : '否'}</td><td className="px-3 py-3">{item.carbonDioxide ? '是' : '否'}</td><td className="px-3 py-3"><select aria-label={`${item.wellNo}人工决定`} className="rounded border px-2 py-1" value={item.decision} onChange={(event) => void patchItem(item, { decision: event.target.value as PlanDecision })}><option value="included">纳入</option><option value="locked">锁定</option><option value="excluded">剔除</option></select></td><td className="px-3 py-3"><input aria-label={`${item.wellNo}备注`} className="rounded border px-2 py-1" defaultValue={item.manualNote ?? ''} onBlur={(event) => void patchItem(item, { manualNote: event.target.value || null })} />{savingId === item.id && <small className="ml-1 text-slate-400">保存中…</small>}</td></tr>)}</tbody></table></div>}
     </section>
     {(excluded.length > 0 || candidates.some((candidate) => candidate.qualityReasons.length > 0)) && <section className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">{'\u6392\u9664\u4e95\u4e0e\u6570\u636e\u8d28\u91cf\u63d0\u793a'}</h4></div><div className="divide-y divide-slate-100 text-sm">{excluded.map((item) => <div key={`excluded-${item.wellNo}`} className="px-4 py-3"><b>{item.wellNo}</b><span className="ml-3 text-amber-700">{item.reason}</span></div>)}{candidates.filter((candidate) => candidate.qualityReasons.length > 0).map((candidate) => <div key={`quality-${candidate.wellNo}`} className="px-4 py-3"><b>{candidate.wellNo}</b><span className="ml-3 text-amber-700">{candidate.qualityReasons.join('\uff1b')}</span></div>)}</div></section>}
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.7fr)]"><section className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">历史选井列表</h4></div><div className="max-h-[360px] overflow-y-auto">{legacyWells.map((well) => <button key={`${well.block}-${well.wellName}`} className="flex w-full justify-between border-b px-4 py-3 text-left hover:bg-slate-50" onClick={() => setSelectedLegacy(well)}><span>{well.wellName}<small className="ml-2 text-slate-400">{well.block}</small></span><b>{well.score.toFixed(1)}</b></button>)}{!legacyWells.length && <div className="p-4 text-sm text-slate-400">暂无历史曲线数据。</div>}</div></section><section className="space-y-6"><div className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">历史近三轮日产油曲线</h4></div><ReactECharts option={chartOption} style={{ height: 300 }} /></div><div className="app-card overflow-hidden"><div className="app-card-header"><h4 className="font-bold text-slate-800">同类井</h4></div><div className="p-4 text-sm text-slate-600">{similar?.matches.length ? similar.matches.map((match) => <div key={`${match.block}-${match.wellName}`} className="border-b py-2">{match.wellName} · {match.block ?? '--'} · 相似度 {match.score.toFixed(1)} · 置信度 {(match.confidence * 100).toFixed(0)}%</div>) : '暂无可比较的同类井数据。'}</div></div></section></div>
+
   </div>;
 }

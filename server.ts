@@ -43,6 +43,7 @@ import {
 } from "./src/lib/injectionSelectionStore.ts";
 import { parseDailyInjectionWorkbook, parseStageOilWorkbook } from "./src/lib/injectionSelectionData.ts";
 import { buildBoilerEffects, buildSelectionCandidates, createMonthlyPlan, toPlanExportRows } from "./src/lib/injectionSelectionPlanner.ts";
+import { buildSelectedWellReference } from "./src/lib/injectionSelectionReference.ts";
 import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts";
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
@@ -3420,6 +3421,32 @@ async function startServer() {
       res.json({ success: true, data: plan });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error?.message || "Injection plan update failed" });
+    }
+  });
+
+  app.get("/api/injection-selection/plans/:planId/reference", async (req, res) => {
+    const planId = Number(req.params.planId);
+    const wellNo = String(req.query.wellNo || "").trim();
+    if (!Number.isInteger(planId) || planId <= 0 || !wellNo) {
+      res.status(400).json({ success: false, message: "Invalid reference parameters" });
+      return;
+    }
+    try {
+      const plan = await getPlanById(localDb, planId);
+      if (!plan || !plan.items.some((item) => item.wellNo === wellNo && (item.decision === "included" || item.decision === "locked"))) {
+        res.status(404).json({ success: false, message: "Selected plan well not found" });
+        return;
+      }
+      const [stageRows, dailyRows, production] = await Promise.all([
+        listStageRows(localDb),
+        listDailyRows(localDb),
+        localDb.all("SELECT jh AS wellNo, rq AS date, oil FROM production WHERE jh = ? ORDER BY rq ASC", [wellNo]),
+      ]);
+      const candidates = buildSelectionCandidates(stageRows, dailyRows);
+      const data = buildSelectedWellReference({ wellNo, stageRows, production, candidates });
+      res.json({ success: true, data });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Selected well reference failed" });
     }
   });
 

@@ -66,3 +66,52 @@ test('renders readable import diagnostics and score evidence', () => {
   assert.equal(breakdown, '<span>油汽比 55/60；阶段产油 18/20；稳定性 8/10；日数据完整性 9/10</span>');
   assert.doesNotMatch(breakdown, /\?/);
 });
+
+test('renders selected-well reference data before the monthly plan', async () => {
+  const { SelectedWellReferencePanel } = await import('../src/components/MeasureWellSelection.tsx');
+  const markup = renderToStaticMarkup(createElement(SelectedWellReferencePanel, {
+    planItems: [{ id: 1, rankNo: 1, wellNo: 'A-01', score: 88, suggestedSteam: null, recommendedBoiler: null, nitrogen: false, carbonDioxide: false, oilSteamRatio: 0.42, stageOil: 120, decision: 'included', manualNote: null, scoreBreakdown: { oilSteamRatio: { score: 1, value: 1, maxScore: 1 }, stageOil: { score: 1, value: 1, maxScore: 1 }, stability: { score: 1, value: 1, maxScore: 1 }, dailyCompleteness: { score: 1, value: 1, maxScore: 1 } } }],
+    selectedWellNo: 'A-01',
+    reference: { wellNo: 'A-01', cycles: [{ cycleNo: 3, stopInjectionDate: '2026-01-01', metrics: { stageOil: 12.3, oilSteamRatio: 0.45, steamVolume: 90 }, points: [{ day: 10, oil: 3.2 }, { day: 11, oil: null }], missingReason: null }], similarWells: [{ wellNo: 'B-02', similarity: 92, score: 86, oilSteamRatio: 0.4, stageOil: 100 }], missingReasons: [] },
+  }));
+  assert.ok(markup.includes('\u5df2\u9009\u4e95\u6548\u679c\u53c2\u8003'));
+  assert.ok(markup.includes('\u505c\u6ce8\u6c7d\u65e5\u671f'));
+  assert.ok(markup.includes('\u9636\u6bb5\u4ea7\u6cb9'));
+  assert.ok(markup.includes('\u540c\u7c7b\u4e95'));
+  assert.match(markup, /B-02/);
+  assert.match(markup, /12\.3/);
+  assert.match(markup, /0\.45/);
+  assert.match(markup, /90/);
+  const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
+  assert.ok(component.indexOf('planItems={plan.items}') < component.lastIndexOf('SelectionScoringExplanation'));
+  assert.match(component, /\/api\/injection-selection\/plans\/\$\{plan\.id\}\/reference\?\$\{params\}/);
+});
+
+test('renders the API missing reason instead of fabricated selected-well reference data', async () => {
+  const { SelectedWellReferencePanel } = await import('../src/components/MeasureWellSelection.tsx');
+  const markup = renderToStaticMarkup(createElement(SelectedWellReferencePanel, {
+    planItems: [{ id: 1, rankNo: 1, wellNo: 'A-01', score: 88, suggestedSteam: null, recommendedBoiler: null, nitrogen: false, carbonDioxide: false, oilSteamRatio: 0.42, stageOil: 120, decision: 'locked', manualNote: null, scoreBreakdown: { oilSteamRatio: { score: 1, value: 1, maxScore: 1 }, stageOil: { score: 1, value: 1, maxScore: 1 }, stability: { score: 1, value: 1, maxScore: 1 }, dailyCompleteness: { score: 1, value: 1, maxScore: 1 } } }],
+    selectedWellNo: 'A-01',
+    reference: { wellNo: 'A-01', cycles: [], similarWells: [], missingReasons: ['\u505c\u6ce8\u6c7d\u540e\u7b2c10\u81f3310\u5929\u7f3a\u5c11\u751f\u4ea7\u65e5\u62a5\u65e5\u4ea7\u6cb9\u6570\u636e'] },
+  }));
+  assert.ok(markup.includes('\u505c\u6ce8\u6c7d\u540e\u7b2c10\u81f3310\u5929\u7f3a\u5c11\u751f\u4ea7\u65e5\u62a5\u65e5\u4ea7\u6cb9\u6570\u636e'));
+  assert.doesNotMatch(markup, /B-02/);
+});
+
+
+test('selected-well reference hides without an eligible plan item and ignores stale requests', () => {
+  const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
+  assert.match(component, /plan && selectablePlanItems\.length > 0/);
+  assert.match(component, /item\.decision === 'included' \|\| item\.decision === 'locked'/);
+  assert.match(component, /new AbortController\(\)/);
+  assert.match(component, /setSelectedWellReference\(null\);/);
+  assert.match(component, /referenceRequestSequence\.current === requestSequence/);
+  assert.match(component, /controller\.abort\(\)/);
+});
+
+test('selected-well reference preserves null chart points and exposes all required tables', () => {
+  const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
+  assert.match(component, /data: cycle\.points\.map\(\(point\) => \[point\.day, point\.oil\]\)/);
+  assert.doesNotMatch(component, /point\.oil \?\? 0/);
+  for (const token of ['missingReasons', 'similarWells', 'cycle.metrics.stageOil', 'cycle.metrics.oilSteamRatio', 'cycle.metrics.steamVolume']) assert.ok(component.includes(token));
+});
