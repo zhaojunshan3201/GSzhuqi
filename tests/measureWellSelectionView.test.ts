@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import test from 'node:test';
+
+import {
+  SelectionImportStatusLine,
+  SelectionScoreBreakdownText,
+  SelectionScoringExplanation,
+} from '../src/components/MeasureWellSelection.tsx';
 
 test('renders independent data imports and monthly injection plan controls', () => {
   const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
@@ -30,14 +38,31 @@ test('requires both sources and a successful rebuild before plan generation, whi
   assert.match(component, /disabled=\{generating \|\| !month \|\| !bothSourcesReady \|\| !rebuildComplete\}/);
 });
 
-test('formats selection import diagnostics and explains the 100 point score', () => {
-  const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
-  for (const value of [
-    'formatSelectionImportError',
-    'formatSelectionScoreBreakdown',
-    'selectionSourceLabel',
-    '总分为四项之和，满分 100 分',
-  ]) assert.match(component, new RegExp(value));
-  assert.doesNotMatch(component, /(?:导入错误|\\u5bfc\\u5165\\u9519\\u8bef)\?/);
-  assert.doesNotMatch(component, /\}\?\\u9636\\u6bb5\\u4ea7\\u6cb9/);
+test('renders readable import diagnostics and score evidence', () => {
+  const status = renderToStaticMarkup(createElement(SelectionImportStatusLine, {
+    source: {
+      sourceType: 'stage',
+      sourceFile: 'stage.xlsx',
+      importedAt: '2026-07-28T00:00:00.000Z',
+      rowCount: 1,
+      skippedRowCount: 1,
+      errorMessages: ['? 1178 ??阶段产油不能为空'],
+    },
+  }));
+  assert.match(status, /阶段产油：跳过 1 行/);
+  assert.match(status, /导入错误：第 1178 行：阶段产油不能为空/);
+  assert.doesNotMatch(status, /\?/);
+
+  const explanation = renderToStaticMarkup(createElement(SelectionScoringExplanation));
+  assert.match(explanation, /总分为四项之和，满分 100 分/);
+  const breakdown = renderToStaticMarkup(createElement(SelectionScoreBreakdownText, {
+    scoreBreakdown: {
+      oilSteamRatio: { score: 55, value: 0.5, maxScore: 60 },
+      stageOil: { score: 18, value: 300, maxScore: 20 },
+      stability: { score: 8, value: 0.8, maxScore: 10 },
+      dailyCompleteness: { score: 9, value: 0.9, maxScore: 10 },
+    },
+  }));
+  assert.equal(breakdown, '<span>油汽比 55/60；阶段产油 18/20；稳定性 8/10；日数据完整性 9/10</span>');
+  assert.doesNotMatch(breakdown, /\?/);
 });
