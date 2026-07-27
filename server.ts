@@ -3456,11 +3456,11 @@ async function startServer() {
       const workbook = XLSX.read(file.buffer, { type: "buffer" });
       if (source === "stage") {
         const parsed = parseStageOilWorkbook(workbook);
-        await replaceSelectionSource(localDb, "stage", decodeUploadedFileName(file.originalname), parsed.rows, { skippedRowCount: parsed.skippedRows.length, errorMessages: parsed.skippedRows.map((row) => `? ${row.rowNumber} ??${row.reason}`) });
+        await replaceSelectionSource(localDb, "stage", decodeUploadedFileName(file.originalname), parsed.rows, { skippedRowCount: parsed.skippedRows.length, errorMessages: parsed.skippedRows.map((row) => `第 ${row.rowNumber} 行：${row.reason}`) });
         res.json({ success: true, data: parsed });
       } else {
         const parsed = parseDailyInjectionWorkbook(workbook);
-        await replaceSelectionSource(localDb, "daily", decodeUploadedFileName(file.originalname), parsed.rows, { skippedRowCount: parsed.skippedRows.length, errorMessages: parsed.skippedRows.map((row) => `? ${row.rowNumber} ??${row.reason}`) });
+        await replaceSelectionSource(localDb, "daily", decodeUploadedFileName(file.originalname), parsed.rows, { skippedRowCount: parsed.skippedRows.length, errorMessages: parsed.skippedRows.map((row) => `第 ${row.rowNumber} 行：${row.reason}`) });
         res.json({ success: true, data: parsed });
       }
     } catch (error: any) {

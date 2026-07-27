@@ -29,3 +29,15 @@ test('requires both sources and a successful rebuild before plan generation, whi
   assert.match(component, /disabled=\{rebuilding \|\| !bothSourcesReady\}/);
   assert.match(component, /disabled=\{generating \|\| !month \|\| !bothSourcesReady \|\| !rebuildComplete\}/);
 });
+
+test('formats selection import diagnostics and explains the 100 point score', () => {
+  const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
+  for (const value of [
+    'formatSelectionImportError',
+    'formatSelectionScoreBreakdown',
+    'selectionSourceLabel',
+    '总分为四项之和，满分 100 分',
+  ]) assert.match(component, new RegExp(value));
+  assert.doesNotMatch(component, /(?:导入错误|\\u5bfc\\u5165\\u9519\\u8bef)\?/);
+  assert.doesNotMatch(component, /\}\?\\u9636\\u6bb5\\u4ea7\\u6cb9/);
+});

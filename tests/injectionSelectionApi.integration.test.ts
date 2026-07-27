@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+
+test('persists skipped import rows with a readable line prefix', () => {
+  const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(server, /`\? \$\{row\.rowNumber\} \?\?\$\{row\.reason\}`/);
+  assert.match(server, /`第 \$\{row\.rowNumber\} 行：\$\{row\.reason\}`/);
+});
 
 test('exposes injection-selection status and rejects a malformed plan month', { timeout: 30000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'injection-selection-api-'));
