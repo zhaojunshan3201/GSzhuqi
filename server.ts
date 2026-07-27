@@ -30,6 +30,19 @@ import {
   upsertSelectionCycles,
   type SelectionFilter,
 } from "./src/lib/measureWellSelectionStore.ts";
+import {
+  getPlan,
+  getPlanById,
+  initInjectionSelectionTables,
+  listDailyRows,
+  listSelectionSourceStatus,
+  listStageRows,
+  replaceSelectionSource,
+  savePlan,
+  updatePlanItem,
+} from "./src/lib/injectionSelectionStore.ts";
+import { parseDailyInjectionWorkbook, parseStageOilWorkbook } from "./src/lib/injectionSelectionData.ts";
+import { buildBoilerEffects, buildSelectionCandidates, createMonthlyPlan, toPlanExportRows } from "./src/lib/injectionSelectionPlanner.ts";
 import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts";
 import { buildSelectionCyclesFromTrackingRows } from "./src/lib/measureWellSelectionData.ts";
@@ -1068,6 +1081,7 @@ async function initLocalDb() {
 
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
+  await initInjectionSelectionTables(localDb);
   await initInjectionProjectTables(localDb);
   await initChannelingProjectTables(localDb);
   await initChannelingRelationImportTables(localDb);
@@ -3321,6 +3335,138 @@ async function startServer() {
       res.status(clientError ? 400 : 500).json({ success: false, message });
     }
   });
+
+  app.post("/api/injection-selection/import/stage", measureWellSelectionImportUploadMiddleware, async (req, res) => {
+    await importInjectionSelectionSource('stage', req, res);
+  });
+
+  app.post("/api/injection-selection/import/daily", measureWellSelectionImportUploadMiddleware, async (req, res) => {
+    await importInjectionSelectionSource('daily', req, res);
+  });
+
+  app.get("/api/injection-selection/data-status", async (_req, res) => {
+    try {
+      res.json({ success: true, data: { sources: await listSelectionSourceStatus(localDb) } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Injection selection data status failed" });
+    }
+  });
+
+  app.post("/api/injection-selection/rebuild", async (_req, res) => {
+    try {
+      const stageRows = await listStageRows(localDb);
+      const dailyRows = await listDailyRows(localDb);
+      const candidates = buildSelectionCandidates(stageRows, dailyRows);
+      res.json({ success: true, data: { candidates: [...candidates], excluded: candidates.excluded, boilerEffects: Object.fromEntries(buildBoilerEffects(stageRows, dailyRows)) } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Selection candidate rebuild failed" });
+    }
+  });
+
+  app.post("/api/injection-selection/plans", async (req, res) => {
+    const month = String(req.body?.month || "").trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      res.status(400).json({ success: false, message: "month must use YYYY-MM" });
+      return;
+    }
+    try {
+      const stageRows = await listStageRows(localDb);
+      const dailyRows = await listDailyRows(localDb);
+      const candidates = buildSelectionCandidates(stageRows, dailyRows);
+      const plan = await savePlan(localDb, createMonthlyPlan(month, candidates, dailyRows, buildBoilerEffects(stageRows, dailyRows)));
+      res.json({ success: true, data: plan });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Injection plan operation failed" });
+    }
+  });
+
+  app.get("/api/injection-selection/plans", async (req, res) => {
+    const month = String(req.query.month || "").trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      res.status(400).json({ success: false, message: "month must use YYYY-MM" });
+      return;
+    }
+    try {
+      const plan = await getPlan(localDb, month);
+      if (!plan) {
+        res.status(404).json({ success: false, message: "Injection plan not found" });
+        return;
+      }
+      res.json({ success: true, data: plan });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Injection plan operation failed" });
+    }
+  });
+
+  app.patch("/api/injection-selection/plans/:planId/items/:itemId", async (req, res) => {
+    const planId = Number(req.params.planId);
+    const itemId = Number(req.params.itemId);
+    const body = req.body;
+    const allowed = new Set(["decision", "manualNote", "suggestedSteam", "recommendedBoiler"]);
+    if (!Number.isInteger(planId) || planId <= 0 || !Number.isInteger(itemId) || itemId <= 0 || !body || typeof body !== "object" || !Object.keys(body).length || Object.keys(body).some((key) => !allowed.has(key)) ||
+      (body.decision !== undefined && !["included", "locked", "excluded"].includes(body.decision)) ||
+      (body.manualNote !== undefined && body.manualNote !== null && typeof body.manualNote !== "string") ||
+      (body.suggestedSteam !== undefined && body.suggestedSteam !== null && (typeof body.suggestedSteam !== "number" || !Number.isFinite(body.suggestedSteam) || body.suggestedSteam < 0)) ||
+      (body.recommendedBoiler !== undefined && body.recommendedBoiler !== null && typeof body.recommendedBoiler !== "string")) {
+      res.status(400).json({ success: false, message: "Invalid plan update" });
+      return;
+    }
+    try {
+      const plan = await updatePlanItem(localDb, planId, itemId, body);
+      if (!plan) {
+        res.status(404).json({ success: false, message: "Plan item not found" });
+        return;
+      }
+      res.json({ success: true, data: plan });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Injection plan update failed" });
+    }
+  });
+
+  app.get("/api/injection-selection/plans/:planId.xlsx", async (req, res) => {
+    const planId = Number(req.params.planId);
+    if (!Number.isInteger(planId) || planId <= 0) {
+      res.status(400).json({ success: false, message: "Invalid plan id" });
+      return;
+    }
+    try {
+      const plan = await getPlanById(localDb, planId);
+      if (!plan) {
+        res.status(404).json({ success: false, message: "Plan item not found" });
+        return;
+      }
+      const worksheet = XLSX.utils.json_to_sheet(toPlanExportRows(plan));
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Injection Plan");
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.attachment(encodeURIComponent(`injection-selection-plan-${plan.month}.xlsx`));
+      res.send(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Injection plan export failed" });
+    }
+  });
+
+  async function importInjectionSelectionSource(source: "stage" | "daily", req: express.Request, res: express.Response) {
+    const file = (req as any).file;
+    if (!file || !file.originalname.toLowerCase().endsWith(".xlsx")) {
+      res.status(400).json({ success: false, message: "Please upload a .xlsx file" });
+      return;
+    }
+    try {
+      const workbook = XLSX.read(file.buffer, { type: "buffer" });
+      if (source === "stage") {
+        const parsed = parseStageOilWorkbook(workbook);
+        await replaceSelectionSource(localDb, "stage", decodeUploadedFileName(file.originalname), parsed.rows, { skippedRowCount: parsed.skippedRows.length, errorMessages: parsed.skippedRows.map((row) => `? ${row.rowNumber} ??${row.reason}`) });
+        res.json({ success: true, data: parsed });
+      } else {
+        const parsed = parseDailyInjectionWorkbook(workbook);
+        await replaceSelectionSource(localDb, "daily", decodeUploadedFileName(file.originalname), parsed.rows, { skippedRowCount: parsed.skippedRows.length, errorMessages: parsed.skippedRows.map((row) => `? ${row.rowNumber} ??${row.reason}`) });
+        res.json({ success: true, data: parsed });
+      }
+    } catch (error: any) {
+      res.status(400).json({ success: false, message: error?.message || "Injection selection workbook parsing failed" });
+    }
+  }
 
   app.get("/api/measure-well-selection/wells", async (req, res) => {
     try {

@@ -90,16 +90,16 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
     if (!needsData && status === 'pendingTransfer' && days > 7) alerts.push({ id: `transfer-overdue:${row.jh}`, type: 'transferOverdue', wellNo: row.jh, block: row.block || '', message: '待转抽超过 7 天', target: 'measures' });
     return { wellNo: row.jh, block: row.block || '', status, evaluation: row.evaluation || null };
   });
-  const blockCycleRows = await db.all(`SELECT well_name, actual_steam, cycle_oil FROM measure_well_cycles`);
+  const blockCycleRows = await db.all(`SELECT well_no, steam_volume, stage_oil FROM injection_stage_rows`);
   let steam = 0;
   let cycleOil = 0;
   for (const row of blockCycleRows) {
-    const actualSteam = finiteNumber(row.actual_steam);
-    const cycleOilValue = finiteNumber(row.cycle_oil);
+    const actualSteam = finiteNumber(row.steam_volume);
+    const cycleOilValue = finiteNumber(row.stage_oil);
     if (actualSteam == null || actualSteam <= 0 || cycleOilValue == null) continue;
     steam += actualSteam;
     cycleOil += cycleOilValue;
-    const block = blockByWell.get(String(row.well_name).trim());
+    const block = blockByWell.get(String(row.well_no).trim());
     if (!block) continue;
     const blockPerformance = blockPerformanceByName.get(block)!;
     blockPerformance.steam += actualSteam;
@@ -107,7 +107,7 @@ export async function buildInjectionProductionCockpit(db: DatabaseLike, options:
   }
   const productionDate = (await db.all(`SELECT MAX(rq) AS updated_at FROM production`))[0]?.updated_at || null;
   const trackingDate = (await db.all(`SELECT MAX(current_round_transfer_time) AS updated_at FROM measure_tracking`))[0]?.updated_at || null;
-  const selectionDate = (await db.all(`SELECT MAX(imported_at) AS updated_at FROM measure_well_imports`))[0]?.updated_at || null;
+  const selectionDate = (await db.all(`SELECT MAX(imported_at) AS updated_at FROM injection_selection_imports WHERE source_type = 'stage'`))[0]?.updated_at || null;
   const productionStatus = options.syncStatus?.lastSyncStatus === 'error' ? 'failed' : productionDate ? 'normal' : 'missing';
   return {
     generatedAt: options.now,
