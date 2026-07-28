@@ -43,6 +43,7 @@ import {
 } from "./src/lib/injectionSelectionStore.ts";
 import { parseDailyInjectionWorkbook, parseStageOilWorkbook } from "./src/lib/injectionSelectionData.ts";
 import { buildBoilerEffects, buildSelectionCandidates, createMonthlyPlan, toPlanExportRows } from "./src/lib/injectionSelectionPlanner.ts";
+import { buildYearEndPlans, evaluateSelectionEligibility, type PlanMode, type ProductionOilPoint } from "./src/lib/injectionSelectionAnnualPlan.ts";
 import { buildSelectedWellReference } from "./src/lib/injectionSelectionReference.ts";
 import { importMeasureWellWorkbook } from "./src/lib/measureWellImport.ts";
 import { alignOilCurve, evaluateWells } from "./src/lib/measureWellSelection.ts";
@@ -88,6 +89,47 @@ const MEASURE_IMPORT_FILE_LIMIT_BYTES = 50 * 1024 * 1024;
 const WATER_CUT_FORMULA_VERSION = "2026-04-14-v4";
 const GAS_FORMULA_VERSION = "2026-04-14-v2";
 const LOCAL_ONLY_MODE = process.env.LOCAL_ONLY === "true";
+
+function nextInjectionPlanMonth(now = new Date()): string {
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function actualInjectionStartsByWell(rows: readonly any[]): Map<string, string[]> {
+  const starts = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const wellNo = String(row.jh ?? "").trim();
+    if (!wellNo) continue;
+    const dates = [row.current_round_transfer_time, ...datesInTrackingDetail(row.detail_json)].filter(isIsoDate);
+    if (!dates.length) continue;
+    const values = starts.get(wellNo) ?? new Set<string>();
+    for (const date of dates) values.add(date);
+    starts.set(wellNo, values);
+  }
+  return new Map([...starts].map(([wellNo, values]) => [wellNo, [...values].sort()]));
+}
+
+function datesInTrackingDetail(detailJson: unknown): string[] {
+  if (typeof detailJson !== "string" || !detailJson.trim()) return [];
+  try {
+    return [...detailJson.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)].map((match) => match[0]);
+  } catch {
+    return [];
+  }
+}
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function latestActualOilByWell(production: readonly ProductionOilPoint[]): Map<string, number> {
+  const oilByWell = new Map<string, number>();
+  for (const row of production) {
+    if (typeof row.oil === "number" && Number.isFinite(row.oil) && row.oil >= 0) oilByWell.set(row.wellNo, row.oil);
+  }
+  return oilByWell;
+}
+
 function resolveAuthTokenSecret() {
   const configuredSecret = process.env.AUTH_TOKEN_SECRET?.trim();
   if (configuredSecret) return configuredSecret;
@@ -3378,6 +3420,75 @@ async function startServer() {
       res.json({ success: true, data: plan });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error?.message || "Injection plan operation failed" });
+    }
+  });
+
+  app.post("/api/injection-selection/plans/generate", async (req, res) => {
+    const mode = req.body?.mode;
+    if (mode !== "next-month" && mode !== "year-end") {
+      res.status(400).json({ success: false, message: "mode must be next-month or year-end" });
+      return;
+    }
+    try {
+      const month = nextInjectionPlanMonth();
+      const targetYear = month.slice(0, 4);
+      const [stageRows, dailyRows, productionRows, importedRows, trackingRows] = await Promise.all([
+        listStageRows(localDb),
+        listDailyRows(localDb),
+        localDb.all("SELECT jh AS wellNo, rq AS date, oil FROM production WHERE jh IS NOT NULL AND rq IS NOT NULL ORDER BY jh ASC, rq ASC"),
+        localDb.all("SELECT DISTINCT r.well_no AS wellNo FROM injection_plan_import_rows r JOIN injection_plan_imports i ON i.id = r.import_id WHERE i.status = 'confirmed' AND r.row_class = 'valid' AND r.well_no IS NOT NULL AND TRIM(r.well_no) != ''"),
+        localDb.all("SELECT jh, current_round_transfer_time, detail_json, batch_year FROM measure_tracking WHERE batch_year = ?", [targetYear]),
+      ]);
+      const production = productionRows as ProductionOilPoint[];
+      const importedWellNos = new Set(importedRows.map((row: any) => String(row.wellNo).trim()));
+      const actualStarts = actualInjectionStartsByWell(trackingRows);
+      const latestActualOil = latestActualOilByWell(production);
+      const candidates = buildSelectionCandidates(stageRows, dailyRows);
+
+      if (mode === "next-month") {
+        const planDate = `${month}-01`;
+        const evaluated = candidates.map((candidate) => ({
+          candidate,
+          evidence: evaluateSelectionEligibility({
+            mode: "next-month", planDate, wellNo: candidate.wellNo,
+            latestActualOil: latestActualOil.get(candidate.wellNo) ?? null,
+            cycles: candidate.validCycles, production, importedWellNos,
+            actualStarts: actualStarts.get(candidate.wellNo) ?? [],
+          }),
+        }));
+        const plan = await savePlan(localDb, createMonthlyPlan(month, evaluated.filter((item) => item.evidence.eligible).map((item) => item.candidate), dailyRows, buildBoilerEffects(stageRows, dailyRows)));
+        res.json({
+          success: true,
+          data: {
+            mode,
+            plan,
+            evidence: evaluated.map(({ candidate, evidence }) => ({ wellNo: candidate.wellNo, score: candidate.score, ...evidence })),
+            excluded: evaluated.filter((item) => !item.evidence.eligible).map(({ candidate, evidence }) => ({ wellNo: candidate.wellNo, score: candidate.score, ...evidence })),
+          },
+        });
+        return;
+      }
+
+      const candidateByWell = new Map(candidates.map((candidate) => [candidate.wellNo, candidate]));
+      const months = buildYearEndPlans({
+        startMonth: month,
+        candidates: candidates.map((candidate) => ({
+          wellNo: candidate.wellNo,
+          score: candidate.score,
+          latestActualOil: latestActualOil.get(candidate.wellNo) ?? null,
+          cycles: candidate.validCycles,
+          actualStarts: actualStarts.get(candidate.wellNo) ?? [],
+        })),
+        production,
+        importedWellNos,
+      }).map((plan) => ({
+        ...plan,
+        items: plan.items.map((item) => ({ ...item, source: candidateByWell.get(item.wellNo) })),
+        excluded: plan.excluded.map((item) => ({ ...item, source: candidateByWell.get(item.wellNo) })),
+      }));
+      res.json({ success: true, data: { mode: mode as PlanMode, months } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error?.message || "Injection plan generation failed" });
     }
   });
 
