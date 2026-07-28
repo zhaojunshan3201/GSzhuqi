@@ -35,7 +35,7 @@ test('requires both sources and a successful rebuild before plan generation, whi
   const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
   for (const value of ['bothSourcesReady', 'rebuildComplete', 'excluded', 'qualityReasons', 'scoreBreakdown', 'skippedRowCount', 'errorMessages']) assert.match(component, new RegExp(value));
   assert.match(component, /disabled=\{rebuilding \|\| !bothSourcesReady\}/);
-  assert.match(component, /disabled=\{generating \|\| !month \|\| !bothSourcesReady \|\| !rebuildComplete\}/);
+  assert.match(component, /disabled=\{generating \|\| !bothSourcesReady \|\| !rebuildComplete\}/);
 });
 
 test('renders readable import diagnostics and score evidence', () => {
@@ -116,4 +116,22 @@ test('selected-well reference preserves null chart points and exposes all requir
   assert.match(component, /table-fixed/);
   assert.match(component, /text-center/);
   for (const token of ['missingReasons', 'similarWells', 'cycle.metrics.stageOil', 'cycle.metrics.oilSteamRatio', 'cycle.metrics.steamVolume']) assert.ok(component.includes(token));
+});
+
+test('renders next-month and year-end generation modes with oil eligibility evidence and annual export', () => {
+  const component = readFileSync(new URL('../src/components/MeasureWellSelection.tsx', import.meta.url), 'utf8');
+  for (const value of [
+    '/api/injection-selection/plans/generate',
+    'next-month',
+    'year-end',
+    '生成下个月计划',
+    '生成至年末计划',
+    '最新实际底产',
+    '预测底产',
+    '最小可注汽日期',
+    '资格说明',
+    'Blob',
+  ]) assert.ok(component.includes(value), `missing ${value}`);
+  assert.match(component, /created\.evidence/);
+  assert.match(component, /nextMonthEvidence/);
 });
