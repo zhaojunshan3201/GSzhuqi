@@ -18,14 +18,14 @@ const production: ProductionOilPoint[] = [
 test('uses the latest actual oil for the next-month plan and rejects oil above 1.5', () => {
   const result = evaluateSelectionEligibility({ mode: 'next-month', planDate: '2026-08-01', wellNo: 'A-1', latestActualOil: 1.6, cycles: [], production: [], importedWellNos: new Set(), actualStarts: [] });
   assert.equal(result.eligible, false);
-  assert.match(result.reason, /×îÐÂµ×²ú.*1.5/);
+  assert.match(result.reason, /æœ€æ–°åº•äº§.*1.5/);
   assert.equal(result.oilSource, 'actual');
 });
 
 test('rejects an imported plan well before evaluating oil evidence', () => {
   const result = evaluateSelectionEligibility({ mode: 'next-month', planDate: '2026-08-01', wellNo: 'A-1', latestActualOil: 0.8, cycles: [], production: [], importedWellNos: new Set(['A-1']), actualStarts: [] });
   assert.equal(result.eligible, false);
-  assert.match(result.reason, /ÒÑÈ·ÈÏµ¼Èë/);
+  assert.match(result.reason, /å·²ç¡®è®¤å¯¼å…¥/);
 });
 
 test('predicts year-end oil from aligned cycles and enforces the half-interval rule', () => {
@@ -40,7 +40,7 @@ test('rejects when the planned date is before half of the latest actual injectio
   const result = evaluateSelectionEligibility({ mode: 'next-month', planDate: '2025-11-01', wellNo: 'A-1', latestActualOil: 1, actualStarts: ['2025-01-01', '2025-09-08'], importedWellNos: new Set(), cycles, production });
   assert.equal(result.eligible, false);
   assert.equal(result.minimumEligibleDate, '2026-01-11');
-  assert.match(result.reason, /×îÐ¡¿É×¢ÆûÈÕÆÚ/);
+  assert.match(result.reason, /æœ€å°å¯æ³¨æ±½æ—¥æœŸ/);
 });
 
 test('rejects a year-end candidate with missing prediction inputs and gives a Chinese reason', () => {

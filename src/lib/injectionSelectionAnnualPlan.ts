@@ -42,24 +42,24 @@ export type YearEndMonthPlan = { month: string; planDate: string; items: Planned
 const OIL_LIMIT = 1.5;
 
 export function evaluateSelectionEligibility(input: EligibilityInput): EligibilityEvidence {
-  if (input.importedWellNos.has(input.wellNo)) return rejected('¸Ã¾®ÒÑÈ·ÈÏµ¼ÈëÔÂ¶È×¢Æû¼Æ»®£¬²»ÄÜÔÙ´ÎÈëÑ¡');
+  if (input.importedWellNos.has(input.wellNo)) return rejected('è¯¥äº•å·²ç¡®è®¤å¯¼å…¥æœˆåº¦æ³¨æ±½è®¡åˆ’ï¼Œä¸èƒ½å†æ¬¡å…¥é€‰');
 
   const interval = minimumEligibleDate(input.actualStarts);
-  if (interval.invalid) return rejected('Êµ¼Ê×¢Æû¼ÇÂ¼È±ÉÙÏàÁÚÁ½ÂÖ¿ªÊ¼ÈÕÆÚ£¬ÎŞ·¨¼ÆËã×îĞ¡×¢Æû¼ä¸ô');
+  if (interval.invalid) return rejected('å®é™…æ³¨æ±½è®°å½•ç¼ºå°‘ç›¸é‚»ä¸¤è½®å¼€å§‹æ—¥æœŸï¼Œæ— æ³•è®¡ç®—æœ€å°æ³¨æ±½é—´éš”');
   if (interval.date && input.planDate < interval.date) {
-    return rejected(`¼Æ»®ÈÕÔçÓÚ×îĞ¡¿É×¢ÆûÈÕÆÚ ${interval.date}`, null, null, interval.date);
+    return rejected(`è®¡åˆ’æ—¥æ—©äºæœ€å°å¯æ³¨æ±½æ—¥æœŸ ${interval.date}`, null, null, interval.date);
   }
 
   if (input.mode === 'next-month') {
-    if (!finiteNonNegative(input.latestActualOil)) return rejected('È±ÉÙ×îĞÂÓĞĞ§Êµ¼Êµ×²ú', null, 'actual', interval.date);
-    if (input.latestActualOil > OIL_LIMIT) return rejected(`×îĞÂµ×²ú ${input.latestActualOil} ¶Ö/ÈÕ¸ßÓÚ 1.5 ¶Ö/ÈÕ`, input.latestActualOil, 'actual', interval.date);
-    return accepted(`×îĞÂµ×²ú ${input.latestActualOil} ¶Ö/ÈÕ·ûºÏÒªÇó`, input.latestActualOil, 'actual', interval.date);
+    if (!finiteNonNegative(input.latestActualOil)) return rejected('ç¼ºå°‘æœ€æ–°æœ‰æ•ˆå®é™…åº•äº§', null, 'actual', interval.date);
+    if (input.latestActualOil > OIL_LIMIT) return rejected(`æœ€æ–°åº•äº§ ${input.latestActualOil} å¨/æ—¥é«˜äº 1.5 å¨/æ—¥`, input.latestActualOil, 'actual', interval.date);
+    return accepted(`æœ€æ–°åº•äº§ ${input.latestActualOil} å¨/æ—¥ç¬¦åˆè¦æ±‚`, input.latestActualOil, 'actual', interval.date);
   }
 
   const prediction = predictOil(input.wellNo, input.planDate, input.cycles, input.production);
   if (prediction.oil === null) return rejected(prediction.reason, null, null, interval.date);
-  if (prediction.oil > OIL_LIMIT) return rejected(`Ô¤²âµ×²ú ${prediction.oil} ¶Ö/ÈÕ¸ßÓÚ 1.5 ¶Ö/ÈÕ`, prediction.oil, 'predicted', interval.date);
-  return accepted(`Ô¤²âµ×²ú ${prediction.oil} ¶Ö/ÈÕ·ûºÏÒªÇó`, prediction.oil, 'predicted', interval.date);
+  if (prediction.oil > OIL_LIMIT) return rejected(`é¢„æµ‹åº•äº§ ${prediction.oil} å¨/æ—¥é«˜äº 1.5 å¨/æ—¥`, prediction.oil, 'predicted', interval.date);
+  return accepted(`é¢„æµ‹åº•äº§ ${prediction.oil} å¨/æ—¥ç¬¦åˆè¦æ±‚`, prediction.oil, 'predicted', interval.date);
 }
 
 export function buildYearEndPlans(input: YearEndPlanInput): YearEndMonthPlan[] {
@@ -71,7 +71,7 @@ export function buildYearEndPlans(input: YearEndPlanInput): YearEndMonthPlan[] {
     const eligible: PlannedCandidate[] = [];
     for (const candidate of input.candidates) {
       if (reserved.has(candidate.wellNo)) {
-        excluded.push({ wellNo: candidate.wellNo, score: candidate.score, evidence: rejected('¸Ã¾®ÒÑÔÚ±¾´ÎÄêÄ©¼Æ»®ÖĞ½¨Òé£¬²»ÄÜÌáÇ°ÖØ¸´°²ÅÅ') });
+        excluded.push({ wellNo: candidate.wellNo, score: candidate.score, evidence: rejected('è¯¥äº•å·²åœ¨æœ¬æ¬¡å¹´æœ«è®¡åˆ’ä¸­å»ºè®®ï¼Œä¸èƒ½æå‰é‡å¤å®‰æ’') });
         continue;
       }
       const evidence = evaluateSelectionEligibility({ mode: 'year-end', planDate, wellNo: candidate.wellNo, latestActualOil: candidate.latestActualOil, cycles: candidate.cycles, production: input.production, importedWellNos: input.importedWellNos, actualStarts: candidate.actualStarts });
@@ -80,7 +80,7 @@ export function buildYearEndPlans(input: YearEndPlanInput): YearEndMonthPlan[] {
     }
     const items = eligible.sort(compareCandidate).slice(0, maxWells);
     for (const item of items) reserved.add(item.wellNo);
-    for (const item of eligible.slice(maxWells)) excluded.push({ wellNo: item.wellNo, score: item.score, evidence: rejected(`µ±ÔÂ¿ÉÑ¡¾®³¬¹ı¼Æ»®ÉÏÏŞ ${maxWells} ¿Ú`) });
+    for (const item of eligible.slice(maxWells)) excluded.push({ wellNo: item.wellNo, score: item.score, evidence: rejected(`å½“æœˆå¯é€‰äº•è¶…è¿‡è®¡åˆ’ä¸Šé™ ${maxWells} å£`) });
     return { month, planDate, items, excluded };
   });
 }
@@ -88,10 +88,10 @@ export function buildYearEndPlans(input: YearEndPlanInput): YearEndMonthPlan[] {
 function predictOil(wellNo: string, planDate: string, cycles: readonly StageOilRow[], production: readonly ProductionOilPoint[]): { oil: number | null; reason: string } {
   const sorted = [...cycles].filter((cycle) => validDate(cycle.startDate)).sort((a, b) => b.startDate.localeCompare(a.startDate));
   const [current, previous] = sorted;
-  if (!current || !previous) return { oil: null, reason: 'È±ÉÙ±¾ÂÖºÍÉÏÂÖ½×¶ÎÖÜÆÚ£¬ÎŞ·¨Ô¤²âµ×²ú' };
-  if (!validDate(current.endDate) || !validDate(previous.endDate)) return { oil: null, reason: 'È±ÉÙÓĞĞ§Í£×¢ÆûÈÕÆÚ£¬ÎŞ·¨Ô¤²âµ×²ú' };
+  if (!current || !previous) return { oil: null, reason: 'ç¼ºå°‘æœ¬è½®å’Œä¸Šè½®é˜¶æ®µå‘¨æœŸï¼Œæ— æ³•é¢„æµ‹åº•äº§' };
+  if (!validDate(current.endDate) || !validDate(previous.endDate)) return { oil: null, reason: 'ç¼ºå°‘æœ‰æ•ˆåœæ³¨æ±½æ—¥æœŸï¼Œæ— æ³•é¢„æµ‹åº•äº§' };
   const targetDay = daysBetween(current.endDate, planDate);
-  if (targetDay < 0) return { oil: null, reason: '¼Æ»®ÈÕÔçÓÚ±¾ÂÖÍ£×¢ÆûÈÕÆÚ£¬ÎŞ·¨Ô¤²âµ×²ú' };
+  if (targetDay < 0) return { oil: null, reason: 'è®¡åˆ’æ—¥æ—©äºæœ¬è½®åœæ³¨æ±½æ—¥æœŸï¼Œæ— æ³•é¢„æµ‹åº•äº§' };
   const values = new Map<string, number>();
   for (const point of production) if (point.wellNo === wellNo && validDate(point.date) && finiteNonNegative(point.oil)) values.set(point.date, point.oil);
   const ratios: number[] = [];
@@ -101,11 +101,11 @@ function predictOil(wellNo: string, planDate: string, cycles: readonly StageOilR
     const previousOil = values.get(addDays(previous.endDate, day));
     if (finitePositive(previousOil)) ratios.push(currentOil / previousOil);
   }
-  if (!ratios.length) return { oil: null, reason: 'È±ÉÙ±¾ÂÖÓëÉÏÂÖÖØµşÍ¬ÆÚÈÕ²úÓÍ£¬ÎŞ·¨Ô¤²âµ×²ú' };
+  if (!ratios.length) return { oil: null, reason: 'ç¼ºå°‘æœ¬è½®ä¸ä¸Šè½®é‡å åŒæœŸæ—¥äº§æ²¹ï¼Œæ— æ³•é¢„æµ‹åº•äº§' };
   const previousTargetOil = values.get(addDays(previous.endDate, targetDay));
-  if (!finiteNonNegative(previousTargetOil)) return { oil: null, reason: 'È±ÉÙÉÏÂÖÄ¿±êÍ¬ÆÚÈÕ²úÓÍ£¬ÎŞ·¨Ô¤²âµ×²ú' };
+  if (!finiteNonNegative(previousTargetOil)) return { oil: null, reason: 'ç¼ºå°‘ä¸Šè½®ç›®æ ‡åŒæœŸæ—¥äº§æ²¹ï¼Œæ— æ³•é¢„æµ‹åº•äº§' };
   const predicted = round(previousTargetOil * median(ratios));
-  return Number.isFinite(predicted) ? { oil: predicted, reason: '' } : { oil: null, reason: 'Ô¤²âµ×²ú¼ÆËã½á¹ûÎŞĞ§' };
+  return Number.isFinite(predicted) ? { oil: predicted, reason: '' } : { oil: null, reason: 'é¢„æµ‹åº•äº§è®¡ç®—ç»“æœæ— æ•ˆ' };
 }
 
 function minimumEligibleDate(starts: readonly string[]): { date: string | null; invalid: boolean } {
@@ -121,10 +121,10 @@ function minimumEligibleDate(starts: readonly string[]): { date: string | null; 
 
 function monthsThroughDecember(startMonth: string): Array<{ month: string; planDate: string }> {
   const match = /^(\d{4})-(\d{2})$/.exec(startMonth);
-  if (!match) throw new Error('startMonth ±ØĞëÎª YYYY-MM');
+  if (!match) throw new Error('startMonth å¿…é¡»ä¸º YYYY-MM');
   const year = Number(match[1]);
   const start = Number(match[2]);
-  if (start < 1 || start > 12) throw new Error('startMonth ±ØĞëÎªÓĞĞ§ÔÂ·İ');
+  if (start < 1 || start > 12) throw new Error('startMonth å¿…é¡»ä¸ºæœ‰æ•ˆæœˆä»½');
   return Array.from({ length: 13 - start }, (_, index) => {
     const month = `${year}-${String(start + index).padStart(2, '0')}`;
     return { month, planDate: `${month}-01` };
