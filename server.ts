@@ -67,7 +67,6 @@ import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
 import {
   buildProductionBlockGroups,
   expandProductionBlockGroups,
-  normalizeProductionBlockGroup,
 } from "./src/lib/blockProductionGrouping.ts";
 
 dotenv.config();
@@ -490,10 +489,6 @@ function getEmptyAnalysisData() {
   };
 }
 
-function normalizeChartBlock(block: string) {
-  return normalizeProductionBlockGroup(block);
-}
-
 function buildChartBlocksList(blocks: string[]) {
   return buildProductionBlockGroups(blocks);
 }
@@ -533,10 +528,7 @@ async function getWellsList() {
     ORDER BY jh
   `);
 
-  return rows.map((row: any) => ({
-    ...row,
-    block: normalizeChartBlock(row.block || "")
-  }));
+  return rows;
 }
 
 async function getIssueAnalysisData() {
@@ -760,12 +752,7 @@ async function getWellsCacheData() {
   const cached = await getHomepageCache<any[]>(WELLS_CACHE_KEY);
   if (cached) {
     console.log(`[${new Date().toISOString()}] /api/wells _________SQLite_________`);
-    return Array.isArray(cached.payload)
-      ? cached.payload.map((row: any) => ({
-          ...row,
-          block: normalizeChartBlock(row?.block || "")
-        }))
-      : [];
+    return Array.isArray(cached.payload) ? cached.payload : [];
   }
 
   console.log(`[${new Date().toISOString()}] /api/wells ___________________________`);
@@ -1680,7 +1667,7 @@ async function loadCompareWellMeta(rangeA: CompareRangeInput, rangeB: CompareRan
   for (const row of rows) {
     metaMap.set(row.jh, {
       station: row.station || "",
-      block: normalizeChartBlock(row.block || "")
+      block: row.block ?? ""
     });
   }
 

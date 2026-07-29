@@ -92,4 +92,13 @@ test('server uses deterministic production block grouping for lists and chart qu
     /const normalizedChartBlocks = buildProductionBlockGroups\(\s*Array\.isArray\(cached\.payload\?\.chartBlocks\)/,
   );
   assert.doesNotMatch(serverSource, /const CHART_BLOCK_GROUPS/);
+  assert.doesNotMatch(serverSource, /normalizeChartBlock/);
+  assert.match(
+    serverSource,
+    /async function getWellsList\(\)[\s\S]*?return rows;\s*\}/,
+  );
+  assert.match(
+    serverSource,
+    /metaMap\.set\(row\.jh, \{\s*station: row\.station \|\| "",\s*block: row\.block \?\? ""\s*\}\);/,
+  );
 });
