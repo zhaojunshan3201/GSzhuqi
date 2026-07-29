@@ -66,17 +66,36 @@ async function seedDatabase(filename: string) {
       await db.run('INSERT INTO production (jh, rq, oil, block, water_cut) VALUES (?, ?, ?, ?, ?)', [well, date, oil, block, waterCut]);
     };
 
+    await insertProduction('含水井-1', '2026-07-10', 2, '高3', 45);
     await insertProduction('含水井-1', '2026-07-19', 2, '高3', 45);
     await insertProduction('含水边界井', '2026-07-20', 2, '高3', 50);
+    await insertProduction('含水最新无效井', '2026-07-10', 2, '高3', 40);
     await db.run(`INSERT INTO water_lab_records
       (jh, record_date, water_cut, block, source_file, created_at)
-      VALUES ('含水井-1', '2026-07-20', 70, '高3', '含水化验.xlsx', '2026-07-21T08:00:00.000Z'),
-             ('含水边界井', '2026-07-20', 70, '高3', '含水化验.xlsx', '2026-07-21T08:00:00.000Z')`);
+      VALUES ('含水井-1', '2026-07-10', 90, '高3', '含水化验.xlsx', '2026-07-11T08:00:00.000Z'),
+             ('含水井-1', '2026-07-20', 70, '高3', '含水化验.xlsx', '2026-07-21T08:00:00.000Z'),
+             ('含水边界井', '2026-07-20', 70, '高3', '含水化验.xlsx', '2026-07-21T08:00:00.000Z'),
+             ('含水最新无效井', '2026-07-10', 80, '高3', '含水化验.xlsx', '2026-07-11T08:00:00.000Z'),
+             ('含水最新无效井', '2026-07-20', NULL, '高3', '含水化验.xlsx', '2026-07-21T08:00:00.000Z')`);
 
     for (let day = 26; day <= 30; day += 1) await insertProduction('泵井-未恢复', `2026-07-${day}`, 5);
+    for (let day = 15; day <= 19; day += 1) {
+      await insertProduction('泵井-库内前后', `2026-07-${day}`, 10);
+      await insertProduction('泵井-不足5日', `2026-07-${day}`, 100);
+    }
+    for (let day = 26; day <= 30; day += 1) await insertProduction('泵井-库内前后', `2026-07-${day}`, 5);
+    for (let day = 26; day <= 29; day += 1) await insertProduction('泵井-不足5日', `2026-07-${day}`, 1);
+    for (const well of ['泵井-空白', '泵井-百分号', '泵井-吨']) {
+      for (let day = 26; day <= 30; day += 1) await insertProduction(well, `2026-07-${day}`, 5);
+    }
     const pumpRows = [
       { 井号: '泵井-未恢复', 状态: '已检泵（已恢复）', 本次检泵开日期: '2026-07-20', 检泵前日产油: 10 },
       { 井号: '泵井-正检', 状态: '正检泵', 本次检泵开日期: '2026-07-29', 检泵前日产油: '' },
+      { 井号: '泵井-库内前后', 状态: '已检泵（已恢复）', 本次检泵开日期: '2026-07-20', 检泵前日产油: 999 },
+      { 井号: '泵井-不足5日', 状态: '已检泵（已恢复）', 本次检泵开日期: '2026-07-20', 检泵前日产油: 10 },
+      { 井号: '泵井-空白', 状态: '正检泵', 本次检泵开日期: '2026-07-20', 检泵前日产油: '   ' },
+      { 井号: '泵井-百分号', 状态: '正检泵', 本次检泵开日期: '2026-07-20', 检泵前日产油: '%' },
+      { 井号: '泵井-吨', 状态: '正检泵', 本次检泵开日期: '2026-07-20', 检泵前日产油: '吨' },
     ];
     await db.run(
       `INSERT INTO pump_tracking_uploads
@@ -190,9 +209,11 @@ async function seedDatabase(filename: string) {
 
     await insertProduction('复产井-有油', '2026-07-30', 3, '高3');
     await insertProduction('复产井-去年', '2026-07-29', 2, '高3');
+    await insertProduction('复产井-过期', '2026-07-20', 4, '高3');
     for (const [date, well, category, year] of [
       ['2026-06-01', '复产井-有油', '捞油复产井', '2026'],
       ['2026-06-02', '复产井-缺数', '新井', '2026'],
+      ['2026-06-03', '复产井-过期', '问题井复产井', '2026'],
       ['2025-06-01', '复产井-去年', '问题井复产井', '2025'],
     ]) {
       await db.run(
@@ -208,6 +229,56 @@ async function seedDatabase(filename: string) {
     }
   } finally {
     await db.close();
+  }
+}
+
+async function withSeededPriorityServer(
+  prefix: string,
+  run: (context: { dbFile: string; baseUrl: string }) => Promise<void>,
+) {
+  const port = await availablePort();
+  const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const dbFile = path.join(directory, 'test.db');
+  await seedDatabase(dbFile);
+  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      LOCAL_ONLY: 'true',
+      NODE_ENV: 'production',
+      LOCAL_DB_FILE: dbFile,
+      AUTH_TOKEN_SECRET: `${prefix}-secret`,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const exitPromise = new Promise<void>((resolve) => {
+    child.once('exit', () => resolve());
+    child.once('error', () => resolve());
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('server did not start')), 15_000);
+      child.stdout?.on('data', (data: Buffer) => {
+        if (String(data).includes('Server running')) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      child.once('exit', (code, signal) => {
+        clearTimeout(timer);
+        reject(new Error(`server exited ${code ?? signal}`));
+      });
+      child.once('error', reject);
+    });
+    await run({ dbFile, baseUrl: `http://127.0.0.1:${port}` });
+  } finally {
+    try {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await exitPromise;
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 }
 
@@ -255,14 +326,28 @@ test('聚合六类重点情况并对缺少单一来源保持整体可用', { tim
     const body = await response.json() as any;
     assert.deepEqual(Object.keys(body.data).sort(), [
       'asOfDate', 'blockDeclines', 'issues', 'restartSummary', 'soakingWells',
-      'sourceStatus', 'summary', 'updatedAt',
+      'sourceStatus', 'summary', 'updatedAt', 'water_cut_pie',
+      'top_water_cut_wells', 'decline_warnings',
     ].sort());
     assert.equal(body.data.asOfDate, '2026-07-30');
     assert.equal(body.data.summary.waterCut, 1);
-    assert.equal(body.data.summary.pump, 2);
+    assert.equal(body.data.summary.pump, 7);
     assert.equal(body.data.summary.soaking, 1);
     assert.equal(body.data.summary.injectionPeriod, 3);
-    assert.equal(body.data.issues.find((issue: any) => issue.category === 'waterCut').deviation, 25);
+    const waterIssues = body.data.issues.filter((issue: any) => issue.category === 'waterCut');
+    assert.equal(waterIssues.length, 1);
+    assert.equal(waterIssues[0].deviation, 25);
+    assert.equal(waterIssues[0].dataDate, '2026-07-20');
+    assert.equal(waterIssues.some((issue: any) => issue.wellNo === '含水最新无效井'), false);
+    assert.ok(Array.isArray(body.data.water_cut_pie));
+    assert.ok(Array.isArray(body.data.top_water_cut_wells));
+    assert.deepEqual(body.data.decline_warnings, []);
+    assert.equal(
+      body.data.summary.total_wells,
+      body.data.water_cut_pie.reduce((sum: number, row: any) => sum + row.value, 0),
+    );
+    assert.equal(typeof body.data.summary.abnormal_wells, 'number');
+    assert.equal(body.data.summary.potential_gain, '--');
     assert.equal(body.data.soakingWells[0].wellNo, '焖井-当前');
     assert.equal(body.data.soakingWells[0].soakingDays, 25);
 
@@ -286,6 +371,21 @@ test('聚合六类重点情况并对缺少单一来源保持整体可用', { tim
     assert.equal(missingPumpIssue.currentOil, null);
     assert.equal(missingPumpIssue.beforeOil, null);
     assert.equal(missingPumpIssue.recoveryRate, null);
+    const databaseWindowPump = body.data.issues.find((issue: any) => issue.wellNo === '泵井-库内前后');
+    assert.equal(databaseWindowPump.currentOil, 5);
+    assert.equal(databaseWindowPump.beforeOil, 10);
+    assert.equal(databaseWindowPump.recoveryRate, 50);
+    assert.equal(databaseWindowPump.beforeOilSource, 'production-5-days');
+    const insufficientPump = body.data.issues.find((issue: any) => issue.wellNo === '泵井-不足5日');
+    assert.equal(insufficientPump.status, '数据待补');
+    assert.equal(insufficientPump.currentOil, null);
+    assert.equal(insufficientPump.currentReportDays, 4);
+    assert.equal(insufficientPump.beforeOil, 100);
+    for (const wellNo of ['泵井-空白', '泵井-百分号', '泵井-吨']) {
+      const issue = body.data.issues.find((item: any) => item.wellNo === wellNo);
+      assert.equal(issue.beforeOil, null);
+      assert.equal(issue.recoveryRate, null);
+    }
 
     const injectionIssues = body.data.issues.filter((issue: any) => issue.category === 'injectionPeriod');
     assert.deepEqual(new Set(injectionIssues.map((issue: any) => issue.status)), new Set(['同期变好', '同期变差']));
@@ -293,6 +393,10 @@ test('聚合六类重点情况并对缺少单一来源保持整体可用', { tim
     assert.equal(body.data.restartSummary['2026:捞油复产井'].averageOil, 3);
     assert.equal(body.data.restartSummary['2026:新井'].totalOil, null);
     assert.equal(body.data.restartSummary['2026:新井'].stoppedOrMissingWells, 1);
+    assert.equal(body.data.restartSummary['2026:问题井复产井'].totalOil, null);
+    assert.equal(body.data.restartSummary['2026:问题井复产井'].missingWells, 1);
+    const staleRestartIssue = body.data.issues.find((issue: any) => issue.wellNo === '复产井-过期');
+    assert.equal(staleRestartIssue.currentOil, null);
     assert.equal(body.data.restartSummary['2025:问题井复产井'].wells, 1);
     assert.equal(body.data.sourceStatus.tracking.fileName, '措施跟踪2026C.xlsx');
     assert.equal(body.data.sourceStatus.tracking.available, true);
@@ -334,6 +438,8 @@ test('聚合六类重点情况并对缺少单一来源保持整体可用', { tim
     assert.equal(withoutTrackingBody.data.summary.soaking, 0);
     assert.deepEqual(withoutTrackingBody.data.soakingWells, []);
     assert.equal(withoutTrackingBody.data.sourceStatus.soaking.available, false);
+    assert.equal(withoutTrackingBody.data.sourceStatus.injectionPeriod.unavailableReason, '措施跟踪数据不可用');
+    assert.equal(withoutTrackingBody.data.sourceStatus.restartTracking.unavailableReason, '措施跟踪数据不可用');
 
     const dbWithoutProduction = await open({ filename: dbFile, driver: sqlite3.Database });
     try {
@@ -438,14 +544,14 @@ test('production 表缺失且未传 asOf 时回退当前日期并继续聚合独
     const body = await response.json() as any;
     assert.equal(body.success, true);
     assert.match(body.data.asOfDate, /^\d{4}-\d{2}-\d{2}$/);
-    assert.deepEqual(body.data.summary, {
-      pump: 0,
-      waterCut: 0,
-      blockDecline: 0,
-      soaking: 1,
-      injectionPeriod: 0,
-      restartTracking: 0,
-    });
+    assert.deepEqual(
+      Object.fromEntries(['pump', 'waterCut', 'blockDecline', 'soaking', 'injectionPeriod', 'restartTracking']
+        .map((key) => [key, body.data.summary[key]])),
+      { pump: 0, waterCut: 0, blockDecline: 0, soaking: 1, injectionPeriod: 0, restartTracking: 0 },
+    );
+    assert.equal(body.data.summary.total_wells, 0);
+    assert.equal(body.data.summary.abnormal_wells, 0);
+    assert.equal(body.data.summary.potential_gain, '--');
     assert.deepEqual(body.data.issues.map((issue: any) => issue.category), ['soaking']);
     assert.deepEqual(body.data.blockDeclines, []);
     assert.equal(body.data.soakingWells.length, 1);
@@ -456,6 +562,7 @@ test('production 表缺失且未传 asOf 时回退当前日期并继续聚合独
     assert.equal(body.data.sourceStatus.tracking.fileName, '措施跟踪2026C.xlsx');
     assert.equal(body.data.sourceStatus.tracking.updatedAt, expectedTrackingUpdatedAt);
     assert.equal(body.data.sourceStatus.soaking.available, true);
+    assert.equal(body.data.asOfDate, today);
   } finally {
     try {
       if (child.exitCode === null && child.signalCode === null) child.kill();
@@ -464,4 +571,92 @@ test('production 表缺失且未传 asOf 时回退当前日期并继续聚合独
       await rm(directory, { recursive: true, force: true });
     }
   }
+});
+
+test('water_lab_records 单独缺失只关闭含水来源', { timeout: 30_000 }, async () => {
+  await withSeededPriorityServer('priority-missing-water-', async ({ dbFile, baseUrl }) => {
+    const db = await open({ filename: dbFile, driver: sqlite3.Database });
+    try {
+      await db.exec('DROP TABLE water_lab_records');
+    } finally {
+      await db.close();
+    }
+    const body = await (await fetch(`${baseUrl}/api/analysis/issues?asOf=2026-07-30`)).json() as any;
+    assert.equal(body.data.summary.waterCut, 0);
+    assert.equal(body.data.sourceStatus.waterLab.available, false);
+    assert.equal(body.data.sourceStatus.tracking.available, true);
+    assert.equal(body.data.summary.soaking, 1);
+  });
+});
+
+test('measure_tracking 单独缺失为同期与复产返回明确原因', { timeout: 30_000 }, async () => {
+  await withSeededPriorityServer('priority-missing-tracking-', async ({ dbFile, baseUrl }) => {
+    const db = await open({ filename: dbFile, driver: sqlite3.Database });
+    try {
+      await db.exec('DROP TABLE measure_tracking');
+    } finally {
+      await db.close();
+    }
+    const response = await fetch(`${baseUrl}/api/analysis/issues?asOf=2026-07-30`);
+    assert.equal(response.status, 200);
+    const body = await response.json() as any;
+    assert.equal(body.data.summary.injectionPeriod, 0);
+    assert.equal(body.data.summary.restartTracking, 0);
+    assert.equal(body.data.sourceStatus.injectionPeriod.available, false);
+    assert.equal(body.data.sourceStatus.injectionPeriod.unavailableReason, '措施跟踪数据不可用');
+    assert.equal(body.data.sourceStatus.restartTracking.available, false);
+    assert.equal(body.data.sourceStatus.restartTracking.unavailableReason, '措施跟踪数据不可用');
+    assert.equal(body.data.summary.waterCut, 1);
+  });
+});
+
+test('检泵 rows_json 损坏时关闭检泵来源并返回原因', { timeout: 30_000 }, async () => {
+  await withSeededPriorityServer('priority-corrupt-pump-', async ({ dbFile, baseUrl }) => {
+    const db = await open({ filename: dbFile, driver: sqlite3.Database });
+    try {
+      await db.run("UPDATE pump_tracking_uploads SET rows_json = '{broken-json'");
+    } finally {
+      await db.close();
+    }
+    const response = await fetch(`${baseUrl}/api/analysis/issues?asOf=2026-07-30`);
+    assert.equal(response.status, 200);
+    const body = await response.json() as any;
+    assert.equal(body.data.summary.pump, 0);
+    assert.equal(body.data.sourceStatus.pump.available, false);
+    assert.equal(body.data.sourceStatus.pump.unavailableReason, '检泵上传数据损坏');
+    assert.equal(body.data.summary.waterCut, 1);
+  });
+});
+
+test('pump_tracking_uploads 单独缺失只关闭检泵来源', { timeout: 30_000 }, async () => {
+  await withSeededPriorityServer('priority-missing-pump-', async ({ dbFile, baseUrl }) => {
+    const db = await open({ filename: dbFile, driver: sqlite3.Database });
+    try {
+      await db.exec('DROP TABLE pump_tracking_uploads');
+    } finally {
+      await db.close();
+    }
+    const body = await (await fetch(`${baseUrl}/api/analysis/issues?asOf=2026-07-30`)).json() as any;
+    assert.equal(body.data.summary.pump, 0);
+    assert.equal(body.data.sourceStatus.pump.available, false);
+    assert.equal(body.data.summary.waterCut, 1);
+    assert.equal(body.data.sourceStatus.tracking.available, true);
+  });
+});
+
+test('soak_transfer_report_rows 单独缺失只关闭焖井来源', { timeout: 30_000 }, async () => {
+  await withSeededPriorityServer('priority-missing-soaking-', async ({ dbFile, baseUrl }) => {
+    const db = await open({ filename: dbFile, driver: sqlite3.Database });
+    try {
+      await db.exec('DROP TABLE soak_transfer_report_rows');
+    } finally {
+      await db.close();
+    }
+    const body = await (await fetch(`${baseUrl}/api/analysis/issues?asOf=2026-07-30`)).json() as any;
+    assert.equal(body.data.summary.soaking, 0);
+    assert.deepEqual(body.data.soakingWells, []);
+    assert.equal(body.data.sourceStatus.soaking.available, false);
+    assert.equal(body.data.sourceStatus.tracking.available, true);
+    assert.equal(body.data.summary.waterCut, 1);
+  });
 });

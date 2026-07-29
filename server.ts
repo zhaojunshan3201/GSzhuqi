@@ -573,9 +573,10 @@ function priorityDate(value: unknown): string | null {
 
 function priorityNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
-  const numeric = typeof value === "number"
-    ? value
-    : Number(String(value).replace(/[%吨,，]/g, "").trim());
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const cleaned = String(value).replace(/[%吨,，]/g, "").trim();
+  if (!cleaned) return null;
+  const numeric = Number(cleaned);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
@@ -660,23 +661,34 @@ function priorityPumpColumn(columns: string[], aliases: string[]): string | null
   }) || null;
 }
 
-function buildPriorityPumpIssues(
-  upload: any | null,
-  productionRows: any[],
-  asOfDate: string,
-): PriorityIssue[] {
-  if (!upload) return [];
-  let rows: Record<string, unknown>[] = [];
-  let columns: string[] = [];
+type PriorityPumpUploadData = {
+  upload: any;
+  rows: Record<string, unknown>[];
+  columns: string[];
+};
+
+function parsePriorityPumpUpload(upload: any | null): PriorityPumpUploadData | null {
+  if (!upload) return null;
   try {
     const parsedRows = JSON.parse(upload.rows_json || "[]");
     const parsedColumns = JSON.parse(upload.columns_json || "[]");
-    rows = Array.isArray(parsedRows) ? parsedRows.filter((row) => row && typeof row === "object") : [];
-    columns = Array.isArray(parsedColumns) ? parsedColumns.map(String) : [];
+    if (!Array.isArray(parsedRows) || !Array.isArray(parsedColumns)) return null;
+    const rows = parsedRows.filter((row) => row && typeof row === "object" && !Array.isArray(row));
+    const columns = parsedColumns.map(String);
+    if (!columns.length && rows[0]) columns.push(...Object.keys(rows[0]));
+    return { upload, rows, columns };
   } catch {
-    return [];
+    return null;
   }
-  if (!columns.length && rows[0]) columns = Object.keys(rows[0]);
+}
+
+function buildPriorityPumpIssues(
+  parsedUpload: PriorityPumpUploadData | null,
+  productionRows: any[],
+  asOfDate: string,
+): PriorityIssue[] {
+  if (!parsedUpload) return [];
+  const { rows, columns } = parsedUpload;
 
   const wellColumn = priorityPumpColumn(columns, ["井号", "井名", "油井"]);
   const statusColumn = priorityPumpColumn(columns, ["状态", "当前状态", "泵状态"]);
@@ -704,16 +716,16 @@ function buildPriorityPumpIssues(
     }
   }
 
-  const oilByWell = new Map<string, number[]>();
+  const productionByWell = new Map<string, Array<{ date: string; oil: number }>>();
   const sortedProduction = [...productionRows].sort((left, right) => String(right.date).localeCompare(String(left.date)));
   for (const row of sortedProduction) {
-    if (row.date > asOfDate) continue;
+    if (!isValidPriorityDate(row.date) || row.date > asOfDate) continue;
     const oil = priorityNumber(row.oil);
     if (oil == null || oil < 0) continue;
     const key = priorityWellKey(row.wellNo);
-    const values = oilByWell.get(key) || [];
-    if (values.length < 5) values.push(oil);
-    oilByWell.set(key, values);
+    const values = productionByWell.get(key) || [];
+    values.push({ date: row.date, oil });
+    productionByWell.set(key, values);
   }
 
   return [...latestByWell.values()].flatMap(({ row, wellNo, status, date }) => {
@@ -722,11 +734,28 @@ function buildPriorityPumpIssues(
     const isAfterPump = status.includes("已检泵") || status.includes("检泵后") || status.includes("恢复");
     if (!isActive && !isPending && !isAfterPump) return [];
 
-    const currentValues = oilByWell.get(priorityWellKey(wellNo)) || [];
-    const currentOil = currentValues.length
-      ? Number((currentValues.reduce((sum, value) => sum + value, 0) / currentValues.length).toFixed(1))
+    const production = productionByWell.get(priorityWellKey(wellNo)) || [];
+    const currentValues = date
+      ? production.filter((point) => point.date >= date && point.date <= asOfDate).slice(0, 5)
+      : [];
+    const beforeValues = date
+      ? production.filter((point) => point.date < date).slice(0, 5)
+      : [];
+    const currentOil = currentValues.length === 5
+      ? Number((currentValues.reduce((sum, point) => sum + point.oil, 0) / 5).toFixed(1))
       : null;
-    const beforeOil = beforeOilColumn ? priorityNumber(row[beforeOilColumn]) : null;
+    const uploadedBeforeOil = beforeOilColumn ? priorityNumber(row[beforeOilColumn]) : null;
+    const hasProductionBeforeOil = beforeValues.length === 5;
+    const beforeOil = hasProductionBeforeOil
+      ? Number((beforeValues.reduce((sum, point) => sum + point.oil, 0) / 5).toFixed(1))
+      : currentOil != null && uploadedBeforeOil != null
+        ? uploadedBeforeOil
+        : null;
+    const beforeOilSource = hasProductionBeforeOil
+      ? "production-5-days"
+      : beforeOil != null
+        ? "uploaded-pre-oil"
+        : null;
     const recoveryRate = calculatePumpRecoveryRate(currentOil, beforeOil);
     if (isAfterPump && recoveryRate != null && recoveryRate >= 80) return [];
 
@@ -740,8 +769,10 @@ function buildPriorityPumpIssues(
       wellNo,
       block: blockColumn ? String(row[blockColumn] ?? "").trim() : "",
       comparison: recoveryRate == null
-        ? "当前近5个有效报产日或检泵前日产油缺失"
-        : `当前 ${currentOil!.toFixed(1)}t / 检泵前 ${beforeOil!.toFixed(1)}t`,
+        ? `检泵后有效报产 ${currentValues.length}/5 日`
+        : beforeOilSource === "production-5-days"
+          ? `检泵后近5日 ${currentOil!.toFixed(1)}t / 检泵前近5日 ${beforeOil!.toFixed(1)}t`
+          : `检泵后近5日 ${currentOil!.toFixed(1)}t / 上传检泵前日产油 ${beforeOil!.toFixed(1)}t`,
       deviation: recoveryRate == null ? null : Number((100 - recoveryRate).toFixed(1)),
       deviationText: recoveryRate == null ? "--" : `恢复率 ${recoveryRate.toFixed(1)}%`,
       status: issueStatus,
@@ -751,6 +782,9 @@ function buildPriorityPumpIssues(
       currentOil,
       beforeOil,
       recoveryRate,
+      currentReportDays: currentValues.length,
+      beforeReportDays: beforeValues.length,
+      beforeOilSource,
     } as PriorityIssue];
   });
 }
@@ -979,11 +1013,11 @@ function priorityRestartCategory(row: any): string | null {
 
 function buildPriorityRestartTracking(trackingRows: any[], productionRows: any[], asOfDate: string) {
   const currentYear = Number(asOfDate.slice(0, 4));
-  const latestOilByWell = new Map<string, number>();
+  const latestOilByWell = new Map<string, { oil: number; date: string }>();
   for (const row of [...productionRows].sort((left, right) => String(left.date).localeCompare(String(right.date)))) {
     const oil = priorityNumber(row.oil);
     if (oil == null || oil < 0 || row.date > asOfDate) continue;
-    latestOilByWell.set(priorityWellKey(row.wellNo), oil);
+    latestOilByWell.set(priorityWellKey(row.wellNo), { oil, date: row.date });
   }
 
   const tracked = new Map<string, { year: number; category: string; wellNo: string; block: string; date: string }>();
@@ -999,7 +1033,10 @@ function buildPriorityRestartTracking(trackingRows: any[], productionRows: any[]
   }
 
   const restartRows = [...tracked.values()].map((row) => {
-    const currentOil = latestOilByWell.get(priorityWellKey(row.wellNo)) ?? null;
+    const latestOil = latestOilByWell.get(priorityWellKey(row.wellNo));
+    const currentOil = latestOil && latestOil.date >= shiftDateDays(asOfDate, -7)
+      ? latestOil.oil
+      : null;
     return { ...row, currentOil, producing: currentOil != null && currentOil > 0 };
   });
   const baseSummary = summarizeRestartTracking(restartRows);
@@ -1026,8 +1063,55 @@ function buildPriorityRestartTracking(trackingRows: any[], productionRows: any[]
     suggestion: row.currentOil == null ? "补充最新生产报产" : "核查复产井停产原因",
     dataDate: row.date,
     targetTab: "measures",
+    currentOil: row.currentOil,
   } as PriorityIssue]);
   return { restartRows, restartSummary, issues };
+}
+
+function buildPriorityLegacyAnalysis(productionRows: any[], asOfDate: string) {
+  const latestRows = productionRows.filter((row) => row.date === asOfDate && row.wellNo);
+  const categories = [
+    { name: "极高含水井(>=95%)", matches: (waterCut: number | null) => waterCut != null && waterCut >= 95 },
+    { name: "高含水井(80-95%)", matches: (waterCut: number | null) => waterCut != null && waterCut >= 80 && waterCut < 95 },
+    { name: "中高含水井(50-80%)", matches: (waterCut: number | null) => waterCut != null && waterCut >= 50 && waterCut < 80 },
+    { name: "低含水井(<50%)", matches: (waterCut: number | null) => waterCut == null || waterCut < 50 },
+  ];
+  const waterCutPie = categories
+    .map((category) => ({
+      name: category.name,
+      value: latestRows.filter((row) => category.matches(priorityNumber(row.waterCut))).length,
+    }))
+    .filter((row) => row.value > 0);
+  const rounded = (value: unknown) => {
+    const numeric = priorityNumber(value);
+    return numeric == null ? null : Number(numeric.toFixed(1));
+  };
+  const topWaterCutWells = [...latestRows]
+    .sort((left, right) =>
+      Number(priorityNumber(right.waterCut) ?? Number.NEGATIVE_INFINITY)
+      - Number(priorityNumber(left.waterCut) ?? Number.NEGATIVE_INFINITY)
+      || Number(priorityNumber(left.oil) ?? Number.POSITIVE_INFINITY)
+      - Number(priorityNumber(right.oil) ?? Number.POSITIVE_INFINITY))
+    .slice(0, 10)
+    .map((row) => ({
+      jh: row.wellNo,
+      water_cut: rounded(row.waterCut),
+      oil: rounded(row.oil),
+      liquid: rounded(row.liquid),
+    }));
+  return {
+    water_cut_pie: waterCutPie,
+    top_water_cut_wells: topWaterCutWells,
+    decline_warnings: [],
+    summary: {
+      total_wells: latestRows.length,
+      abnormal_wells: latestRows.filter((row) => {
+        const waterCut = priorityNumber(row.waterCut);
+        return waterCut != null && waterCut >= 50;
+      }).length,
+      potential_gain: "--",
+    },
+  };
 }
 
 async function getIssueAnalysisData(asOfDate?: string) {
@@ -1049,11 +1133,21 @@ async function getIssueAnalysisData(asOfDate?: string) {
 
   const [productionResult, labResult, pumpResult, trackingResult, soakingResult] = await Promise.all([
     prioritySafeAll(
-      `SELECT jh AS wellNo, rq AS date, oil, water_cut AS waterCut, block
+      `SELECT jh AS wellNo, rq AS date, oil, liquid, water_cut AS waterCut, block
        FROM production WHERE rq >= ? AND rq <= ?`,
       [historyStart, resolvedAsOfDate],
     ),
-    prioritySafeAll("SELECT * FROM water_lab_records"),
+    prioritySafeAll(
+      `SELECT w.*
+       FROM water_lab_records w
+       INNER JOIN (
+         SELECT jh, MAX(record_date) AS latest_date
+         FROM water_lab_records
+         WHERE record_date <= ?
+         GROUP BY jh
+       ) latest ON latest.jh = w.jh AND latest.latest_date = w.record_date`,
+      [resolvedAsOfDate],
+    ),
     prioritySafeAll("SELECT * FROM pump_tracking_uploads ORDER BY id DESC LIMIT 1"),
     prioritySafeAll("SELECT * FROM measure_tracking"),
     prioritySafeAll("SELECT * FROM soak_transfer_report_rows ORDER BY stop_date"),
@@ -1064,19 +1158,29 @@ async function getIssueAnalysisData(asOfDate?: string) {
       wellNo: String(row.wellNo || "").trim(),
       date: priorityDate(row.date),
       oil: priorityNumber(row.oil),
+      liquid: priorityNumber(row.liquid),
       waterCut: priorityNumber(row.waterCut),
       block: String(row.block || "").trim(),
     }))
     .filter((row) => row.wellNo && row.date && row.date <= resolvedAsOfDate);
-  const labRows = labResult.rows
+  const datedLabRows = labResult.rows
     .map((row) => ({
       wellNo: String(row.jh || "").trim(),
       date: priorityDate(row.record_date),
       waterCut: priorityNumber(row.water_cut),
       block: String(row.block || "").trim(),
     }))
-    .filter((row) => row.wellNo && row.date && row.date <= resolvedAsOfDate && row.waterCut != null)
-    .map((row) => ({ ...row, date: row.date!, waterCut: row.waterCut! }));
+    .filter((row) => row.wellNo && row.date && row.date <= resolvedAsOfDate)
+    .map((row) => ({ ...row, date: row.date! }));
+  const latestLabByWell = new Map<string, (typeof datedLabRows)[number]>();
+  for (const row of datedLabRows) {
+    const key = priorityWellKey(row.wellNo);
+    const previous = latestLabByWell.get(key);
+    if (!previous || row.date > previous.date) latestLabByWell.set(key, row);
+  }
+  const labRows = [...latestLabByWell.values()]
+    .filter((row) => row.waterCut != null)
+    .map((row) => ({ ...row, waterCut: row.waterCut! }));
 
   const productionAvailable = productionResult.available && productionRows.length > 0;
   const waterCutIssues = productionAvailable
@@ -1088,8 +1192,9 @@ async function getIssueAnalysisData(asOfDate?: string) {
       )
     : [];
   const pumpUpload = pumpResult.rows[0] || null;
+  const parsedPumpUpload = parsePriorityPumpUpload(pumpUpload);
   const pumpIssues = productionAvailable
-    ? buildPriorityPumpIssues(pumpUpload, productionRows, resolvedAsOfDate)
+    ? buildPriorityPumpIssues(parsedPumpUpload, productionRows, resolvedAsOfDate)
     : [];
   const blockDeclines = productionAvailable
     ? buildPriorityBlockDeclines(productionRows, resolvedAsOfDate)
@@ -1099,10 +1204,10 @@ async function getIssueAnalysisData(asOfDate?: string) {
   const soaking = trackingDataAvailable
     ? buildPrioritySoaking(soakingResult.rows, trackingResult.rows, resolvedAsOfDate)
     : { wells: [], issues: [] };
-  const injectionPeriod = productionAvailable
+  const injectionPeriod = productionAvailable && trackingDataAvailable
     ? buildPriorityInjectionPeriod(trackingResult.rows, productionRows, resolvedAsOfDate)
     : { comparableRows: [], issues: [] };
-  const restart = productionAvailable
+  const restart = productionAvailable && trackingDataAvailable
     ? buildPriorityRestartTracking(trackingResult.rows, productionRows, resolvedAsOfDate)
     : { restartRows: [], restartSummary: {}, issues: [] };
 
@@ -1129,8 +1234,10 @@ async function getIssueAnalysisData(asOfDate?: string) {
   };
   const pumpCategoryResult: PriorityQueryResult = {
     ...pumpResult,
-    available: pumpResult.available && productionAvailable,
-    unavailableReason: pumpResult.unavailableReason || productionDependencyReason,
+    available: pumpResult.available && productionAvailable && Boolean(parsedPumpUpload),
+    unavailableReason: pumpResult.unavailableReason
+      || productionDependencyReason
+      || (pumpUpload && !parsedPumpUpload ? "检泵上传数据损坏" : undefined),
   };
   const soakingCategoryResult: PriorityQueryResult = {
     ...soakingResult,
@@ -1145,7 +1252,7 @@ async function getIssueAnalysisData(asOfDate?: string) {
     ),
     waterLab: prioritySourceStatus(
       waterCategoryResult,
-      labRows,
+      labResult.rows,
       waterUpdatedAt,
       labResult.rows.find((row) => row.source_file)?.source_file || null,
     ),
@@ -1168,10 +1275,12 @@ async function getIssueAnalysisData(asOfDate?: string) {
       ...(!blockDeclines.some((row) => row.available) ? { unavailableReason: "无完整上年和目标月可比数据" } : {}),
     },
     injectionPeriod: {
-      available: productionAvailable && injectionPeriod.comparableRows.length > 0,
+      available: productionAvailable && trackingDataAvailable && injectionPeriod.comparableRows.length > 0,
       updatedAt: trackingStatus.updatedAt,
       ...(
-        !productionAvailable
+        !trackingDataAvailable
+          ? { unavailableReason: "措施跟踪数据不可用" }
+          : !productionAvailable
           ? { unavailableReason: "生产数据不可用" }
           : injectionPeriod.comparableRows.length === 0
             ? { unavailableReason: "无本轮可比实际施工数据" }
@@ -1179,10 +1288,12 @@ async function getIssueAnalysisData(asOfDate?: string) {
       ),
     },
     restartTracking: {
-      available: productionAvailable && restart.restartRows.length > 0,
+      available: productionAvailable && trackingDataAvailable && restart.restartRows.length > 0,
       updatedAt: trackingStatus.updatedAt,
       ...(
-        !productionAvailable
+        !trackingDataAvailable
+          ? { unavailableReason: "措施跟踪数据不可用" }
+          : !productionAvailable
           ? { unavailableReason: "生产数据不可用" }
           : restart.restartRows.length === 0
             ? { unavailableReason: "无今年或去年复产跟踪数据" }
@@ -1190,6 +1301,7 @@ async function getIssueAnalysisData(asOfDate?: string) {
       ),
     },
   };
+  const legacyAnalysis = buildPriorityLegacyAnalysis(productionRows, resolvedAsOfDate);
 
   return {
     asOfDate: resolvedAsOfDate,
@@ -1201,6 +1313,7 @@ async function getIssueAnalysisData(asOfDate?: string) {
       soaking: soaking.issues.length,
       injectionPeriod: injectionPeriod.issues.length,
       restartTracking: restart.issues.length,
+      ...legacyAnalysis.summary,
     },
     issues: mergePriorityIssues([
       ...pumpIssues,
@@ -1214,6 +1327,9 @@ async function getIssueAnalysisData(asOfDate?: string) {
     soakingWells: soaking.wells,
     restartSummary: restart.restartSummary,
     sourceStatus,
+    water_cut_pie: legacyAnalysis.water_cut_pie,
+    top_water_cut_wells: legacyAnalysis.top_water_cut_wells,
+    decline_warnings: legacyAnalysis.decline_warnings,
   };
 }
 
