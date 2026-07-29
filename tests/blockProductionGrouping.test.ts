@@ -62,8 +62,8 @@ test('expands selected groups to sorted, deduplicated raw block names', () => {
   ];
 
   assert.deepEqual(expandProductionBlockGroups(['高3624'], rawBlocks), [
+    ' 3624块（南）L6 ',
     '3624块(北)L5',
-    '3624块（南）L6',
   ]);
 });
 
@@ -76,6 +76,16 @@ test('server uses deterministic production block grouping for lists and chart qu
   assert.match(
     serverSource,
     /const sourceBlocks = expandProductionBlockGroups\(normalizedBlocks, rawBlocks\);/,
+  );
+  assert.match(serverSource, /const summaryQueryBlocks = sourceBlocks;/);
+  assert.match(serverSource, /const productionQueryBlocks = sourceBlocks;/);
+  assert.match(
+    serverSource,
+    /WHERE scope_type = 'block' AND scope_value = \?[\s\S]*?\[summaryQueryBlocks\[0\]\]/,
+  );
+  assert.match(
+    serverSource,
+    /FROM production[\s\S]*?WHERE block = \?[\s\S]*?\[productionQueryBlocks\[0\]\]/,
   );
   assert.match(
     serverSource,

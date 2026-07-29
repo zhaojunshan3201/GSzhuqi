@@ -35,8 +35,10 @@ export function expandProductionBlockGroups(
   return [
     ...new Set(
       rawBlocks
-        .map((block) => block.trim())
-        .filter((block) => block && selected.has(normalizeProductionBlockGroup(block))),
+        .filter((block) => {
+          const normalizedBlock = normalizeProductionBlockGroup(block);
+          return Boolean(normalizedBlock) && selected.has(normalizedBlock);
+        }),
     ),
   ].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 }
