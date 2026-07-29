@@ -355,3 +355,77 @@ test('聚合六类重点情况并对缺少单一来源保持整体可用', { tim
     }
   }
 });
+
+test('production 表缺失且未传 asOf 时返回稳定空 DTO', { timeout: 30_000 }, async () => {
+  const port = await availablePort();
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'priority-situation-default-asof-'));
+  const dbFile = path.join(directory, 'test.db');
+  await seedDatabase(dbFile);
+  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      LOCAL_ONLY: 'true',
+      NODE_ENV: 'production',
+      LOCAL_DB_FILE: dbFile,
+      AUTH_TOKEN_SECRET: 'priority-default-asof-test-secret',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const exitPromise = new Promise<void>((resolve) => {
+    child.once('exit', () => resolve());
+    child.once('error', () => resolve());
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('server did not start')), 15_000);
+      child.stdout?.on('data', (data: Buffer) => {
+        if (String(data).includes('Server running')) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      child.once('exit', (code, signal) => {
+        clearTimeout(timer);
+        reject(new Error(`server exited ${code ?? signal}`));
+      });
+      child.once('error', reject);
+    });
+
+    const db = await open({ filename: dbFile, driver: sqlite3.Database });
+    try {
+      await db.exec('DROP TABLE production');
+    } finally {
+      await db.close();
+    }
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/analysis/issues`);
+    assert.equal(response.status, 200);
+    const body = await response.json() as any;
+    assert.equal(body.success, true);
+    assert.match(body.data.asOfDate, /^\d{4}-\d{2}-\d{2}$/);
+    assert.deepEqual(body.data.summary, {
+      pump: 0,
+      waterCut: 0,
+      blockDecline: 0,
+      soaking: 0,
+      injectionPeriod: 0,
+      restartTracking: 0,
+    });
+    assert.deepEqual(body.data.issues, []);
+    assert.deepEqual(body.data.blockDeclines, []);
+    assert.deepEqual(body.data.soakingWells, []);
+    assert.deepEqual(body.data.restartSummary, {});
+    assert.equal(body.data.sourceStatus.production.available, false);
+    assert.equal(body.data.sourceStatus.production.unavailableReason, '生产数据不可用，已使用当前日期');
+  } finally {
+    try {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await exitPromise;
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
