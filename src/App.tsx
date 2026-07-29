@@ -4700,7 +4700,7 @@ export default function App() {
     if (activeTab !== 'block' || chartBlocks.length === 0) return;
     if (loading || blockDefaultAutoLoadedRef.current) return;
 
-    const defaultBlock = chartBlocks.includes('高246块') ? '高246块' : chartBlocks[0];
+    const defaultBlock = chartBlocks.includes('高246') ? '高246' : chartBlocks[0];
     const shouldLoadDefault =
       selectedChartBlocks.length === 0 ||
       (selectedChartBlocks.length === 1 && selectedChartBlocks[0] === defaultBlock && !blockChartData);

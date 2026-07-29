@@ -9,6 +9,7 @@ import {
 } from '../src/lib/blockProductionGrouping.ts';
 
 const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
 test('normalizes production block variants into deterministic groups', () => {
   const cases: Array<[string | null | undefined, string]> = [
@@ -101,4 +102,12 @@ test('server uses deterministic production block grouping for lists and chart qu
     serverSource,
     /metaMap\.set\(row\.jh, \{\s*station: row\.station \|\| "",\s*block: row\.block \?\? ""\s*\}\);/,
   );
+});
+
+test('production generator defaults to the unified 高246 block label', () => {
+  assert.match(
+    appSource,
+    /const defaultBlock = chartBlocks\.includes\('高246'\) \? '高246' : chartBlocks\[0\];/,
+  );
+  assert.doesNotMatch(appSource, /chartBlocks\.includes\('高246块'\)/);
 });
