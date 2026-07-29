@@ -18,6 +18,7 @@ test('normalizes production block variants into deterministic groups', () => {
     ['高21(北)', '高21'],
     ['高21南', '高21'],
     ['高21块（南）', '高21'],
+    ['高21块', '高21块'],
     ['高246', '高246'],
     ['高3', '高3'],
     ['高3618', '高3618'],

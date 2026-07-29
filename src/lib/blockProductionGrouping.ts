@@ -11,7 +11,9 @@ export function normalizeProductionBlockGroup(block: string | null | undefined):
   if (/^(?:3块L|高3$)/u.test(normalized)) return '高3';
   if (/^(?:3618块L|高3618$)/u.test(normalized)) return '高3618';
   if (/^(?:3624块|高3624$)/u.test(normalized)) return '高3624';
-  if (/^高21块?(?:\([南北]\)|[南北])?$/u.test(normalized)) return '高21';
+  if (normalized === '高21' || /^高21块?(?:\([南北]\)|[南北])$/u.test(normalized)) {
+    return '高21';
+  }
 
   return trimmed;
 }
