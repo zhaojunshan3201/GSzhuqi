@@ -64,6 +64,11 @@ import { confirmChannelingRelationImport, createChannelingRelationPreview, initC
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
+import {
+  buildProductionBlockGroups,
+  expandProductionBlockGroups,
+  normalizeProductionBlockGroup,
+} from "./src/lib/blockProductionGrouping.ts";
 
 dotenv.config();
 
@@ -175,59 +180,6 @@ function authenticatedUser(req: express.Request): AuthenticatedUser | null {
     return typeof user?.username === "string" && typeof user?.role === "string" ? user : null;
   } catch { return null; }
 }
-const CHART_BLOCK_GROUPS: Record<string, string[]> = {
-  "___246___": ["246___L6", "246___L5"],
-  "___3618___": ["3618___L4", "3618___L5", "3618___L6"],
-  "___3624___": ["3624___(___)L5", "3624___(___)L6", "3624___(___)L5", "3624___(___)L6"],
-  "___3___": ["3___L5", "3___L6", "3___L7", "数据获取失败", "___372108"],
-  "___21___": ["___21(___)", "___21(___)"]
-};
-
-function normalizeBlockAliasKey(block: string) {
-  return block.trim().replace(/\s+/g, "").replace(/\(/g, "___").replace(/\)/g, "___");
-}
-
-function buildRawBlockAliases(block: string) {
-  const base = normalizeBlockAliasKey(block);
-  const variants = new Set<string>([
-    block.trim(),
-    base,
-    base.replace(/___/g, "(").replace(/___/g, ")")
-  ]);
-
-  if (base.includes("_________")) {
-    variants.add(base.replace("_________", "___"));
-    variants.add(base.replace("_________", "(___)"));
-  }
-
-  if (base.includes("_________")) {
-    variants.add(base.replace("_________", "___"));
-    variants.add(base.replace("_________", "(___)"));
-  }
-
-  return Array.from(variants);
-}
-
-const RAW_BLOCK_ALIASES = Object.fromEntries(
-  Object.values(CHART_BLOCK_GROUPS)
-    .flat()
-    .map((block) => [block, buildRawBlockAliases(block)])
-) as Record<string, string[]>;
-
-const RAW_BLOCK_TO_CANONICAL = Object.fromEntries(
-  Object.entries(RAW_BLOCK_ALIASES).flatMap(([canonicalBlock, aliases]) =>
-    aliases.map((alias) => [normalizeBlockAliasKey(alias), canonicalBlock])
-  )
-) as Record<string, string>;
-
-const RAW_BLOCK_TO_CHART_BLOCK = Object.fromEntries(
-  Object.entries(CHART_BLOCK_GROUPS).flatMap(([chartBlock, sourceBlocks]) =>
-    sourceBlocks.flatMap((sourceBlock) =>
-      (RAW_BLOCK_ALIASES[sourceBlock] || [sourceBlock]).map((alias) => [normalizeBlockAliasKey(alias), chartBlock])
-    )
-  )
-) as Record<string, string>;
-
 // --- Oracle Thick Mode Initialization ---
 if (!LOCAL_ONLY_MODE && process.env.ORACLE_LIB_DIR) {
   try {
@@ -538,75 +490,17 @@ function getEmptyAnalysisData() {
   };
 }
 
-function normalizeRawBlock(block: string) {
-  const normalizedKey = normalizeBlockAliasKey(block);
-  return RAW_BLOCK_TO_CANONICAL[normalizedKey] || block.trim();
-}
-
 function normalizeChartBlock(block: string) {
-  const normalizedBlock = normalizeRawBlock(block);
-  const normalizedKey = normalizeBlockAliasKey(normalizedBlock);
-  return RAW_BLOCK_TO_CHART_BLOCK[normalizedKey] || normalizedBlock;
+  return normalizeProductionBlockGroup(block);
 }
 
 function buildChartBlocksList(blocks: string[]) {
-  const seen = new Set<string>();
-  const chartBlocks: string[] = [];
-
-  for (const block of blocks) {
-    const chartBlock = normalizeChartBlock(block);
-    if (!seen.has(chartBlock)) {
-      seen.add(chartBlock);
-      chartBlocks.push(chartBlock);
-    }
-  }
-
-  return chartBlocks;
-}
-
-function getChartBlockSourceBlocks(block: string) {
-  const normalizedBlock = normalizeChartBlock(block);
-  return (CHART_BLOCK_GROUPS[normalizedBlock] || [normalizeRawBlock(block)]).map((sourceBlock) => normalizeRawBlock(sourceBlock));
-}
-
-function getQueryBlocksForSourceBlock(block: string) {
-  const canonicalBlock = normalizeRawBlock(block);
-  return RAW_BLOCK_ALIASES[canonicalBlock] || [canonicalBlock];
+  return buildProductionBlockGroups(blocks);
 }
 
 function normalizeSelectedChartBlocks(blocks: string[]) {
-  const seen = new Set<string>();
-  const normalizedBlocks: string[] = [];
-
-  for (const block of blocks) {
-    const normalizedBlock = normalizeChartBlock(block);
-    if (!normalizedBlock || seen.has(normalizedBlock)) {
-      continue;
-    }
-    seen.add(normalizedBlock);
-    normalizedBlocks.push(normalizedBlock);
-  }
-
-  return normalizedBlocks.sort((a, b) => a.localeCompare(b, "zh-CN"));
+  return buildProductionBlockGroups(blocks);
 }
-
-function expandChartBlocksToSourceBlocks(blocks: string[]) {
-  const seen = new Set<string>();
-  const sourceBlocks: string[] = [];
-
-  for (const block of blocks) {
-    for (const sourceBlock of getChartBlockSourceBlocks(block)) {
-      if (!sourceBlock || seen.has(sourceBlock)) {
-        continue;
-      }
-      seen.add(sourceBlock);
-      sourceBlocks.push(sourceBlock);
-    }
-  }
-
-  return sourceBlocks.sort((a, b) => a.localeCompare(b, "zh-CN"));
-}
-
 function buildBlockChartCacheKey(blocks: string[]) {
   return normalizeSelectedChartBlocks(blocks).join("||");
 }
@@ -909,7 +803,9 @@ async function getDashboardBootstrapData() {
     console.log(`[${new Date().toISOString()}] /api/dashboard/bootstrap _________SQLite_________`);
     const liveSyncStatus = await getSyncStatus();
     const cachedBlocks = Array.isArray(cached.payload?.blocks) ? cached.payload.blocks : [];
-    const normalizedChartBlocks = Array.isArray(cached.payload?.chartBlocks) ? cached.payload.chartBlocks : buildChartBlocksList(cachedBlocks);
+    const normalizedChartBlocks = buildProductionBlockGroups(
+      Array.isArray(cached.payload?.chartBlocks) ? cached.payload.chartBlocks : cachedBlocks
+    );
     return {
       ...cached.payload,
       blocks: normalizedChartBlocks,
@@ -1295,14 +1191,13 @@ async function getBlockChartRows(blocks: string[]) {
     return { rows: cached, source: "memory" };
   }
 
-  const sourceBlocks = expandChartBlocksToSourceBlocks(normalizedBlocks);
+  const rawBlocks = await getBlocksList();
+  const sourceBlocks = expandProductionBlockGroups(normalizedBlocks, rawBlocks);
   if (sourceBlocks.length === 0) {
     return { rows: [], source: "summary" };
   }
 
-  const placeholders = sourceBlocks.map(() => "?").join(", ");
-
-  const summaryQueryBlocks = Array.from(new Set(sourceBlocks.flatMap((block) => getQueryBlocksForSourceBlock(block))));
+  const summaryQueryBlocks = sourceBlocks;
   const summaryPlaceholders = summaryQueryBlocks.map(() => "?").join(", ");
 
   const summaryRows = summaryQueryBlocks.length === 1
@@ -1338,7 +1233,7 @@ async function getBlockChartRows(blocks: string[]) {
     return { rows: summaryRows, source: "summary" };
   }
 
-  const productionQueryBlocks = Array.from(new Set(sourceBlocks.flatMap((block) => getQueryBlocksForSourceBlock(block))));
+  const productionQueryBlocks = sourceBlocks;
   const productionPlaceholders = productionQueryBlocks.map(() => "?").join(", ");
 
   const rows = productionQueryBlocks.length === 1

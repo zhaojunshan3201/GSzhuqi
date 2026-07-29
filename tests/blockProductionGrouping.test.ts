@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -6,6 +7,8 @@ import {
   expandProductionBlockGroups,
   normalizeProductionBlockGroup,
 } from '../src/lib/blockProductionGrouping.ts';
+
+const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
 
 test('normalizes production block variants into deterministic groups', () => {
   const cases: Array<[string | null | undefined, string]> = [
@@ -62,4 +65,21 @@ test('expands selected groups to sorted, deduplicated raw block names', () => {
     '3624块(北)L5',
     '3624块（南）L6',
   ]);
+});
+
+test('server uses deterministic production block grouping for lists and chart queries', () => {
+  assert.match(
+    serverSource,
+    /function buildChartBlocksList\(blocks: string\[\]\) \{\s*return buildProductionBlockGroups\(blocks\);\s*\}/,
+  );
+  assert.match(serverSource, /const rawBlocks = await getBlocksList\(\);/);
+  assert.match(
+    serverSource,
+    /const sourceBlocks = expandProductionBlockGroups\(normalizedBlocks, rawBlocks\);/,
+  );
+  assert.match(
+    serverSource,
+    /const normalizedChartBlocks = buildProductionBlockGroups\(\s*Array\.isArray\(cached\.payload\?\.chartBlocks\)/,
+  );
+  assert.doesNotMatch(serverSource, /const CHART_BLOCK_GROUPS/);
 });
