@@ -52,6 +52,24 @@ test('builds a sorted, deduplicated list of production block groups', () => {
   assert.deepEqual(buildProductionBlockGroups(rawBlocks), ['高10', '高246', '高3624']);
 });
 
+test('groups only explicit 3624 direction and layer formats', () => {
+  for (const block of [
+    '3624\u5757\u5317L5',
+    '3624\u5757\u5357',
+    '3624\u5757L7',
+  ]) {
+    assert.equal(normalizeProductionBlockGroup(block), '\u9ad83624');
+  }
+
+  for (const block of [
+    '3624\u5757',
+    '3624\u5757\u5176\u5b83',
+    '3624\u5757\u4e1cL5',
+  ]) {
+    assert.equal(normalizeProductionBlockGroup(block), block);
+  }
+});
+
 test('expands selected groups to sorted, deduplicated raw block names', () => {
   const rawBlocks = [
     '246块L5',
@@ -91,6 +109,22 @@ test('server uses deterministic production block grouping for lists and chart qu
   assert.match(
     serverSource,
     /const normalizedChartBlocks = buildProductionBlockGroups\(\s*Array\.isArray\(cached\.payload\?\.chartBlocks\)/,
+  );
+  assert.match(
+    serverSource,
+    /async function getBlocksCacheData\(\)[\s\S]*?return Array\.isArray\(cached\.payload\) \? cached\.payload : \[\];/,
+  );
+  assert.match(
+    serverSource,
+    /blocks: cachedBlocks,\s*chartBlocks: normalizedChartBlocks,/,
+  );
+  assert.match(
+    serverSource,
+    /async function buildDashboardBootstrapPayload\(\)[\s\S]*?blocks: rawBlocks,\s*chartBlocks: buildChartBlocksList\(rawBlocks\),/,
+  );
+  assert.match(
+    serverSource,
+    /async function buildLightweightDashboardBootstrapPayload\(\)[\s\S]*?blocks: rawBlocks,\s*chartBlocks,/,
   );
   assert.doesNotMatch(serverSource, /const CHART_BLOCK_GROUPS/);
   assert.doesNotMatch(serverSource, /normalizeChartBlock/);

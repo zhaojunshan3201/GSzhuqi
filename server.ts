@@ -85,6 +85,8 @@ const DASHBOARD_BOOTSTRAP_CACHE_KEY = "dashboard_bootstrap";
 const WELLS_CACHE_KEY = "wells_list";
 const BLOCKS_CACHE_KEY = "blocks_list";
 const STATIONS_CACHE_KEY = "stations_list";
+const HOMEPAGE_CACHE_SCHEMA_VERSION_KEY = "homepage_cache_schema_version";
+const HOMEPAGE_CACHE_SCHEMA_VERSION = "2";
 const CHART_CACHE_TTL_MS = 1000 * 60 * 5;
 const INCREMENTAL_SYNC_INTERVAL_MS = 1000 * 60 * 60 * 4;
 const DAILY_REBUILD_CHECK_INTERVAL_MS = 1000 * 60 * 60;
@@ -619,8 +621,28 @@ async function getHomepageCache<T>(key: string): Promise<{ payload: T; updatedAt
   }
 }
 
+async function ensureHomepageCacheSchemaVersion() {
+  const current = await localDb.get(
+    "SELECT value FROM sync_meta WHERE key = ?",
+    [HOMEPAGE_CACHE_SCHEMA_VERSION_KEY]
+  );
+  if (current?.value === HOMEPAGE_CACHE_SCHEMA_VERSION) {
+    return;
+  }
+
+  await localDb.run("BEGIN TRANSACTION");
+  try {
+    await localDb.run("DELETE FROM homepage_cache");
+    await setSyncMeta(HOMEPAGE_CACHE_SCHEMA_VERSION_KEY, HOMEPAGE_CACHE_SCHEMA_VERSION);
+    await localDb.run("COMMIT");
+  } catch (error) {
+    await localDb.run("ROLLBACK");
+    throw error;
+  }
+}
+
 async function buildDashboardBootstrapPayload() {
-  const [overallRows, analysisData, blocks, stations, syncStatus] = await Promise.all([
+  const [overallRows, analysisData, rawBlocks, stations, syncStatus] = await Promise.all([
     getOverallChartRows(),
     getIssueAnalysisData(),
     getBlocksCacheData(),
@@ -631,8 +653,8 @@ async function buildDashboardBootstrapPayload() {
   return {
     overallData: buildChartData(overallRows),
     analysisData,
-    blocks: buildChartBlocksList(blocks),
-    chartBlocks: buildChartBlocksList(blocks),
+    blocks: rawBlocks,
+    chartBlocks: buildChartBlocksList(rawBlocks),
     stations,
     syncStatus
   };
@@ -662,7 +684,7 @@ async function buildLightweightDashboardBootstrapPayload() {
   return {
     overallData: overallRows.length > 0 ? buildChartData(overallRows) : buildEmptyChartData(),
     analysisData,
-    blocks: chartBlocks,
+    blocks: rawBlocks,
     chartBlocks,
     stations: rawStations,
     syncStatus
@@ -764,12 +786,12 @@ async function getBlocksCacheData() {
   const cached = await getHomepageCache<string[]>(BLOCKS_CACHE_KEY);
   if (cached) {
     console.log(`[${new Date().toISOString()}] /api/blocks _________SQLite_________`);
-    return buildChartBlocksList(Array.isArray(cached.payload) ? cached.payload : []);
+    return Array.isArray(cached.payload) ? cached.payload : [];
   }
 
   console.log(`[${new Date().toISOString()}] /api/blocks ___________________________`);
   const warmed = await warmBlocksCache();
-  return buildChartBlocksList(warmed.data);
+  return warmed.data;
 }
 
 async function getStationsCacheData() {
@@ -795,7 +817,7 @@ async function getDashboardBootstrapData() {
     );
     return {
       ...cached.payload,
-      blocks: normalizedChartBlocks,
+      blocks: cachedBlocks,
       chartBlocks: normalizedChartBlocks,
       syncStatus: liveSyncStatus,
       cacheWarm: Boolean(cached.sourceDate),
@@ -1005,6 +1027,7 @@ async function initLocalDb() {
     CREATE INDEX IF NOT EXISTS idx_well_map_category_wells_well ON well_map_category_wells(well_no);
   `);
 
+  await ensureHomepageCacheSchemaVersion();
   await initWellTemperatureTables(localDb);
   await initMeasureWellSelectionTables(localDb);
   await initInjectionSelectionTables(localDb);

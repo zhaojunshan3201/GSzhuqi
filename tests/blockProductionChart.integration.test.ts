@@ -44,12 +44,33 @@ async function seedChartDatabase(dbFile: string) {
         UNIQUE(rq, scope_type, scope_value) ON CONFLICT REPLACE
       );
       CREATE TABLE sync_meta (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE homepage_cache (
+        cache_key TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        source_date TEXT
+      );
     `);
     await db.run(
       `INSERT INTO sync_meta (key, value) VALUES
         ('water_cut_formula_version', '2026-04-14-v4'),
-        ('gas_formula_version', '2026-04-14-v2')`,
+        ('gas_formula_version', '2026-04-14-v2'),
+        ('homepage_cache_schema_version', '1')`,
     );
+    for (const [key, payload] of [
+      ['wells_list', [{ jh: 'S-1', block: chartBlock, station: 'legacy' }]],
+      ['blocks_list', [chartBlock, '\u9ad821\u5757']],
+      ['dashboard_bootstrap', {
+        blocks: [chartBlock, '\u9ad821\u5757'],
+        chartBlocks: [chartBlock, '\u9ad821\u5757'],
+      }],
+    ] as const) {
+      await db.run(
+        `INSERT INTO homepage_cache (cache_key, payload, updated_at, source_date)
+         VALUES (?, ?, '2026-07-01T00:00:00.000Z', '2026-07-01')`,
+        [key, JSON.stringify(payload)],
+      );
+    }
     for (const row of [
       ['N-1', 60, 15, 5, 3, northBlock],
       ['N-2', 60, 10, 5, 5, northBlock],
@@ -138,6 +159,31 @@ test('block chart uses exact raw SQLite blocks for summary and production fallba
     assert.equal(wellsResponse.status, 200);
     const wells = (await wellsResponse.json() as any).data;
     assert.equal(wells.find((well: any) => well.jh === 'S-1').block, southBlock);
+
+    const blocksResponse = await fetch(`http://127.0.0.1:${port}/api/blocks`);
+    assert.equal(blocksResponse.status, 200);
+    const blocks = (await blocksResponse.json() as any).data;
+    assert.deepEqual([...blocks].sort(), [northBlock, southBlock].sort());
+
+    const bootstrapResponse = await fetch(`http://127.0.0.1:${port}/api/dashboard/bootstrap`);
+    assert.equal(bootstrapResponse.status, 200);
+    const bootstrap = (await bootstrapResponse.json() as any).data;
+    assert.deepEqual([...bootstrap.blocks].sort(), [northBlock, southBlock].sort());
+    assert.deepEqual(bootstrap.chartBlocks, [chartBlock]);
+    assert.deepEqual(
+      wells.filter((well: any) => well.block === southBlock).map((well: any) => well.jh),
+      ['S-1'],
+    );
+
+    const versionDb = await open({ filename: dbFile, driver: sqlite3.Database });
+    try {
+      const version = await versionDb.get(
+        `SELECT value FROM sync_meta WHERE key = 'homepage_cache_schema_version'`,
+      );
+      assert.equal(version?.value, '2');
+    } finally {
+      await versionDb.close();
+    }
 
     const summaryResponse = await fetch(
       `http://127.0.0.1:${port}/api/chart/block?block=${encodeURIComponent(chartBlock)}`,
