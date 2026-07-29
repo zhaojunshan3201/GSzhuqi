@@ -62,6 +62,58 @@ test('含水对比没有7天内有效同井报产时不生成问题', () => {
   );
 });
 
+test('含水对比仅接受严格ISO日期，非法日历日期不匹配', () => {
+  assert.deepEqual(
+    buildWaterCutIssues(
+      [{ wellNo: '非法化验日期', date: '2026-02-30', waterCut: 70 }],
+      [{ wellNo: '非法化验日期', date: '2026-03-01', waterCut: 40 }],
+    ),
+    [],
+  );
+  assert.deepEqual(
+    buildWaterCutIssues(
+      [{ wellNo: '非法报产日期', date: '2026-03-01', waterCut: 70 }],
+      [{ wellNo: '非法报产日期', date: '2026-02-30', waterCut: 40 }],
+    ),
+    [],
+  );
+  assert.deepEqual(
+    buildWaterCutIssues(
+      [{ wellNo: '非纯日期', date: '2026-03-01T00:00:00Z', waterCut: 70 }],
+      [{ wellNo: '非纯日期', date: '2026-03-01', waterCut: 40 }],
+    ),
+    [],
+  );
+});
+
+test('含水输入仅接受0到100之间的有限值，并忽略无效的最近候选', () => {
+  for (const waterCut of [Number.NaN, Number.POSITIVE_INFINITY, -1, 101]) {
+    assert.deepEqual(
+      buildWaterCutIssues(
+        [{ wellNo: '非法化验值', date: '2026-07-10', waterCut }],
+        [{ wellNo: '非法化验值', date: '2026-07-10', waterCut: 40 }],
+      ),
+      [],
+    );
+    assert.deepEqual(
+      buildWaterCutIssues(
+        [{ wellNo: '非法报产值', date: '2026-07-10', waterCut: 70 }],
+        [{ wellNo: '非法报产值', date: '2026-07-10', waterCut }],
+      ),
+      [],
+    );
+  }
+
+  const issues = buildWaterCutIssues(
+    [{ wellNo: '有效边界值', date: '2026-07-10', waterCut: 100 }],
+    [
+      { wellNo: '有效边界值', date: '2026-07-10', waterCut: Number.NaN },
+      { wellNo: '有效边界值', date: '2026-07-08', waterCut: 0 },
+    ],
+  );
+  assert.equal(issues[0].deviation, 100);
+});
+
 test('区块递减率按年度折算口径计算并保留1位小数', () => {
   assert.equal(calculateBlockDeclineRate(3650, 8, 365), 20);
   assert.equal(calculateBlockDeclineRate(3000, 7.123, 365), 13.3);
@@ -76,6 +128,8 @@ test('区块递减率在输入超出有效范围或不是有限数时返回null'
   assert.equal(calculateBlockDeclineRate(3650, 8, 0), null);
   assert.equal(calculateBlockDeclineRate(3650, 8, -365), null);
   assert.equal(calculateBlockDeclineRate(3650, 8, Number.NaN), null);
+  assert.equal(calculateBlockDeclineRate(Number.MAX_VALUE, Number.MAX_VALUE, 2), null);
+  assert.equal(calculateBlockDeclineRate(Number.MIN_VALUE, Number.MAX_VALUE, 1), null);
 });
 
 test('注汽同期同时保留变好与变差井，并按变化率绝对值倒序', () => {
@@ -98,6 +152,9 @@ test('注汽同期严格排除正负20%、上轮非正数和非数值行', () =>
     { wellNo: '零基准', currentAverageOil: 10, previousAverageOil: 0 },
     { wellNo: '负基准', currentAverageOil: 10, previousAverageOil: -1 },
     { wellNo: '非数', currentAverageOil: Number.NaN, previousAverageOil: 10 },
+    { wellNo: '无穷大', currentAverageOil: Number.POSITIVE_INFINITY, previousAverageOil: 10 },
+    { wellNo: '负产油', currentAverageOil: -1, previousAverageOil: 10 },
+    { wellNo: '变化溢出', currentAverageOil: Number.MAX_VALUE, previousAverageOil: Number.MIN_VALUE },
   ]);
   assert.deepEqual(issues, []);
 });
@@ -129,6 +186,13 @@ test('统一清单按风险、偏差绝对值和数据日期依次排序且不�
   assert.deepEqual(items.map((item) => item.id), ['medium', 'high-old', 'high-new', 'high-large', 'low']);
 });
 
+test('统一清单在所有排序键完全相同时保持输入顺序', () => {
+  const items = ['first', 'second', 'third'].map((id) =>
+    issue({ id, severity: 'medium', deviation: -21, dataDate: '2026-07-30' }));
+
+  assert.deepEqual(mergePriorityIssues(items).map((item) => item.id), ['first', 'second', 'third']);
+});
+
 test('检泵恢复率按百分比保留1位，无效数据返回null', () => {
   assert.equal(calculatePumpRecoveryRate(8.456, 10), 84.6);
   assert.equal(calculatePumpRecoveryRate(null, 10), null);
@@ -137,12 +201,21 @@ test('检泵恢复率按百分比保留1位，无效数据返回null', () => {
   assert.equal(calculatePumpRecoveryRate(-1, 10), null);
   assert.equal(calculatePumpRecoveryRate(Number.NaN, 10), null);
   assert.equal(calculatePumpRecoveryRate(8, Number.POSITIVE_INFINITY), null);
+  assert.equal(calculatePumpRecoveryRate(Number.MAX_VALUE, Number.MIN_VALUE), null);
+  assert.equal(calculatePumpRecoveryRate(Number.MAX_VALUE, 2), null);
 });
 
-test('焖井天数使用UTC整天差并且最小为0', () => {
+test('焖井天数使用严格ISO日期计算UTC整天差并且最小为0', () => {
   assert.equal(calculateSoakingDays('2026-07-01', '2026-07-10'), 9);
-  assert.equal(calculateSoakingDays('2026-07-10T23:59:59+08:00', '2026-07-12T00:01:00+08:00'), 2);
   assert.equal(calculateSoakingDays('2026-07-10', '2026-07-09'), 0);
+  assert.equal(calculateSoakingDays('2024-02-28', '2024-03-01'), 2);
+});
+
+test('焖井天数遇到无效或非纯ISO日期时返回null', () => {
+  assert.equal(calculateSoakingDays('2026-02-30', '2026-03-01'), null);
+  assert.equal(calculateSoakingDays('2026-07-01', '2026-13-01'), null);
+  assert.equal(calculateSoakingDays('2026-07-01T00:00:00Z', '2026-07-10'), null);
+  assert.equal(calculateSoakingDays('', '2026-07-10'), null);
 });
 
 test('复产跟踪按年份和类别聚合，缺失产油只计缺失井不虚构产量', () => {
@@ -191,6 +264,20 @@ test('复产跟踪总产油只累加有限数值', () => {
 
   assert.equal(summary['2026:复产'].totalOil, 2);
   assert.equal(summary['2026:复产'].missingWells, 2);
+});
+
+test('复产跟踪无有效产油时总产油为null，真实0保持为0', () => {
+  const summary = summarizeRestartTracking([
+    { year: 2026, category: '全缺失', currentOil: null, producing: false },
+    { year: 2026, category: '全缺失', currentOil: Number.NaN, producing: false },
+    { year: 2026, category: '全缺失', currentOil: -1, producing: false },
+    { year: 2026, category: '真实零', currentOil: 0, producing: false },
+  ]);
+
+  assert.equal(summary['2026:全缺失'].totalOil, null);
+  assert.equal(summary['2026:全缺失'].missingWells, 3);
+  assert.equal(summary['2026:真实零'].totalOil, 0);
+  assert.equal(summary['2026:真实零'].missingWells, 0);
 });
 
 function issue(overrides: Partial<PriorityIssue> & Pick<PriorityIssue, 'id'>): PriorityIssue {

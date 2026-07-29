@@ -50,19 +50,27 @@ export type RestartTrackingSummary = {
   category: string;
   wells: number;
   producingWells: number;
-  totalOil: number;
+  totalOil: number | null;
   missingWells: number;
 };
 
 const DAY_MS = 86_400_000;
 
-function utcDay(value: string): number {
-  const date = value.slice(0, 10);
-  return Date.parse(`${date}T00:00:00Z`);
+function utcDay(value: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  if (!Number.isFinite(timestamp)) return null;
+  return new Date(timestamp).toISOString().slice(0, 10) === value ? timestamp : null;
 }
 
-function dayDistance(left: string, right: string): number {
-  return Math.abs(utcDay(left) - utcDay(right)) / DAY_MS;
+function dayDistance(left: string, right: string): number | null {
+  const leftDay = utcDay(left);
+  const rightDay = utcDay(right);
+  return leftDay == null || rightDay == null ? null : Math.abs(leftDay - rightDay) / DAY_MS;
+}
+
+function validWaterCut(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 100;
 }
 
 export function buildWaterCutIssues(
@@ -70,12 +78,17 @@ export function buildWaterCutIssues(
   productionRows: WaterCutRow[],
 ): PriorityIssue[] {
   return labRows.flatMap((lab) => {
+    if (!validWaterCut(lab.waterCut) || utcDay(lab.date) == null) return [];
     const production = productionRows
-      .filter((row) => row.wellNo === lab.wellNo && dayDistance(row.date, lab.date) <= 7)
-      .sort((left, right) => dayDistance(left.date, lab.date) - dayDistance(right.date, lab.date))[0];
+      .flatMap((row) => {
+        if (row.wellNo !== lab.wellNo || !validWaterCut(row.waterCut)) return [];
+        const distance = dayDistance(row.date, lab.date);
+        return distance != null && distance <= 7 ? [{ row, distance }] : [];
+      })
+      .sort((left, right) => left.distance - right.distance)[0]?.row;
     if (!production) return [];
 
-    const deviation = Math.abs(Number(lab.waterCut) - Number(production.waterCut));
+    const deviation = Math.abs(lab.waterCut - production.waterCut);
     if (!(deviation > 20)) return [];
 
     return [{
@@ -110,7 +123,9 @@ export function calculateBlockDeclineRate(
   ) return null;
 
   const annualizedOil = monthlyAverageOil * yearDays;
-  return Number((((previousYearOil - annualizedOil) / previousYearOil) * 100).toFixed(1));
+  if (!Number.isFinite(annualizedOil)) return null;
+  const rate = ((previousYearOil - annualizedOil) / previousYearOil) * 100;
+  return Number.isFinite(rate) ? Number(rate.toFixed(1)) : null;
 }
 
 export function buildInjectionPeriodIssues(rows: InjectionPeriodRow[]): PriorityIssue[] {
@@ -119,10 +134,11 @@ export function buildInjectionPeriodIssues(rows: InjectionPeriodRow[]): Priority
       !Number.isFinite(row.previousAverageOil)
       || row.previousAverageOil <= 0
       || !Number.isFinite(row.currentAverageOil)
+      || row.currentAverageOil < 0
     ) return [];
 
     const change = ((row.currentAverageOil - row.previousAverageOil) / row.previousAverageOil) * 100;
-    if (Math.abs(change) <= 20) return [];
+    if (!Number.isFinite(change) || Math.abs(change) <= 20) return [];
 
     return [{
       id: `injectionPeriod:${row.wellNo}`,
@@ -167,12 +183,15 @@ export function calculatePumpRecoveryRate(
     || beforeOil <= 0
   ) return null;
 
-  return Number(((currentOil / beforeOil) * 100).toFixed(1));
+  const rate = (currentOil / beforeOil) * 100;
+  return Number.isFinite(rate) ? Number(rate.toFixed(1)) : null;
 }
 
-export function calculateSoakingDays(stopDate: string, asOfDate: string): number {
-  const difference = Math.floor((utcDay(asOfDate) - utcDay(stopDate)) / DAY_MS);
-  return Number.isFinite(difference) ? Math.max(0, difference) : 0;
+export function calculateSoakingDays(stopDate: string, asOfDate: string): number | null {
+  const stopDay = utcDay(stopDate);
+  const asOfDay = utcDay(asOfDate);
+  if (stopDay == null || asOfDay == null) return null;
+  return Math.max(0, Math.floor((asOfDay - stopDay) / DAY_MS));
 }
 
 export function summarizeRestartTracking(
@@ -185,13 +204,13 @@ export function summarizeRestartTracking(
       category: row.category,
       wells: 0,
       producingWells: 0,
-      totalOil: 0,
+      totalOil: null,
       missingWells: 0,
     };
     const hasOil = row.currentOil != null && Number.isFinite(row.currentOil) && row.currentOil >= 0;
     item.wells += 1;
     item.producingWells += row.producing ? 1 : 0;
-    item.totalOil += hasOil ? row.currentOil! : 0;
+    if (hasOil) item.totalOil = (item.totalOil ?? 0) + row.currentOil!;
     item.missingWells += hasOil ? 0 : 1;
     return summary;
   }, {});
