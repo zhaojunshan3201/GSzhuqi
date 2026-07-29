@@ -16,6 +16,7 @@ test('含水绝对偏差必须严格大于20个百分点，并取同井7天内�
   const issues = buildWaterCutIssues(
     [{ wellNo: '高-1', block: '高区', date: '2026-07-10', waterCut: 68 }],
     [
+      { wellNo: '高-1', date: '2026-07-05', waterCut: 20 },
       { wellNo: '高-1', date: '2026-07-08', waterCut: 47 },
       { wellNo: '高-1', date: '2026-06-30', waterCut: 10 },
       { wellNo: '高-2', date: '2026-07-10', waterCut: 1 },
@@ -66,11 +67,14 @@ test('区块递减率按年度折算口径计算并保留1位小数', () => {
   assert.equal(calculateBlockDeclineRate(3000, 7.123, 365), 13.3);
 });
 
-test('区块递减率在上年产油无效、非正数或任一参数非数时返回null', () => {
+test('区块递减率在输入超出有效范围或不是有限数时返回null', () => {
   assert.equal(calculateBlockDeclineRate(0, 8, 365), null);
   assert.equal(calculateBlockDeclineRate(-1, 8, 365), null);
   assert.equal(calculateBlockDeclineRate(Number.NaN, 8, 365), null);
+  assert.equal(calculateBlockDeclineRate(3650, -1, 365), null);
   assert.equal(calculateBlockDeclineRate(3650, Number.POSITIVE_INFINITY, 365), null);
+  assert.equal(calculateBlockDeclineRate(3650, 8, 0), null);
+  assert.equal(calculateBlockDeclineRate(3650, 8, -365), null);
   assert.equal(calculateBlockDeclineRate(3650, 8, Number.NaN), null);
 });
 
@@ -130,6 +134,7 @@ test('检泵恢复率按百分比保留1位，无效数据返回null', () => {
   assert.equal(calculatePumpRecoveryRate(null, 10), null);
   assert.equal(calculatePumpRecoveryRate(8, null), null);
   assert.equal(calculatePumpRecoveryRate(8, 0), null);
+  assert.equal(calculatePumpRecoveryRate(-1, 10), null);
   assert.equal(calculatePumpRecoveryRate(Number.NaN, 10), null);
   assert.equal(calculatePumpRecoveryRate(8, Number.POSITIVE_INFINITY), null);
 });
@@ -181,10 +186,11 @@ test('复产跟踪总产油只累加有限数值', () => {
   const summary = summarizeRestartTracking([
     { year: 2026, category: '复产', currentOil: 2, producing: true },
     { year: 2026, category: '复产', currentOil: Number.NaN, producing: false },
+    { year: 2026, category: '复产', currentOil: -3, producing: false },
   ]);
 
   assert.equal(summary['2026:复产'].totalOil, 2);
-  assert.equal(summary['2026:复产'].missingWells, 1);
+  assert.equal(summary['2026:复产'].missingWells, 2);
 });
 
 function issue(overrides: Partial<PriorityIssue> & Pick<PriorityIssue, 'id'>): PriorityIssue {

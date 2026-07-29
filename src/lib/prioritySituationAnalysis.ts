@@ -104,7 +104,9 @@ export function calculateBlockDeclineRate(
     !Number.isFinite(previousYearOil)
     || previousYearOil <= 0
     || !Number.isFinite(monthlyAverageOil)
+    || monthlyAverageOil < 0
     || !Number.isFinite(yearDays)
+    || yearDays <= 0
   ) return null;
 
   const annualizedOil = monthlyAverageOil * yearDays;
@@ -160,6 +162,7 @@ export function calculatePumpRecoveryRate(
     currentOil == null
     || beforeOil == null
     || !Number.isFinite(currentOil)
+    || currentOil < 0
     || !Number.isFinite(beforeOil)
     || beforeOil <= 0
   ) return null;
@@ -185,7 +188,7 @@ export function summarizeRestartTracking(
       totalOil: 0,
       missingWells: 0,
     };
-    const hasOil = row.currentOil != null && Number.isFinite(row.currentOil);
+    const hasOil = row.currentOil != null && Number.isFinite(row.currentOil) && row.currentOil >= 0;
     item.wells += 1;
     item.producingWells += row.producing ? 1 : 0;
     item.totalOil += hasOil ? row.currentOil! : 0;
