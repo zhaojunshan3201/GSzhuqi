@@ -1211,8 +1211,11 @@ async function getIssueAnalysisData(asOfDate?: string) {
     ? buildPriorityRestartTracking(trackingResult.rows, productionRows, resolvedAsOfDate)
     : { restartRows: [], restartSummary: {}, issues: [] };
 
-  const trackingFileRows = trackingResult.rows
-    .filter((row) => String(row.source_batch || "").trim())
+  const trackingSourceRows = trackingResult.rows
+    .filter((row) => String(row.source_batch || "").trim());
+  const sameYearTrackingRows = trackingSourceRows
+    .filter((row) => String(row.batch_year || "") === resolvedAsOfDate.slice(0, 4));
+  const trackingFileRows = (sameYearTrackingRows.length > 0 ? sameYearTrackingRows : trackingSourceRows)
     .sort((left, right) =>
       String(right.updated_at || "").localeCompare(String(left.updated_at || ""))
       || Number(right.id || 0) - Number(left.id || 0));
@@ -3140,6 +3143,20 @@ function parseMeasureImportFile(fileName: string, buffer: Buffer) {
     }
 
     const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
+    const headerFields = new Set(
+      Object.keys(rawRows[0] || {})
+        .map((header) => getMeasureImportFieldByAlias(normalizeMeasureImportHeader(header)))
+        .filter(Boolean),
+    );
+    const missingFields: string[] = [];
+    if (!headerFields.has("jh")) missingFields.push("井号");
+    if (!headerFields.has("current_round_measure_type") && !headerFields.has("measure_name")) {
+      missingFields.push("措施类型/类别");
+    }
+    if (!headerFields.has("current_round_transfer_time")) missingFields.push("年份或日期");
+    if (missingFields.length > 0) {
+      throw new MeasureImportParseError(`缺少必需字段：${missingFields.join("、")}`);
+    }
     const parsed = parseMeasureImportRows(rawRows);
     if (parsed.rows.length === 0) {
       throw new MeasureImportParseError("未从Excel文件中解析到有效的措施记录");
@@ -3605,10 +3622,10 @@ async function getMeasuresData(query: any) {
   };
 }
 
-async function replaceMeasuresData(rows: any[], year?: string) {
+async function replaceMeasuresData(rows: any[], year?: string, sourceFileName?: string) {
   const batchId = new Date().toISOString();
   const normalizedRows = rows
-    .map((row) => normalizeMeasurePayload(row, batchId))
+    .map((row) => normalizeMeasurePayload(row, sourceFileName || batchId))
     .filter(Boolean) as MeasureRecord[];
 
   if (normalizedRows.length === 0) {
@@ -5037,7 +5054,11 @@ app.post("/api/register", async (req, res) => {
         return;
       }
       const year = (typeof req.query.year === 'string' && req.query.year) || (typeof req.body?.year === 'string' ? req.body.year : undefined);
-      const result = await replaceMeasuresData(rows, year);
+      const result = await replaceMeasuresData(
+        rows,
+        year,
+        uploadedFile ? decodeUploadedFileName(uploadedFile.originalname) : undefined,
+      );
       res.json({
         success: true,
         message: `导入成功，${year ? year + '年 ' : ''}共 ${result.count} 条记录`,

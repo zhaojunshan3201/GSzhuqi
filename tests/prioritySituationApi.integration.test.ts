@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import * as XLSX from 'xlsx';
 import { formatShanghaiBusinessDate } from '../src/lib/businessDate.ts';
 
 async function availablePort(): Promise<number> {
@@ -280,6 +281,29 @@ async function withSeededPriorityServer(
       await rm(directory, { recursive: true, force: true });
     }
   }
+}
+
+function buildMeasureWorkbook(rows: Record<string, unknown>[]) {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), '措施跟踪');
+  return XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
+}
+
+async function uploadMeasureWorkbook(
+  baseUrl: string,
+  endpoint: string,
+  fileName: string,
+  rows: Record<string, unknown>[],
+) {
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([new Uint8Array(buildMeasureWorkbook(rows))], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }),
+    fileName,
+  );
+  return fetch(`${baseUrl}${endpoint}`, { method: 'POST', body: form });
 }
 
 test('聚合六类重点情况并对缺少单一来源保持整体可用', { timeout: 30_000 }, async () => {
@@ -658,5 +682,54 @@ test('soak_transfer_report_rows 单独缺失只关闭焖井来源', { timeout: 3
     assert.equal(body.data.sourceStatus.soaking.available, false);
     assert.equal(body.data.sourceStatus.tracking.available, true);
     assert.equal(body.data.summary.waterCut, 1);
+  });
+});
+
+test('措施跟踪上传后措施页与重点情况分析共享同一批数据', { timeout: 30_000 }, async () => {
+  await withSeededPriorityServer('priority-shared-tracking-', async ({ baseUrl }) => {
+    const upload = await uploadMeasureWorkbook(
+      baseUrl,
+      '/api/measures/import?year=2026',
+      '重点跟踪.xlsx',
+      [{
+        井号: '高3-试1',
+        区块: '高三区',
+        措施类型: '吞吐',
+        目前状态: '生产',
+        转抽时间: '2026-07-15',
+      }],
+    );
+    assert.equal(upload.status, 200);
+    const uploadBody = await upload.json() as any;
+    assert.equal(uploadBody.success, true);
+    assert.equal(uploadBody.count, 1);
+
+    const measures2026 = await (await fetch(`${baseUrl}/api/measures?year=2026`)).json() as any;
+    assert.deepEqual(measures2026.data.rows.map((row: any) => row.jh), ['高3-试1']);
+    assert.equal(measures2026.data.rows[0].source_batch, '重点跟踪.xlsx');
+
+    const measures2025 = await (await fetch(`${baseUrl}/api/measures?year=2025`)).json() as any;
+    assert.ok(measures2025.data.rows.length > 0);
+
+    const analysis = await (await fetch(`${baseUrl}/api/analysis/issues?asOf=2026-07-30`)).json() as any;
+    assert.equal(analysis.data.sourceStatus.tracking.available, true);
+    assert.equal(analysis.data.sourceStatus.tracking.fileName, '重点跟踪.xlsx');
+    assert.ok(analysis.data.sourceStatus.tracking.updatedAt);
+  });
+});
+
+test('措施跟踪预检明确报告缺失的井号、措施类型和日期字段', { timeout: 30_000 }, async () => {
+  await withSeededPriorityServer('priority-tracking-validation-', async ({ baseUrl }) => {
+    const preview = await uploadMeasureWorkbook(
+      baseUrl,
+      '/api/measures/import/preview?year=2026',
+      '缺少字段.xlsx',
+      [{ 区块: '高三区' }],
+    );
+    assert.equal(preview.status, 400);
+    const body = await preview.json() as any;
+    assert.match(body.message, /井号/);
+    assert.match(body.message, /措施类型|类别/);
+    assert.match(body.message, /年份|日期/);
   });
 });
