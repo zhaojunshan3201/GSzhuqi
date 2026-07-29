@@ -69,6 +69,19 @@ import {
   expandProductionBlockGroups,
 } from "./src/lib/blockProductionGrouping.ts";
 
+import { normalizeForecastBlock } from "./src/lib/injectionTenDayForecast.ts";
+import {
+  buildInjectionPeriodIssues,
+  buildWaterCutIssues,
+  calculateBlockDeclineRate,
+  calculatePumpRecoveryRate,
+  calculateSoakingDays,
+  mergePriorityIssues,
+  summarizeRestartTracking,
+  type PriorityIssue,
+} from "./src/lib/prioritySituationAnalysis.ts";
+import { formatShanghaiBusinessDate } from "./src/lib/businessDate.ts";
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -533,61 +546,665 @@ async function getWellsList() {
   return rows;
 }
 
-async function getIssueAnalysisData() {
-  const latestDate = await getLocalLatestDate();
+type PriorityQueryResult = {
+  available: boolean;
+  rows: any[];
+  unavailableReason?: string;
+};
 
-  if (!latestDate) {
-    return getEmptyAnalysisData();
+function isValidPriorityDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+}
+
+function priorityDate(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000);
+    const iso = date.toISOString().slice(0, 10);
+    return isValidPriorityDate(iso) ? iso : null;
+  }
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4})[年./-](\d{1,2})[月./-](\d{1,2})(?:日)?$/);
+  if (!match) return isValidPriorityDate(text) ? text : null;
+  const iso = `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+  return isValidPriorityDate(iso) ? iso : null;
+}
+
+function priorityNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = typeof value === "number"
+    ? value
+    : Number(String(value).replace(/[%吨,，]/g, "").trim());
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function priorityWellKey(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, "").toUpperCase();
+}
+
+function priorityLatest(values: unknown[]): string | null {
+  const dates = values.map((value) => String(value ?? "").trim()).filter(Boolean).sort();
+  return dates.at(-1) || null;
+}
+
+function priorityJson(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function priorityJsonEntries(value: unknown): Array<[string, unknown]> {
+  const entries: Array<[string, unknown]> = [];
+  const visit = (item: unknown) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    for (const [key, nested] of Object.entries(item as Record<string, unknown>)) {
+      entries.push([key, nested]);
+      visit(nested);
+    }
+  };
+  visit(value);
+  return entries;
+}
+
+function priorityJsonDate(value: unknown, keyPattern: RegExp): string | null {
+  for (const [key, item] of priorityJsonEntries(value)) {
+    if (!keyPattern.test(key.replace(/\s+/g, ""))) continue;
+    const date = priorityDate(item);
+    if (date) return date;
+  }
+  return null;
+}
+
+async function prioritySafeAll(sql: string, params: unknown[] = []): Promise<PriorityQueryResult> {
+  try {
+    return { available: true, rows: await localDb.all(sql, params) };
+  } catch (error: any) {
+    return {
+      available: false,
+      rows: [],
+      unavailableReason: error?.message?.includes("no such table") ? "数据源尚未导入" : "数据源读取失败",
+    };
+  }
+}
+
+function prioritySourceStatus(
+  result: PriorityQueryResult,
+  rows: any[],
+  updatedAt: string | null,
+  fileName?: string | null,
+) {
+  const available = result.available && rows.length > 0;
+  return {
+    available,
+    updatedAt,
+    ...(fileName ? { fileName } : {}),
+    ...(!available ? { unavailableReason: result.unavailableReason || "暂无可用数据" } : {}),
+  };
+}
+
+function priorityPumpColumn(columns: string[], aliases: string[]): string | null {
+  const normalize = (value: string) => value
+    .replace(/\s+/g, "")
+    .replace(/[()（）/\\:_\-、，,；;：]/g, "")
+    .toLowerCase();
+  const normalizedAliases = aliases.map(normalize);
+  return columns.find((column) => {
+    const key = normalize(column);
+    return normalizedAliases.some((alias) => key === alias || key.includes(alias));
+  }) || null;
+}
+
+function buildPriorityPumpIssues(
+  upload: any | null,
+  productionRows: any[],
+  asOfDate: string,
+): PriorityIssue[] {
+  if (!upload) return [];
+  let rows: Record<string, unknown>[] = [];
+  let columns: string[] = [];
+  try {
+    const parsedRows = JSON.parse(upload.rows_json || "[]");
+    const parsedColumns = JSON.parse(upload.columns_json || "[]");
+    rows = Array.isArray(parsedRows) ? parsedRows.filter((row) => row && typeof row === "object") : [];
+    columns = Array.isArray(parsedColumns) ? parsedColumns.map(String) : [];
+  } catch {
+    return [];
+  }
+  if (!columns.length && rows[0]) columns = Object.keys(rows[0]);
+
+  const wellColumn = priorityPumpColumn(columns, ["井号", "井名", "油井"]);
+  const statusColumn = priorityPumpColumn(columns, ["状态", "当前状态", "泵状态"]);
+  const dateColumn = priorityPumpColumn(columns, ["本次检泵开日期", "本次检泵开井日期", "检泵日期", "检泵时间", "作业日期", "交井日期", "开井日期"]);
+  const beforeOilColumn = priorityPumpColumn(columns, ["检泵前日产油", "检泵前产油", "检泵前日油", "检泵前油"]);
+  const blockColumn = priorityPumpColumn(columns, ["区块", "分区", "所属区块"]);
+  if (!wellColumn || !statusColumn) return [];
+
+  const latestByWell = new Map<string, {
+    row: Record<string, unknown>;
+    wellNo: string;
+    status: string;
+    date: string | null;
+  }>();
+  for (const row of rows) {
+    const wellNo = String(row[wellColumn] ?? "").trim();
+    const status = String(row[statusColumn] ?? "").replace(/\s+/g, "");
+    if (!wellNo || !status) continue;
+    const date = dateColumn ? priorityDate(row[dateColumn]) : null;
+    if (date && date > asOfDate) continue;
+    const key = priorityWellKey(wellNo);
+    const previous = latestByWell.get(key);
+    if (!previous || String(date || "") >= String(previous.date || "")) {
+      latestByWell.set(key, { row, wellNo, status, date });
+    }
   }
 
-  const waterCutRows = await localDb.all(
-    `
-      SELECT
-        CASE
-          WHEN water_cut >= 95 THEN '_____________________?>=95%)'
-          WHEN water_cut >= 80 THEN '__________________(80-95%)'
-          WHEN water_cut >= 50 THEN '__________________(50-80%)'
-          ELSE '__________________(<50%)'
-        END as "name",
-        COUNT(*) as "value"
-      FROM production
-      WHERE rq = ? AND jh IS NOT NULL AND jh != ''
-      GROUP BY
-        CASE
-          WHEN water_cut >= 95 THEN '_____________________?>=95%)'
-          WHEN water_cut >= 80 THEN '__________________(80-95%)'
-          WHEN water_cut >= 50 THEN '__________________(50-80%)'
-          ELSE '__________________(<50%)'
-        END
-    `,
-    [latestDate]
-  );
+  const oilByWell = new Map<string, number[]>();
+  const sortedProduction = [...productionRows].sort((left, right) => String(right.date).localeCompare(String(left.date)));
+  for (const row of sortedProduction) {
+    if (row.date > asOfDate) continue;
+    const oil = priorityNumber(row.oil);
+    if (oil == null || oil < 0) continue;
+    const key = priorityWellKey(row.wellNo);
+    const values = oilByWell.get(key) || [];
+    if (values.length < 5) values.push(oil);
+    oilByWell.set(key, values);
+  }
 
-  const topWaterCutRows = await localDb.all(
-    `
-      SELECT jh as "jh", ROUND(water_cut, 1) as "water_cut", ROUND(oil, 1) as "oil", ROUND(liquid, 1) as "liquid"
-      FROM production
-      WHERE rq = ? AND jh IS NOT NULL AND jh != ''
-      ORDER BY water_cut DESC, oil ASC
-      LIMIT 10
-    `,
-    [latestDate]
-  );
+  return [...latestByWell.values()].flatMap(({ row, wellNo, status, date }) => {
+    const isActive = status.includes("正检泵") || status.includes("正/待检泵");
+    const isPending = status.includes("待检泵") || status.includes("未检泵");
+    const isAfterPump = status.includes("已检泵") || status.includes("检泵后") || status.includes("恢复");
+    if (!isActive && !isPending && !isAfterPump) return [];
 
-  const totalWells = waterCutRows.reduce((sum: number, row: any) => sum + Number(row.value || 0), 0);
-  const abnormalWells = waterCutRows
-    .filter((row: any) => row.name !== "__________________(<50%)")
-    .reduce((sum: number, row: any) => sum + Number(row.value || 0), 0);
+    const currentValues = oilByWell.get(priorityWellKey(wellNo)) || [];
+    const currentOil = currentValues.length
+      ? Number((currentValues.reduce((sum, value) => sum + value, 0) / currentValues.length).toFixed(1))
+      : null;
+    const beforeOil = beforeOilColumn ? priorityNumber(row[beforeOilColumn]) : null;
+    const recoveryRate = calculatePumpRecoveryRate(currentOil, beforeOil);
+    if (isAfterPump && recoveryRate != null && recoveryRate >= 80) return [];
+
+    const dataMissing = recoveryRate == null;
+    const issueStatus = dataMissing ? "数据待补" : isActive ? "正检泵" : isPending ? "待检泵" : "未恢复";
+    const severity = recoveryRate != null && recoveryRate < 60 ? "high" : isActive ? "high" : "medium";
+    return [{
+      id: `pump:${priorityWellKey(wellNo)}:${date || "unknown"}`,
+      category: "pump",
+      severity,
+      wellNo,
+      block: blockColumn ? String(row[blockColumn] ?? "").trim() : "",
+      comparison: recoveryRate == null
+        ? "当前近5个有效报产日或检泵前日产油缺失"
+        : `当前 ${currentOil!.toFixed(1)}t / 检泵前 ${beforeOil!.toFixed(1)}t`,
+      deviation: recoveryRate == null ? null : Number((100 - recoveryRate).toFixed(1)),
+      deviationText: recoveryRate == null ? "--" : `恢复率 ${recoveryRate.toFixed(1)}%`,
+      status: issueStatus,
+      suggestion: dataMissing ? "补充有效日产油和检泵前产量" : isAfterPump ? "复核检泵后恢复情况" : "跟踪检泵进度",
+      dataDate: date,
+      targetTab: "pumpAnalysis",
+      currentOil,
+      beforeOil,
+      recoveryRate,
+    } as PriorityIssue];
+  });
+}
+
+function buildPriorityBlockDeclines(productionRows: any[], asOfDate: string) {
+  const asOf = new Date(`${asOfDate}T00:00:00Z`);
+  const target = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 1, 1));
+  const targetYear = target.getUTCFullYear();
+  const targetMonth = `${targetYear}-${String(target.getUTCMonth() + 1).padStart(2, "0")}`;
+  const previousYear = targetYear - 1;
+  const yearDays = (Date.UTC(targetYear + 1, 0, 1) - Date.UTC(targetYear, 0, 1)) / 86_400_000;
+  const blocks = new Map<string, {
+    previousYearOil: number;
+    previousMonths: Set<string>;
+    targetDaily: Map<string, number>;
+  }>();
+
+  for (const row of productionRows) {
+    const block = normalizeForecastBlock(row.block);
+    if (block === "未分区" || !isValidPriorityDate(row.date)) continue;
+    const item = blocks.get(block) || {
+      previousYearOil: 0,
+      previousMonths: new Set<string>(),
+      targetDaily: new Map<string, number>(),
+    };
+    blocks.set(block, item);
+    const oil = priorityNumber(row.oil);
+    if (oil == null || oil < 0) continue;
+    if (row.date.startsWith(`${previousYear}-`)) {
+      item.previousYearOil += oil;
+      item.previousMonths.add(row.date.slice(0, 7));
+    }
+    if (row.date.startsWith(`${targetMonth}-`)) {
+      item.targetDaily.set(row.date, (item.targetDaily.get(row.date) || 0) + oil);
+    }
+  }
+
+  return [...blocks.entries()].map(([block, item]) => {
+    const monthlyAverageOil = item.targetDaily.size
+      ? [...item.targetDaily.values()].reduce((sum, value) => sum + value, 0) / item.targetDaily.size
+      : null;
+    const hasCompletePreviousYear = item.previousMonths.size === 12 && item.previousYearOil > 0;
+    const declineRate = hasCompletePreviousYear && monthlyAverageOil != null
+      ? calculateBlockDeclineRate(item.previousYearOil, monthlyAverageOil, yearDays)
+      : null;
+    return {
+      block,
+      targetMonth,
+      previousYear,
+      previousYearOil: hasCompletePreviousYear ? Number(item.previousYearOil.toFixed(1)) : null,
+      monthlyAverageOil: monthlyAverageOil == null ? null : Number(monthlyAverageOil.toFixed(1)),
+      declineRate,
+      available: declineRate != null,
+      ...(
+        declineRate == null
+          ? { unavailableReason: !hasCompletePreviousYear ? "上年1—12月数据不足" : "目标月无有效产量" }
+          : {}
+      ),
+    };
+  }).sort((left, right) => Number(right.declineRate ?? Number.NEGATIVE_INFINITY) - Number(left.declineRate ?? Number.NEGATIVE_INFINITY));
+}
+
+function buildPriorityBlockIssues(blockDeclines: ReturnType<typeof buildPriorityBlockDeclines>): PriorityIssue[] {
+  const declining = blockDeclines.filter((item) => item.declineRate != null && item.declineRate > 0);
+  const highRiskCount = declining.length ? Math.max(1, Math.ceil(declining.length * 0.2)) : 0;
+  return declining.map((item, index) => ({
+    id: `blockDecline:${item.block}:${item.targetMonth}`,
+    category: "blockDecline",
+    severity: index < highRiskCount ? "high" : "medium",
+    block: item.block,
+    comparison: `${item.previousYear}年总油 ${item.previousYearOil!.toFixed(1)}t / ${item.targetMonth}平均日产油 ${item.monthlyAverageOil!.toFixed(1)}t`,
+    deviation: item.declineRate,
+    deviationText: `${item.declineRate!.toFixed(1)}%`,
+    status: "区块递减",
+    suggestion: "核查区块递减原因并制定稳产措施",
+    dataDate: `${item.targetMonth}-01`,
+    targetTab: "block",
+  }));
+}
+
+function buildPrioritySoaking(
+  soakingRows: any[],
+  trackingRows: any[],
+  asOfDate: string,
+): { wells: any[]; issues: PriorityIssue[] } {
+  const trackingByWell = new Map<string, any[]>();
+  for (const row of trackingRows) {
+    const key = priorityWellKey(row.jh);
+    if (!key) continue;
+    const values = trackingByWell.get(key) || [];
+    values.push(row);
+    trackingByWell.set(key, values);
+  }
+
+  const wells = soakingRows.flatMap((row) => {
+    const wellNo = String(row.well_no ?? row.wellNo ?? "").trim();
+    const stopDate = priorityDate(row.stop_date ?? row.stopDate);
+    if (!wellNo || !stopDate || stopDate > asOfDate) return [];
+    const tracking = trackingByWell.get(priorityWellKey(wellNo)) || [];
+    let ended = false;
+    let plannedDate: string | null = null;
+    for (const item of tracking) {
+      const detail = priorityJson(item.detail_json);
+      const actualEnd = priorityJsonDate(detail, /(实际|已)?(转抽|复产|结束|开井).*(时间|日期)|^(实际转抽时间|结束时间)$/);
+      const status = `${item.current_status || ""}${item.status || ""}${priorityJsonEntries(detail).map((entry) => entry[1]).join("")}`;
+      const trackingDate = priorityDate(item.current_round_transfer_time) || priorityDate(item.measure_date);
+      const statusApplies = Boolean(trackingDate && trackingDate >= stopDate && trackingDate <= asOfDate);
+      if (
+        (actualEnd && actualEnd >= stopDate && actualEnd <= asOfDate)
+        || statusApplies && /(已转抽|已结束|复产|生产)/.test(status) && !/正焖|焖井中/.test(status)
+      ) {
+        ended = true;
+      }
+      plannedDate ||= priorityJsonDate(detail, /(计划|预计).*(转抽|复注|结束|开井).*(时间|日期)?|计划时间/);
+    }
+    if (ended) return [];
+    const soakingDays = calculateSoakingDays(stopDate, asOfDate);
+    if (soakingDays == null) return [];
+    return [{
+      wellNo,
+      stopDate,
+      soakingDays,
+      status: "正焖井",
+      plannedDate,
+    }];
+  });
+
+  const issues: PriorityIssue[] = wells.map((well) => {
+    const overdue = Boolean(well.plannedDate && well.plannedDate < asOfDate);
+    return {
+      id: `soaking:${priorityWellKey(well.wellNo)}:${well.stopDate}`,
+      category: "soaking",
+      severity: overdue ? "high" : "medium",
+      wellNo: well.wellNo,
+      comparison: `已焖井 ${well.soakingDays} 天`,
+      deviation: well.soakingDays,
+      deviationText: `${well.soakingDays} 天`,
+      status: overdue ? "计划已超期" : "正焖井",
+      suggestion: overdue ? "核查转抽或复注计划" : "持续跟踪焖井进度",
+      dataDate: well.stopDate,
+      targetTab: "injectionSoakTransfer",
+    };
+  });
+  return { wells, issues };
+}
+
+function buildPriorityInjectionPeriod(
+  trackingRows: any[],
+  productionRows: any[],
+  asOfDate: string,
+) {
+  const productionByWell = new Map<string, any[]>();
+  for (const row of productionRows) {
+    const oil = priorityNumber(row.oil);
+    if (oil == null || oil < 0 || row.date > asOfDate) continue;
+    const key = priorityWellKey(row.wellNo);
+    const values = productionByWell.get(key) || [];
+    values.push({ ...row, oil });
+    productionByWell.set(key, values);
+  }
+  for (const values of productionByWell.values()) {
+    values.sort((left, right) => String(left.date).localeCompare(String(right.date)));
+  }
+
+  const latestTrackingByWell = new Map<string, { row: any; currentDate: string }>();
+  for (const row of trackingRows) {
+    const detail = priorityJson(row.detail_json);
+    const currentRound = priorityJson(detail.currentRound);
+    const previousRound = priorityJson(detail.previousRound);
+    const measureText = `${row.measure_type || ""}${row.current_round_measure_type || ""}${row.measure_name || ""}`;
+    const hasStructuredInjectionDates = Boolean(
+      priorityJsonDate(currentRound, /(转抽|转注|注汽|措施).*(时间|日期)/)
+      && priorityJsonDate(previousRound, /(转抽|转注|注汽|措施).*(时间|日期)/),
+    );
+    if (!/(注汽|吞吐|转注|蒸汽|热采)/.test(measureText) && !hasStructuredInjectionDates) continue;
+    const currentDate = priorityDate(row.current_round_transfer_time)
+      || priorityJsonDate(currentRound, /(转抽|转注|注汽|措施).*(时间|日期)/)
+      || priorityJsonDate(detail, /(本轮|本次|当前).*(转抽|转注|注汽|措施).*(时间|日期)/);
+    const key = priorityWellKey(row.jh);
+    if (!key || !currentDate || currentDate > asOfDate) continue;
+    const previous = latestTrackingByWell.get(key);
+    if (!previous || currentDate > previous.currentDate) latestTrackingByWell.set(key, { row, currentDate });
+  }
+
+  const comparableRows: Array<{
+    wellNo: string;
+    currentAverageOil: number;
+    previousAverageOil: number;
+    block: string;
+    dataDate: string | null;
+  }> = [];
+  for (const { row, currentDate } of latestTrackingByWell.values()) {
+    const detail = priorityJson(row.detail_json);
+    const previousRound = priorityJson(detail.previousRound);
+    const previousDate = priorityJsonDate(previousRound, /(转抽|转注|注汽|措施).*(时间|日期)/)
+      || priorityJsonDate(detail, /(上轮|上次|上一轮|上期).*(转抽|转注|注汽|措施).*(时间|日期)|^(转抽时间|转注时间)_1$/);
+    if (!previousDate || previousDate >= currentDate) continue;
+    const production = productionByWell.get(priorityWellKey(row.jh)) || [];
+    const current = production.filter((point) => point.date >= currentDate && point.date <= asOfDate);
+    const previous = production.filter((point) => point.date >= previousDate && point.date < currentDate);
+    const comparableDays = Math.min(current.length, previous.length);
+    if (!comparableDays) continue;
+    const currentComparable = current.slice(0, comparableDays);
+    const previousComparable = previous.slice(0, comparableDays);
+    comparableRows.push({
+      wellNo: String(row.jh || "").trim(),
+      currentAverageOil: currentComparable.reduce((sum, point) => sum + point.oil, 0) / comparableDays,
+      previousAverageOil: previousComparable.reduce((sum, point) => sum + point.oil, 0) / comparableDays,
+      block: String(row.block || ""),
+      dataDate: currentComparable.at(-1)?.date || null,
+    });
+  }
+  return {
+    comparableRows,
+    issues: buildInjectionPeriodIssues(comparableRows),
+  };
+}
+
+function priorityRestartCategory(row: any): string | null {
+  const text = `${row.measure_type || ""} ${row.measure_name || ""} ${row.current_round_measure_type || ""} ${row.detail_json || ""}`;
+  for (const category of ["捞油复产井", "问题井复产井", "新井"]) {
+    if (text.includes(category)) return category;
+  }
+  return null;
+}
+
+function buildPriorityRestartTracking(trackingRows: any[], productionRows: any[], asOfDate: string) {
+  const currentYear = Number(asOfDate.slice(0, 4));
+  const latestOilByWell = new Map<string, number>();
+  for (const row of [...productionRows].sort((left, right) => String(left.date).localeCompare(String(right.date)))) {
+    const oil = priorityNumber(row.oil);
+    if (oil == null || oil < 0 || row.date > asOfDate) continue;
+    latestOilByWell.set(priorityWellKey(row.wellNo), oil);
+  }
+
+  const tracked = new Map<string, { year: number; category: string; wellNo: string; block: string; date: string }>();
+  for (const row of trackingRows) {
+    const category = priorityRestartCategory(row);
+    const date = priorityDate(row.current_round_transfer_time) || priorityDate(row.measure_date);
+    const year = Number(String(row.batch_year || date?.slice(0, 4) || ""));
+    const wellNo = String(row.jh || "").trim();
+    if (!category || !wellNo || !date || date > asOfDate || ![currentYear, currentYear - 1].includes(year)) continue;
+    const key = `${year}:${category}:${priorityWellKey(wellNo)}`;
+    const previous = tracked.get(key);
+    if (!previous || date > previous.date) tracked.set(key, { year, category, wellNo, block: String(row.block || ""), date });
+  }
+
+  const restartRows = [...tracked.values()].map((row) => {
+    const currentOil = latestOilByWell.get(priorityWellKey(row.wellNo)) ?? null;
+    return { ...row, currentOil, producing: currentOil != null && currentOil > 0 };
+  });
+  const baseSummary = summarizeRestartTracking(restartRows);
+  const restartSummary = Object.fromEntries(Object.entries(baseSummary).map(([key, item]) => [
+    key,
+    {
+      ...item,
+      averageOil: item.totalOil == null || item.producingWells === 0
+        ? null
+        : Number((item.totalOil / item.producingWells).toFixed(1)),
+      stoppedOrMissingWells: item.wells - item.producingWells,
+    },
+  ]));
+  const issues: PriorityIssue[] = restartRows.flatMap((row) => row.producing ? [] : [{
+    id: `restartTracking:${row.year}:${row.category}:${priorityWellKey(row.wellNo)}`,
+    category: "restartTracking",
+    severity: row.currentOil == null ? "medium" : "high",
+    wellNo: row.wellNo,
+    block: row.block,
+    comparison: row.currentOil == null ? "截至数据日期无有效日产油" : `当前日产油 ${row.currentOil.toFixed(1)}t`,
+    deviation: null,
+    deviationText: "--",
+    status: row.currentOil == null ? "数据待补" : "停产",
+    suggestion: row.currentOil == null ? "补充最新生产报产" : "核查复产井停产原因",
+    dataDate: row.date,
+    targetTab: "measures",
+  } as PriorityIssue]);
+  return { restartRows, restartSummary, issues };
+}
+
+async function getIssueAnalysisData(asOfDate?: string) {
+  const resolvedAsOfDate = asOfDate
+    || await getLocalLatestDate()
+    || formatShanghaiBusinessDate(new Date());
+  const asOf = new Date(`${resolvedAsOfDate}T00:00:00Z`);
+  const targetMonth = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 1, 1));
+  const historyStart = `${targetMonth.getUTCFullYear() - 1}-01-01`;
+
+  const [productionResult, labResult, pumpResult, trackingResult, soakingResult] = await Promise.all([
+    prioritySafeAll(
+      `SELECT jh AS wellNo, rq AS date, oil, water_cut AS waterCut, block
+       FROM production WHERE rq >= ? AND rq <= ?`,
+      [historyStart, resolvedAsOfDate],
+    ),
+    prioritySafeAll("SELECT * FROM water_lab_records"),
+    prioritySafeAll("SELECT * FROM pump_tracking_uploads ORDER BY id DESC LIMIT 1"),
+    prioritySafeAll("SELECT * FROM measure_tracking"),
+    prioritySafeAll("SELECT * FROM soak_transfer_report_rows ORDER BY stop_date"),
+  ]);
+
+  const productionRows = productionResult.rows
+    .map((row) => ({
+      wellNo: String(row.wellNo || "").trim(),
+      date: priorityDate(row.date),
+      oil: priorityNumber(row.oil),
+      waterCut: priorityNumber(row.waterCut),
+      block: String(row.block || "").trim(),
+    }))
+    .filter((row) => row.wellNo && row.date && row.date <= resolvedAsOfDate);
+  const labRows = labResult.rows
+    .map((row) => ({
+      wellNo: String(row.jh || "").trim(),
+      date: priorityDate(row.record_date),
+      waterCut: priorityNumber(row.water_cut),
+      block: String(row.block || "").trim(),
+    }))
+    .filter((row) => row.wellNo && row.date && row.date <= resolvedAsOfDate && row.waterCut != null)
+    .map((row) => ({ ...row, date: row.date!, waterCut: row.waterCut! }));
+
+  const productionAvailable = productionResult.available && productionRows.length > 0;
+  const waterCutIssues = productionAvailable
+    ? buildWaterCutIssues(
+        labRows,
+        productionRows
+          .filter((row) => row.waterCut != null)
+          .map((row) => ({ wellNo: row.wellNo, date: row.date!, waterCut: row.waterCut!, block: row.block })),
+      )
+    : [];
+  const pumpUpload = pumpResult.rows[0] || null;
+  const pumpIssues = productionAvailable
+    ? buildPriorityPumpIssues(pumpUpload, productionRows, resolvedAsOfDate)
+    : [];
+  const blockDeclines = productionAvailable
+    ? buildPriorityBlockDeclines(productionRows, resolvedAsOfDate)
+    : [];
+  const blockDeclineIssues = buildPriorityBlockIssues(blockDeclines);
+  const trackingDataAvailable = trackingResult.available && trackingResult.rows.length > 0;
+  const soaking = trackingDataAvailable
+    ? buildPrioritySoaking(soakingResult.rows, trackingResult.rows, resolvedAsOfDate)
+    : { wells: [], issues: [] };
+  const injectionPeriod = productionAvailable
+    ? buildPriorityInjectionPeriod(trackingResult.rows, productionRows, resolvedAsOfDate)
+    : { comparableRows: [], issues: [] };
+  const restart = productionAvailable
+    ? buildPriorityRestartTracking(trackingResult.rows, productionRows, resolvedAsOfDate)
+    : { restartRows: [], restartSummary: {}, issues: [] };
+
+  const trackingFileRows = trackingResult.rows
+    .filter((row) => String(row.source_batch || "").trim())
+    .sort((left, right) =>
+      String(right.updated_at || "").localeCompare(String(left.updated_at || ""))
+      || Number(right.id || 0) - Number(left.id || 0));
+  const latestTrackingFile = trackingFileRows[0];
+  const trackingStatus = {
+    available: Boolean(trackingResult.available && latestTrackingFile),
+    updatedAt: latestTrackingFile?.updated_at || null,
+    ...(latestTrackingFile ? { fileName: latestTrackingFile.source_batch } : {}),
+    ...(!latestTrackingFile ? { unavailableReason: trackingResult.unavailableReason || "暂无共享跟踪文件" } : {}),
+  };
+  const waterUpdatedAt = priorityLatest(labResult.rows.map((row) => row.created_at || row.record_date));
+  const pumpUpdatedAt = pumpUpload?.created_at || null;
+  const soakingUpdatedAt = priorityLatest(soakingResult.rows.map((row) => row.updated_at || row.report_date));
+  const productionDependencyReason = productionAvailable ? undefined : "生产数据不可用";
+  const waterCategoryResult: PriorityQueryResult = {
+    ...labResult,
+    available: labResult.available && productionAvailable,
+    unavailableReason: labResult.unavailableReason || productionDependencyReason,
+  };
+  const pumpCategoryResult: PriorityQueryResult = {
+    ...pumpResult,
+    available: pumpResult.available && productionAvailable,
+    unavailableReason: pumpResult.unavailableReason || productionDependencyReason,
+  };
+  const soakingCategoryResult: PriorityQueryResult = {
+    ...soakingResult,
+    available: soakingResult.available && trackingDataAvailable,
+    unavailableReason: soakingResult.unavailableReason || (trackingDataAvailable ? undefined : "措施跟踪数据不可用"),
+  };
+  const sourceStatus = {
+    production: prioritySourceStatus(
+      productionResult,
+      productionRows,
+      priorityLatest(productionRows.map((row) => row.date)),
+    ),
+    waterLab: prioritySourceStatus(
+      waterCategoryResult,
+      labRows,
+      waterUpdatedAt,
+      labResult.rows.find((row) => row.source_file)?.source_file || null,
+    ),
+    pump: prioritySourceStatus(
+      pumpCategoryResult,
+      pumpResult.rows,
+      pumpUpdatedAt,
+      pumpUpload?.source_file || null,
+    ),
+    tracking: trackingStatus,
+    soaking: prioritySourceStatus(
+      soakingCategoryResult,
+      soakingResult.rows,
+      soakingUpdatedAt,
+      soakingResult.rows.find((row) => row.source_file)?.source_file || null,
+    ),
+    blockDecline: {
+      available: blockDeclines.some((row) => row.available),
+      updatedAt: priorityLatest(productionRows.map((row) => row.date)),
+      ...(!blockDeclines.some((row) => row.available) ? { unavailableReason: "无完整上年和目标月可比数据" } : {}),
+    },
+    injectionPeriod: {
+      available: productionAvailable && injectionPeriod.comparableRows.length > 0,
+      updatedAt: trackingStatus.updatedAt,
+      ...(
+        !productionAvailable
+          ? { unavailableReason: "生产数据不可用" }
+          : injectionPeriod.comparableRows.length === 0
+            ? { unavailableReason: "无本轮可比实际施工数据" }
+            : {}
+      ),
+    },
+    restartTracking: {
+      available: productionAvailable && restart.restartRows.length > 0,
+      updatedAt: trackingStatus.updatedAt,
+      ...(
+        !productionAvailable
+          ? { unavailableReason: "生产数据不可用" }
+          : restart.restartRows.length === 0
+            ? { unavailableReason: "无今年或去年复产跟踪数据" }
+            : {}
+      ),
+    },
+  };
 
   return {
-    water_cut_pie: waterCutRows,
-    top_water_cut_wells: topWaterCutRows,
-    decline_warnings: [],
+    asOfDate: resolvedAsOfDate,
+    updatedAt: new Date().toISOString(),
     summary: {
-      total_wells: totalWells,
-      abnormal_wells: abnormalWells,
-      potential_gain: "--"
-    }
+      pump: pumpIssues.length,
+      waterCut: waterCutIssues.length,
+      blockDecline: blockDeclineIssues.length,
+      soaking: soaking.issues.length,
+      injectionPeriod: injectionPeriod.issues.length,
+      restartTracking: restart.issues.length,
+    },
+    issues: mergePriorityIssues([
+      ...pumpIssues,
+      ...waterCutIssues,
+      ...blockDeclineIssues,
+      ...soaking.issues,
+      ...injectionPeriod.issues,
+      ...restart.issues,
+    ]),
+    blockDeclines,
+    soakingWells: soaking.wells,
+    restartSummary: restart.restartSummary,
+    sourceStatus,
   };
 }
 
@@ -5543,8 +6160,19 @@ app.post("/api/register", async (req, res) => {
 
   // ________________________________________________________________________
   app.get("/api/analysis/issues", async (req, res) => {
+    const requestedAsOf = req.query.asOf;
+    if (requestedAsOf !== undefined && !isValidPriorityDate(requestedAsOf)) {
+      res.status(400).json({ success: false, message: "asOf 必须是有效的 YYYY-MM-DD 日期" });
+      return;
+    }
     try {
-      const data = await withTimingLog("/api/analysis/issues", () => getIssueAnalysisData());
+      const asOfDate = requestedAsOf
+        || await getLocalLatestDate()
+        || formatShanghaiBusinessDate(new Date());
+      const data = await withTimingLog(
+        `/api/analysis/issues?asOf=${asOfDate}`,
+        () => getIssueAnalysisData(asOfDate),
+      );
       res.json({ success: true, data });
     } catch (err: any) {
       console.error("Issue analysis query failed:", err.message);
