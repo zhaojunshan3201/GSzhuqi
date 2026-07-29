@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { formatShanghaiBusinessDate } from '../src/lib/businessDate.ts';
 
 async function availablePort(): Promise<number> {
   const server = createServer();
@@ -18,6 +19,10 @@ async function availablePort(): Promise<number> {
   assert(address && typeof address !== 'string');
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   return address.port;
+}
+
+function shiftIsoDate(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
 async function seedDatabase(filename: string) {
@@ -356,10 +361,15 @@ test('聚合六类重点情况并对缺少单一来源保持整体可用', { tim
   }
 });
 
-test('production 表缺失且未传 asOf 时返回稳定空 DTO', { timeout: 30_000 }, async () => {
+test('production 表缺失且未传 asOf 时回退当前日期并继续聚合独立来源', { timeout: 30_000 }, async () => {
   const port = await availablePort();
   const directory = await mkdtemp(path.join(os.tmpdir(), 'priority-situation-default-asof-'));
   const dbFile = path.join(directory, 'test.db');
+  const today = formatShanghaiBusinessDate(new Date());
+  const stopDate = shiftIsoDate(today, -25);
+  const historicalProductionDate = shiftIsoDate(stopDate, -1);
+  const futureProductionDate = shiftIsoDate(today, 1);
+  const expectedTrackingUpdatedAt = `${futureProductionDate}T00:00:00.000Z`;
   await seedDatabase(dbFile);
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: process.cwd(),
@@ -396,6 +406,28 @@ test('production 表缺失且未传 asOf 时返回稳定空 DTO', { timeout: 30_
 
     const db = await open({ filename: dbFile, driver: sqlite3.Database });
     try {
+      await db.exec('DELETE FROM soak_transfer_report_rows; DELETE FROM measure_tracking');
+      await db.run(
+        `INSERT INTO soak_transfer_report_rows
+         (well_no, stop_date, report_date, source_file, updated_at)
+         VALUES ('焖井-当前', ?, ?, '焖井转抽.xlsx', ?)`,
+        [stopDate, today, `${today}T00:00:00.000Z`],
+      );
+      for (const [date, status, updatedAt] of [
+        [stopDate, '正焖井', `${today}T00:00:00.000Z`],
+        [historicalProductionDate, '生产', `${historicalProductionDate}T00:00:00.000Z`],
+        [futureProductionDate, '生产', expectedTrackingUpdatedAt],
+      ]) {
+        await db.run(
+          `INSERT INTO measure_tracking
+           (measure_date, jh, measure_type, status, current_status,
+            current_round_transfer_time, batch_year, detail_json, source_batch,
+            created_at, updated_at)
+           VALUES (?, '焖井-当前', '日常生产', ?, ?, ?, ?, '{}',
+                   '措施跟踪2026C.xlsx', ?, ?)`,
+          [date, status, status, date, date.slice(0, 4), updatedAt, updatedAt],
+        );
+      }
       await db.exec('DROP TABLE production');
     } finally {
       await db.close();
@@ -410,16 +442,20 @@ test('production 表缺失且未传 asOf 时返回稳定空 DTO', { timeout: 30_
       pump: 0,
       waterCut: 0,
       blockDecline: 0,
-      soaking: 0,
+      soaking: 1,
       injectionPeriod: 0,
       restartTracking: 0,
     });
-    assert.deepEqual(body.data.issues, []);
+    assert.deepEqual(body.data.issues.map((issue: any) => issue.category), ['soaking']);
     assert.deepEqual(body.data.blockDeclines, []);
-    assert.deepEqual(body.data.soakingWells, []);
+    assert.equal(body.data.soakingWells.length, 1);
+    assert.equal(body.data.soakingWells[0].wellNo, '焖井-当前');
     assert.deepEqual(body.data.restartSummary, {});
     assert.equal(body.data.sourceStatus.production.available, false);
-    assert.equal(body.data.sourceStatus.production.unavailableReason, '生产数据不可用，已使用当前日期');
+    assert.equal(body.data.sourceStatus.tracking.available, true);
+    assert.equal(body.data.sourceStatus.tracking.fileName, '措施跟踪2026C.xlsx');
+    assert.equal(body.data.sourceStatus.tracking.updatedAt, expectedTrackingUpdatedAt);
+    assert.equal(body.data.sourceStatus.soaking.available, true);
   } finally {
     try {
       if (child.exitCode === null && child.signalCode === null) child.kill();

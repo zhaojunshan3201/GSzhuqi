@@ -1030,40 +1030,6 @@ function buildPriorityRestartTracking(trackingRows: any[], productionRows: any[]
   return { restartRows, restartSummary, issues };
 }
 
-function buildEmptyPriorityAnalysisData(asOfDate: string) {
-  const unavailable = (unavailableReason: string) => ({
-    available: false,
-    updatedAt: null,
-    unavailableReason,
-  });
-  return {
-    asOfDate,
-    updatedAt: new Date().toISOString(),
-    summary: {
-      pump: 0,
-      waterCut: 0,
-      blockDecline: 0,
-      soaking: 0,
-      injectionPeriod: 0,
-      restartTracking: 0,
-    },
-    issues: [],
-    blockDeclines: [],
-    soakingWells: [],
-    restartSummary: {},
-    sourceStatus: {
-      production: unavailable("生产数据不可用，已使用当前日期"),
-      waterLab: unavailable("缺少生产数据截止日期，未执行聚合"),
-      pump: unavailable("缺少生产数据截止日期，未执行聚合"),
-      tracking: unavailable("缺少生产数据截止日期，未执行聚合"),
-      soaking: unavailable("缺少生产数据截止日期，未执行聚合"),
-      blockDecline: unavailable("缺少生产数据截止日期，未执行聚合"),
-      injectionPeriod: unavailable("缺少生产数据截止日期，未执行聚合"),
-      restartTracking: unavailable("缺少生产数据截止日期，未执行聚合"),
-    },
-  };
-}
-
 async function getIssueAnalysisData(asOfDate?: string) {
   let resolvedAsOfDate = asOfDate;
   if (!resolvedAsOfDate) {
@@ -1073,10 +1039,9 @@ async function getIssueAnalysisData(asOfDate?: string) {
     } catch {
       latestProductionDate = null;
     }
-    if (!latestProductionDate || !isValidPriorityDate(latestProductionDate)) {
-      return buildEmptyPriorityAnalysisData(formatShanghaiBusinessDate(new Date()));
-    }
-    resolvedAsOfDate = latestProductionDate;
+    resolvedAsOfDate = latestProductionDate && isValidPriorityDate(latestProductionDate)
+      ? latestProductionDate
+      : formatShanghaiBusinessDate(new Date());
   }
   const asOf = new Date(`${resolvedAsOfDate}T00:00:00Z`);
   const targetMonth = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 1, 1));
