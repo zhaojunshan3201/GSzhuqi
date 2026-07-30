@@ -74,7 +74,7 @@ export function calculateBlockDeclineRate(
 export function calculateDeclineRateSeries(
   dates: string[],
   monthlyAverageOil: Array<number | null | undefined>,
-  previousYearOilTotals: Record<string, number>,
+  previousYearOilTotals: Readonly<Record<string, number | null | undefined>>,
 ): Array<number | null> {
   return dates.map((date, index) => {
     const current = monthlyAverageOil[index];
