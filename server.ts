@@ -67,13 +67,14 @@ import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
 import {
   buildProductionBlockGroups,
   expandProductionBlockGroups,
+  normalizeProductionBlockGroup,
 } from "./src/lib/blockProductionGrouping.ts";
+import { calculateBlockDeclineRate } from "./src/lib/blockProductionGenerator.ts";
 
 import { normalizeForecastBlock } from "./src/lib/injectionTenDayForecast.ts";
 import {
   buildInjectionPeriodIssues,
   buildWaterCutIssues,
-  calculateBlockDeclineRate,
   calculatePumpRecoveryRate,
   calculateSoakingDays,
   mergePriorityIssues,
@@ -795,47 +796,58 @@ function buildPriorityBlockDeclines(productionRows: any[], asOfDate: string) {
   const targetYear = target.getUTCFullYear();
   const targetMonth = `${targetYear}-${String(target.getUTCMonth() + 1).padStart(2, "0")}`;
   const previousYear = targetYear - 1;
-  const yearDays = (Date.UTC(targetYear + 1, 0, 1) - Date.UTC(targetYear, 0, 1)) / 86_400_000;
-  const blocks = new Map<string, {
-    previousYearOil: number;
-    previousMonths: Set<string>;
-    targetDaily: Map<string, number>;
-  }>();
+  const blocks = new Map<string, Map<string, number>>();
 
   for (const row of productionRows) {
-    const block = normalizeForecastBlock(row.block);
-    if (block === "未分区" || !isValidPriorityDate(row.date)) continue;
-    const item = blocks.get(block) || {
-      previousYearOil: 0,
-      previousMonths: new Set<string>(),
-      targetDaily: new Map<string, number>(),
-    };
-    blocks.set(block, item);
+    const block = normalizeProductionBlockGroup(row.block);
+    if (!block || !isValidPriorityDate(row.date)) continue;
+    const daily = blocks.get(block) || new Map<string, number>();
+    blocks.set(block, daily);
     const oil = priorityNumber(row.oil);
     if (oil == null || oil < 0) continue;
-    if (row.date.startsWith(`${previousYear}-`)) {
-      item.previousYearOil += oil;
-      item.previousMonths.add(row.date.slice(0, 7));
-    }
-    if (row.date.startsWith(`${targetMonth}-`)) {
-      item.targetDaily.set(row.date, (item.targetDaily.get(row.date) || 0) + oil);
-    }
+    daily.set(row.date, (daily.get(row.date) || 0) + oil);
   }
 
-  return [...blocks.entries()].map(([block, item]) => {
-    const monthlyAverageOil = item.targetDaily.size
-      ? [...item.targetDaily.values()].reduce((sum, value) => sum + value, 0) / item.targetDaily.size
+  return [...blocks.entries()].map(([block, daily]) => {
+    const roundedDaily = [...daily.entries()].map(([date, oil]) => ({
+      date,
+      oil: Number(oil.toFixed(1)),
+    }));
+    const previousYearRows = roundedDaily.filter(({ date }) =>
+      date.startsWith(`${previousYear}-`)
+    );
+    const previousMonths = new Set(
+      previousYearRows.map(({ date }) => date.slice(0, 7)),
+    );
+    const previousYearOil = previousYearRows.reduce(
+      (sum, row) => sum + row.oil,
+      0,
+    );
+    const targetRows = roundedDaily.filter(({ date }) =>
+      date.startsWith(`${targetMonth}-`)
+    );
+    const monthlyAverageOil = targetRows.length
+      ? Number((
+          targetRows.reduce((sum, row) => sum + row.oil, 0) / targetRows.length
+        ).toFixed(1))
       : null;
-    const hasCompletePreviousYear = item.previousMonths.size === 12 && item.previousYearOil > 0;
-    const declineRate = hasCompletePreviousYear && monthlyAverageOil != null
-      ? calculateBlockDeclineRate(item.previousYearOil, monthlyAverageOil, yearDays)
+    const hasCompletePreviousYear =
+      previousMonths.size === 12 && previousYearOil > 0;
+    const rawDeclineRate = hasCompletePreviousYear && monthlyAverageOil != null
+      ? calculateBlockDeclineRate(previousYearOil, monthlyAverageOil, targetYear)
       : null;
+    const declineRate = rawDeclineRate == null
+      ? null
+      : Number(rawDeclineRate.toFixed(1));
+
     return {
       block,
       targetMonth,
       previousYear,
-      previousYearOil: hasCompletePreviousYear ? Number(item.previousYearOil.toFixed(1)) : null,
-      monthlyAverageOil: monthlyAverageOil == null ? null : Number(monthlyAverageOil.toFixed(1)),
+      previousYearOil: hasCompletePreviousYear
+        ? Number(previousYearOil.toFixed(1))
+        : null,
+      monthlyAverageOil,
       declineRate,
       available: declineRate != null,
       ...(

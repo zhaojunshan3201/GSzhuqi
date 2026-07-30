@@ -8,6 +8,7 @@ import test from 'node:test';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import * as XLSX from 'xlsx';
+import { calculateBlockDeclineRate } from '../src/lib/blockProductionGenerator.ts';
 import { formatShanghaiBusinessDate } from '../src/lib/businessDate.ts';
 
 async function availablePort(): Promise<number> {
@@ -111,11 +112,18 @@ async function seedDatabase(filename: string) {
         '区块井',
         `2025-${String(month).padStart(2, '0')}-15`,
         previousYearOil[month - 1],
-        month % 2 ? '高3624东' : '3624北',
+        '高3624',
+      );
+      await insertProduction(
+        `GROUP-${month}`,
+        `2025-${String(month).padStart(2, '0')}-15`,
+        10.04,
+        '3624块(北)L5',
       );
     }
-    await insertProduction('区块井', '2026-06-10', 8, '高3624东');
-    await insertProduction('区块井', '2026-06-20', 8, '3624北');
+    await insertProduction('区块井', '2026-06-10', 8, '高3624');
+    await insertProduction('区块井', '2026-06-20', 8, '高3624');
+    await insertProduction('GROUP-TARGET', '2026-06-10', 2.04, '3624块(北)L5');
     for (let month = 1; month <= 12; month += 1) {
       await insertProduction('跨年区块井', `2024-${String(month).padStart(2, '0')}-15`, 100, '跨年区');
     }
@@ -375,14 +383,21 @@ test('聚合六类重点情况并对缺少单一来源保持整体可用', { tim
     assert.equal(body.data.soakingWells[0].wellNo, '焖井-当前');
     assert.equal(body.data.soakingWells[0].soakingDays, 25);
 
-    const decline = body.data.blockDeclines.find((row: any) => row.block === '高3624');
-    assert.equal(decline.previousYearOil, 3650);
-    assert.equal(decline.monthlyAverageOil, 8);
-    assert.equal(decline.declineRate, 20);
+    // 验证区块生产动态分组与按区块日汇总后保留一位小数的共同口径。
+    const declines = body.data.blockDeclines.filter((row: any) => row.block === '高3624');
+    assert.equal(declines.length, 1);
+    const [decline] = declines;
+    assert.equal(decline.previousYearOil, 3770);
+    assert.equal(decline.monthlyAverageOil, 9);
+    assert.equal(
+      decline.declineRate,
+      Number(calculateBlockDeclineRate(3770, 9, 2026)?.toFixed(1)),
+    );
     assert.equal(decline.available, true);
     const unavailableDecline = body.data.blockDeclines.find((row: any) => row.block === '缺数区');
     assert.equal(unavailableDecline.declineRate, null);
     assert.equal(unavailableDecline.available, false);
+    assert.equal(unavailableDecline.unavailableReason, '上年1—12月数据不足');
 
     const pumpIssue = body.data.issues.find((issue: any) => issue.wellNo === '泵井-未恢复');
     assert.equal(pumpIssue.category, 'pump');
