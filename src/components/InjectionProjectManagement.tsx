@@ -27,15 +27,16 @@ const deviationStatuses = new Set<ComparisonStatus>(['early', 'delayed', 'not_st
 export type InjectionChartSeries = { name: string; data: number[]; color: string };
 
 export type InjectionProjectFilters = { planMonth: string; unit: string; boiler: string; planStatus: string; lifecycleStatus: string; comparisonStatus: string };
-type FilterableInjectionProject = { id: number; unit?: string | null; boiler?: string | null; planStatus: string; lifecycleStatus: string; sourceImportId?: number | null };
+type FilterableInjectionProject = { id: number; wellNo?: string | null; unit?: string | null; boiler?: string | null; planStatus: string; lifecycleStatus: string; sourceImportId?: number | null };
 type FilterablePlanImport = { id: number; planMonth: string };
 type FilterableComparisonRow = { projectId: number; comparisonStatus: string };
 
-export function filterInjectionProjects<T extends FilterableInjectionProject>(projects: T[], imports: FilterablePlanImport[], comparisonRows: FilterableComparisonRow[], filters: InjectionProjectFilters, initialProjectId?: string) {
+export function filterInjectionProjects<T extends FilterableInjectionProject>(projects: T[], imports: FilterablePlanImport[], comparisonRows: FilterableComparisonRow[], filters: InjectionProjectFilters, initialProjectId?: string, wellNo = '') {
   const planMonthByImportId = new Map(imports.map((item) => [item.id, item.planMonth]));
   const comparisonStatusByProjectId = new Map(comparisonRows.map((row) => [row.projectId, row.comparisonStatus]));
   return filterProjectsByInitialId(projects, initialProjectId).filter((project) =>
-    (!filters.planMonth || planMonthByImportId.get(project.sourceImportId ?? -1) === filters.planMonth)
+    (!wellNo.trim() || project.wellNo?.includes(wellNo.trim()))
+    && (!filters.planMonth || planMonthByImportId.get(project.sourceImportId ?? -1) === filters.planMonth)
     && (!filters.unit || project.unit === filters.unit)
     && (!filters.boiler || project.boiler === filters.boiler)
     && (!filters.planStatus || project.planStatus === filters.planStatus)
@@ -66,7 +67,7 @@ export function getInjectionDashboardRenderMode(view: InjectionProjectView) {
     soakTransfer: view === 'soakTransfer',
   };
 }
-export function InjectionProjectManagement({ view = 'plan', initialProjectId, onClearProjectLocation, onClearInitialProjectId }: { view?: InjectionProjectView; initialProjectId?: string; onClearProjectLocation?: () => void; onClearInitialProjectId?: () => void }) {
+export function InjectionProjectManagement({ view = 'plan', initialProjectId, initialWellNo = '', onClearProjectLocation, onClearInitialProjectId }: { view?: InjectionProjectView; initialProjectId?: string; initialWellNo?: string; onClearProjectLocation?: () => void; onClearInitialProjectId?: () => void }) {
   const dashboardMode = getInjectionDashboardRenderMode(view);
   const isPlan = dashboardMode.planExecution;
   const isConstruction = dashboardMode.construction;
@@ -77,8 +78,10 @@ export function InjectionProjectManagement({ view = 'plan', initialProjectId, on
   const [form, setForm] = useState({ wellNo: '', block: '', processType: '', plannedTransferDate: '', owner: '' });
   const [preview, setPreview] = useState<ImportBatch | null>(null); const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]); const [uploading, setUploading] = useState(false); const [importHistoryExpanded, setImportHistoryExpanded] = useState(false); const inputRef = useRef<HTMLInputElement>(null);
   const [filters, setFilters] = useState<InjectionProjectFilters>({ planMonth: '', unit: '', boiler: '', planStatus: '', lifecycleStatus: '', comparisonStatus: '' });
+  const [wellNoFilter, setWellNoFilter] = useState(initialWellNo);
   const [projectLocationId, setProjectLocationId] = useState(initialProjectId);
   useEffect(() => { setProjectLocationId(initialProjectId); }, [initialProjectId]);
+  useEffect(() => { setWellNoFilter(initialWellNo); }, [initialWellNo]);
   const load = () => Promise.all([
     fetch('/api/injection-projects').then((r) => r.json()), fetch('/api/injection-project-imports').then((r) => r.json()),
     fetch(`/api/injection-projects/plan-actual-comparison?${new URLSearchParams(Object.entries({ planMonth: filters.planMonth, unit: filters.unit, boiler: filters.boiler, status: filters.comparisonStatus }).filter(([, value]) => value) as [string, string][]).toString()}`).then((r) => r.json()),
@@ -91,7 +94,7 @@ export function InjectionProjectManagement({ view = 'plan', initialProjectId, on
   const businessToday = formatShanghaiBusinessDate(new Date());
   const viewProjects = useMemo(() => filterProjectsForView(projects, view, businessToday), [projects, view, businessToday]);
   const hasInitialProjectOutsideView = Boolean(projectLocationId && projects.some((project) => String(project.id) === projectLocationId) && !viewProjects.some((project) => String(project.id) === projectLocationId));
-  const filteredProjects = useMemo(() => filterInjectionProjects(viewProjects, imports, comparisonResult?.rows || [], filters, projectLocationId), [viewProjects, imports, comparisonResult, filters, projectLocationId]);
+  const filteredProjects = useMemo(() => filterInjectionProjects(viewProjects, imports, comparisonResult?.rows || [], filters, projectLocationId, isSoakTransfer ? wellNoFilter : ''), [viewProjects, imports, comparisonResult, filters, projectLocationId, isSoakTransfer, wellNoFilter]);
   const overdueProjects = useMemo(() => filteredProjects.filter((project) => isOverdue(project, businessToday)), [filteredProjects, businessToday]);
   const timelineGroups = useMemo(() => Object.entries(filteredProjects.filter((project) => project.boiler && project.plannedStartDate && project.plannedEndDate).reduce<Record<string, Project[]>>((result, project) => { (result[project.boiler!] ||= []).push(project); return result; }, {})), [filteredProjects]);
   const options = (key: 'unit' | 'boiler' | 'planStatus' | 'lifecycleStatus') => [...new Set(projects.map((project) => project[key]).filter(Boolean))] as string[];
@@ -108,6 +111,7 @@ export function InjectionProjectManagement({ view = 'plan', initialProjectId, on
 
   return <div className="page-stack">
     <section className="app-card p-5"><h3 className="text-xl font-bold">{viewTitle}</h3><p className="mt-1 text-sm text-slate-500">{isPlan ? '\u7edf\u4e00\u7ba1\u7406\u6ce8\u6c7d\u65b9\u6848\u3001\u8ba1\u5212\u548c\u6267\u884c\u8fdb\u5ea6\u3002' : isConstruction ? '\u805a\u7126\u5f85\u6ce8\u6c7d\u548c\u6ce8\u6c7d\u4e2d\u7684\u65bd\u5de5\u9879\u76ee\u3002' : '\u805a\u7126\u7116\u4e95\u4e0e\u5f85\u8f6c\u62bd\u9879\u76ee\uff0c\u903e\u671f\u5f85\u529e\u4f18\u5148\u3002'}</p></section>
+    {isSoakTransfer && <section className="app-card p-5"><label className="text-sm font-bold text-slate-700" htmlFor="soak-transfer-well-filter">井号筛选</label><div className="mt-2 flex flex-wrap gap-2"><input id="soak-transfer-well-filter" className="field-control max-w-xs" value={wellNoFilter} onChange={(event) => setWellNoFilter(event.target.value)} placeholder="输入井号定位当前焖井项目" />{wellNoFilter && <button type="button" className="action-button action-secondary" onClick={() => setWellNoFilter('')}>清除井号</button>}</div></section>}
     {isSoakTransfer && <section className="app-card border-l-4 border-l-red-500 p-5"><h3 className="font-bold text-red-700">{'\u903e\u671f\u5f85\u529e'}?{overdueProjects.length}?</h3><p className="mt-1 text-sm text-slate-600">{overdueProjects.length ? overdueProjects.map((project) => `${project.wellNo}?${project.plannedTransferDate}?`).join('?') : '\u6682\u65e0\u903e\u671f\u7116\u4e95\u6216\u5f85\u8f6c\u62bd\u9879\u76ee\u3002'}</p></section>}
     <section className={`app-card p-5 ${isPlan ? '' : 'hidden'}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-bold">月度注汽计划导入</h3><p className="mt-1 text-sm text-slate-500">上传主计划表，解析预览后确认覆盖同月计划。</p></div><input ref={inputRef} className="hidden" type="file" accept=".xlsx,.xls" onChange={upload} /><button className="action-button action-primary" disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? '解析中…' : '选择 .xlsx / .xls 文件'}</button></div>
       {preview && <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold">{preview.planMonth} · {preview.fileName}</p><p className="mt-1 text-sm text-slate-600">工作表：{preview.sheetName || '--'}　计划注汽总量：{preview.totalPlannedSteam}</p></div><button className="action-button action-primary" disabled={preview.status !== 'preview'} onClick={confirmPreview}>{preview.status === 'preview' ? '确认覆盖并生成项目' : importText[preview.status] || preview.status}</button></div><div className="mt-3 grid grid-cols-5 gap-2 text-center text-sm"><div className="rounded bg-white p-2">有效<br /><b>{preview.validCount}</b></div><div className="rounded bg-white p-2">待定<br /><b>{preview.pendingCount}</b></div><div className="rounded bg-white p-2">异常<br /><b>{preview.invalidCount}</b></div><div className="rounded bg-white p-2">合计<br /><b>{preview.validCount + preview.pendingCount + preview.invalidCount}</b></div><div className="rounded bg-white p-2">计划注汽总量<br /><b>{preview.totalPlannedSteam}</b></div></div>

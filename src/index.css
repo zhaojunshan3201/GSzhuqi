@@ -210,3 +210,15 @@ table.w-full.text-sm > thead.bg-gray-100.text-gray-700 th:nth-child(14):hover {
   background-color: #ecfdf5;
   color: #047857;
 }
+
+@layer components {
+  .priority-situation-page {
+    @apply min-w-0 overflow-x-hidden;
+  }
+
+  @media (max-width: 1023px) {
+    .priority-situation-page .overflow-x-auto {
+      overscroll-behavior-inline: contain;
+    }
+  }
+}

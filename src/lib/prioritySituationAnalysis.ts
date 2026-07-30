@@ -23,6 +23,38 @@ export interface PriorityIssue {
   targetTab: string;
 }
 
+export function derivePriorityTrackingImportYear(asOfDate?: string, currentYear = new Date().getFullYear()) {
+  const match = asOfDate?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const timestamp = Date.parse(`${asOfDate}T00:00:00Z`);
+    if (Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === asOfDate) return match[1];
+  }
+  return String(currentYear);
+}
+
+export function filterPumpTrackingRowsByWell<T extends Record<string, unknown>>(
+  rows: T[],
+  columns: string[],
+  wellNo: string,
+) {
+  const normalizedWellNo = wellNo.trim();
+  if (!normalizedWellNo) return rows;
+  const wellColumn = columns.find((column) => ['井号', '井名', '井'].includes(column.trim()));
+  if (!wellColumn) return [];
+  return rows.filter((row) => String(row[wellColumn] ?? '').trim() === normalizedWellNo);
+}
+
+export function mergePriorityIssueMeasureQuery<T extends { keyword: string; block: string }>(
+  previous: T,
+  issue: Pick<PriorityIssue, 'wellNo' | 'block'>,
+): T {
+  return {
+    ...previous,
+    ...(issue.wellNo ? { keyword: issue.wellNo } : {}),
+    ...(issue.block ? { block: issue.block } : {}),
+  };
+}
+
 type WaterCutRow = {
   wellNo: string;
   date: string;

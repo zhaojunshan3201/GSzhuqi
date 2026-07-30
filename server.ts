@@ -6307,14 +6307,16 @@ app.post("/api/register", async (req, res) => {
   // ________________________________________________________________________
   app.get("/api/analysis/issues", async (req, res) => {
     const requestedAsOf = req.query.asOf;
+    let asOfDate: string | undefined;
     if (requestedAsOf !== undefined && !isValidPriorityDate(requestedAsOf)) {
       res.status(400).json({ success: false, message: "asOf 必须是有效的 YYYY-MM-DD 日期" });
       return;
     }
+    if (typeof requestedAsOf === "string") asOfDate = requestedAsOf;
     try {
       const data = await withTimingLog(
-        `/api/analysis/issues${requestedAsOf ? `?asOf=${requestedAsOf}` : ""}`,
-        () => getIssueAnalysisData(requestedAsOf),
+        `/api/analysis/issues${asOfDate ? `?asOf=${asOfDate}` : ""}`,
+        () => getIssueAnalysisData(asOfDate),
       );
       res.json({ success: true, data });
     } catch (err: any) {

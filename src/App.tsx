@@ -50,6 +50,8 @@ import type { SidebarGroupKey, SidebarIcon, SidebarTab } from './lib/sidebarNavi
 import type { LucideIcon } from 'lucide-react';
 import { AxonLandingPage } from './components/AxonLandingPage';
 import { DatacoreLandingPage } from './components/DatacoreLandingPage';
+import { PrioritySituationAnalysis, type PrioritySituationData } from './components/PrioritySituationAnalysis';
+import { derivePriorityTrackingImportYear, filterPumpTrackingRowsByWell, mergePriorityIssueMeasureQuery, type PriorityCategory, type PriorityIssue } from './lib/prioritySituationAnalysis';
 
 // --- Types ---
 interface Well {
@@ -2248,6 +2250,9 @@ export default function App() {
   });
   
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
+  const [priorityAnalysisData, setPriorityAnalysisData] = useState<PrioritySituationData | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
   const [loading, setLoading] = useState(false);
   const [overallRange, setOverallRange] = useState<DateRange>({
     start: '2026-01-01',
@@ -2373,6 +2378,8 @@ export default function App() {
     error: ''
   });
   const [pumpAnalysisUploading, setPumpAnalysisUploading] = useState(false);
+  const [priorityPumpWellNo, setPriorityPumpWellNo] = useState('');
+  const [prioritySoakingWellNo, setPrioritySoakingWellNo] = useState('');
   const [pumpDeepAnalysisExpanded, setPumpDeepAnalysisExpanded] = useState<Record<string, boolean>>({
     upload: true,
     analysis: true
@@ -2436,6 +2443,7 @@ export default function App() {
     error: string;
     data: PumpProductionOilAnalysisData | null;
   }>({ loading: false, error: '', data: null });
+  const pumpProductionRequestIdRef = React.useRef(0);
   const [measureMonthlyCohorts, setMeasureMonthlyCohorts] = useState<MeasureMonthlyCohortState>({
     rows: [],
     loading: false,
@@ -3428,6 +3436,7 @@ export default function App() {
   const loadPumpProductionOilAnalysis = async (
     groups: Array<{ key: string; title: string; wells: Array<{ jh: string; openDate: string; previousOpenDate: string }> }>
   ) => {
+    const requestId = ++pumpProductionRequestIdRef.current;
     if (groups.every((group) => group.wells.length === 0)) {
       setPumpProductionOilAnalysis({ loading: false, error: '', data: null });
       return;
@@ -3441,6 +3450,7 @@ export default function App() {
         body: JSON.stringify({ intervalDays: 5, groups })
       });
 
+      if (requestId !== pumpProductionRequestIdRef.current) return;
       if (!result.success) {
         setPumpProductionOilAnalysis({ loading: false, error: result.message || '检泵跟踪曲线生成失败', data: null });
         return;
@@ -3448,6 +3458,7 @@ export default function App() {
 
       setPumpProductionOilAnalysis({ loading: false, error: '', data: result.data as PumpProductionOilAnalysisData });
     } catch (err: any) {
+      if (requestId !== pumpProductionRequestIdRef.current) return;
       setPumpProductionOilAnalysis({ loading: false, error: err?.message || '检泵跟踪曲线生成失败', data: null });
     }
   };
@@ -4586,6 +4597,12 @@ export default function App() {
   }, [activeTab, isLoggedIn]);
 
   useEffect(() => {
+    if (activeTab === 'analysis') {
+      void loadAnalysisChart();
+    }
+  }, [activeTab, isLoggedIn]);
+
+  useEffect(() => {
     if (activeTab === 'wellTemperature') {
       void loadWellTemperatureTests().then((tests) => {
         if (tests?.[0]) void loadWellTemperatureTestDetail(tests[0].id);
@@ -4737,21 +4754,72 @@ export default function App() {
   };
 
   const loadAnalysisChart = async () => {
-    setLoading(true);
-    setAnalysisData(null);
-
+    setAnalysisLoading(true);
+    setAnalysisError('');
     try {
       const result = await fetchJson('/api/analysis/issues');
       if (result.success) {
-        setAnalysisData(result.data);
+        setPriorityAnalysisData(result.data as PrioritySituationData);
       } else {
-        showDataError(result.message);
+        setAnalysisError(result.message || '重点情况分析加载失败');
       }
-    } catch {
-      showDataError();
+    } catch (error: any) {
+      setAnalysisError(error?.message || '重点情况分析加载失败');
     } finally {
-      setLoading(false);
+      setAnalysisLoading(false);
     }
+  };
+
+  const handlePriorityTrackingUpload = async (file: File) => {
+    if (!/\.xlsx?$/i.test(file.name)) {
+      setAnalysisError('仅支持 .xls 或 .xlsx 跟踪表文件');
+      return;
+    }
+
+    setMeasureImporting(true);
+    setAnalysisError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const importYear = derivePriorityTrackingImportYear(priorityAnalysisData?.asOfDate);
+      const yearParam = `?year=${encodeURIComponent(importYear)}`;
+      const result = await fetchJson(`/api/measures/import${yearParam}`, { method: 'POST', body: formData });
+      if (!result.success) {
+        setAnalysisError(result.message || '跟踪表导入失败');
+        return;
+      }
+      await Promise.all([loadMeasures(true), loadAnalysisChart()]);
+    } catch (error: any) {
+      setAnalysisError(error?.message || '跟踪表导入失败');
+    } finally {
+      setMeasureImporting(false);
+    }
+  };
+
+  const handlePriorityIssueOpen = (issue: PriorityIssue) => {
+    const targetMap: Record<PriorityCategory, string> = {
+      pump: 'pumpAnalysis',
+      waterCut: 'waterLab',
+      blockDecline: 'blockProduction',
+      soaking: 'injectionSoakTransfer',
+      injectionPeriod: 'measures',
+      restartTracking: 'measures'
+    };
+    const target = targetMap[issue.category] === 'blockProduction' ? 'block' : targetMap[issue.category];
+    if (target === 'measures') setMeasureQuery(prev => mergePriorityIssueMeasureQuery(prev, issue));
+    if (issue.wellNo) {
+      if (issue.category === 'pump') setPriorityPumpWellNo(issue.wellNo);
+      if (issue.category === 'soaking') setPrioritySoakingWellNo(issue.wellNo);
+      setSelectedWell(issue.wellNo);
+      setWaterLabSelectedWell(issue.wellNo);
+      setWellSearch(issue.wellNo);
+    }
+    if (issue.block) {
+      setSelectedWellBlock(issue.block);
+      setWaterLabSelectedBlock(issue.block);
+      setSelectedChartBlocks([issue.block]);
+    }
+    setActiveTab(target as SidebarTab);
   };
 
   const loadCompareData = async (
@@ -5336,27 +5404,6 @@ export default function App() {
     ]
   });
 
-  const getPieOption = () => ({
-    title: { text: '含水分布诊断', subtext: '按含水区间统计井数', left: 'center' },
-    tooltip: { trigger: 'item', formatter: '{a} <br/>{b}：{c} 口 ({d}%)' },
-    legend: { bottom: '0', left: 'center' },
-    series: [
-      {
-        name: '含水分布', type: 'pie', radius: '60%',
-        data: analysisData?.water_cut_pie || [],
-        emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } },
-        itemStyle: {
-          color: (params: any) => {
-            const name = params.name || '';
-            if (name.includes('特高')) return '#D32F2F';
-            if (name.includes('高含水')) return '#FF9800';
-            if (name.includes('低含水')) return '#4CAF50';
-            return '#2196F3';
-          }
-        }
-      }
-    ]
-  });
 
   const occupancyColorMap: Record<string, string> = {
     '注汽占产': '#F59E0B',
@@ -5836,10 +5883,22 @@ export default function App() {
     () => measureAnalysisRows.map(item => ({ name: `${item.evaluation}类`, value: Number(item.currentOil.toFixed(1)) })),
     [measureAnalysisRows]
   );
-  const pumpOldWellRecoveredOilSeries = React.useMemo(
-    () => buildPumpOldWellRecoveredOilSeries(pumpAnalysisUpload.rows, pumpAnalysisUpload.columns),
-    [pumpAnalysisUpload.rows, pumpAnalysisUpload.columns]
+  const priorityPumpTrackingRows = React.useMemo(
+    () => filterPumpTrackingRowsByWell(pumpAnalysisUpload.rows, pumpAnalysisUpload.columns, priorityPumpWellNo),
+    [pumpAnalysisUpload.rows, pumpAnalysisUpload.columns, priorityPumpWellNo]
   );
+  const pumpOldWellRecoveredOilSeries = React.useMemo(
+    () => buildPumpOldWellRecoveredOilSeries(priorityPumpTrackingRows, pumpAnalysisUpload.columns),
+    [priorityPumpTrackingRows, pumpAnalysisUpload.columns]
+  );
+  useEffect(() => {
+    if (activeTab !== 'pumpAnalysis') return;
+    if (pumpOldWellRecoveredOilSeries.missing.length > 0) {
+      void loadPumpProductionOilAnalysis([]);
+      return;
+    }
+    void loadPumpProductionOilAnalysis(pumpOldWellRecoveredOilSeries.groups);
+  }, [activeTab, pumpOldWellRecoveredOilSeries]);
   const pumpDeepAnalysisData = React.useMemo(
     () => buildPumpDeepAnalysisData(pumpDeepAnalysisUpload),
     [pumpDeepAnalysisUpload]
@@ -6139,7 +6198,7 @@ export default function App() {
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
                {activeTab === 'channelingProjectManagement' && <ChannelingProjectManagement role={user?.role || 'guest'} />}
                 {activeTab === 'injectionOperationReports' && <InjectionOperationReports />}
-              {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} />}
+              {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} initialWellNo={prioritySoakingWellNo} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {
                 if (shouldApplyCockpitMeasureFilters(tab)) {
                   setMeasureQuery((current) => applyCockpitMeasureFilters(current, filters).query);
@@ -6702,122 +6761,15 @@ export default function App() {
               )}
 
               {activeTab === 'analysis' && (
-                <div className="page-stack">
-                  {/* Summary Stats */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="app-card border-l-4 border-l-[#D32F2F] p-4">
-                      <p className="text-sm text-gray-500">全区总井数</p>
-                      <p className="text-2xl font-bold">{analysisData?.summary?.total_wells ?? '--'}</p>
-                    </div>
-                    <div className="app-card border-l-4 border-l-[#FF9800] p-4">
-                      <p className="text-sm text-gray-500">异常待排查井</p>
-                      <p className="text-2xl font-bold">{analysisData?.summary?.abnormal_wells ?? '--'}</p>
-                    </div>
-                    <div className="app-card border-l-4 border-l-[#4CAF50] p-4">
-                      <p className="text-sm text-gray-500">预计增产空间</p>
-                      <p className="text-2xl font-bold">{analysisData?.summary?.potential_gain || '--'}</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Pie Chart */}
-                    <div className="analysis-section border-t-[#facc15]">
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold">含水分布诊断</h3>
-                        <button 
-                          onClick={loadAnalysisChart}
-                          className="action-button action-danger h-8 px-3 text-xs"
-                        >
-                          刷新诊断
-                        </button>
-                      </div>
-                      <div className="h-[400px]">
-                        {analysisData ? (
-                          <ReactECharts option={getPieOption()} style={{ height: '100%' }} />
-                        ) : (
-                          <div className="h-full flex items-center justify-center text-gray-400 text-sm">
-                            正在加载实时诊断...
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Top Problematic Wells Table */}
-                    <div className="analysis-section">
-                      <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                        <AlertTriangle className="text-[#D32F2F]" size={20} />
-                        特高含水井 Top 10
-                      </h3>
-                      <div className="overflow-x-auto">
-                        <table
-                          className="measure-table w-full text-left text-sm"
-                          onClick={(event) => {
-                            const header = (event.target as HTMLElement).closest('th');
-                            if (header?.cellIndex === 13) {
-                              setMeasureEvaluationSorted(true);
-                            }
-                          }}
-                        >
-                          <thead>
-                            <tr>
-                              <th>井号</th>
-                              <th>含水率(%)</th>
-                              <th>日产油(t)</th>
-                              <th>日产液(t)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(analysisData?.top_water_cut_wells ?? []).map((w, i) => (
-                              <tr key={i}>
-                                <td className="font-medium">{w.jh}</td>
-                                <td className="text-red-600 font-bold">{w.water_cut}%</td>
-                                <td>{w.oil}</td>
-                                <td>{w.liquid}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Decline Warnings & Recommendations */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="analysis-section lg:col-span-2 border-t-[#2563eb]">
-                      <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                        <TrendingUp className="text-[#004a99]" size={20} />
-                        产量递减异常预警
-                      </h3>
-                      <div className="space-y-4">
-                        {(analysisData?.decline_warnings ?? []).map((w, i) => (
-                          <div key={i} className="p-4 bg-blue-50 rounded-lg border-l-4 border-l-[#004a99] flex flex-col md:flex-row md:items-center justify-between gap-4">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="font-bold text-gray-900">{w.jh}</span>
-                                <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded font-bold">递减率 {w.decline_rate}</span>
-                              </div>
-                              <p className="text-sm text-gray-600"><span className="font-medium">可能原因：</span> {w.reason}</p>
-                            </div>
-                            <div className="bg-white p-3 rounded border border-blue-100 min-w-[200px]">
-                              <p className="text-xs font-bold text-[#004a99] mb-1">专家建议</p>
-                              <p className="text-sm text-gray-700">{w.suggestion}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="analysis-section border-t-[#10b981]">
-                      <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                        <Activity className="text-[#10b981]" size={20} />
-                        重点措施建议
-                      </h3>
-                      <div className="p-3 bg-gray-50 rounded border border-gray-100">
-                        <p className="text-sm text-gray-600">暂无真实措施建议数据。</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <PrioritySituationAnalysis
+                  data={priorityAnalysisData}
+                  loading={analysisLoading}
+                  error={analysisError}
+                  uploading={measureImporting}
+                  onRefresh={loadAnalysisChart}
+                  onUpload={handlePriorityTrackingUpload}
+                  onOpenIssue={handlePriorityIssueOpen}
+                />
               )}
               {activeTab === 'comparison' && (
                 <div className="page-stack">
@@ -8022,6 +7974,16 @@ export default function App() {
 
               {activeTab === 'pumpAnalysis' && (
                 <div className="page-stack">
+                  {priorityPumpWellNo && (
+                    <div className="app-card flex flex-wrap items-center justify-between gap-3 border-l-4 border-l-red-500 p-5">
+                      <div>
+                        <div className="text-sm font-bold text-red-700">重点情况定位井号</div>
+                        <div className="mt-1 text-lg font-bold text-slate-900">{priorityPumpWellNo}</div>
+                        <div className="mt-1 text-sm text-slate-500">当前检泵统计与生产曲线仅展示该井。</div>
+                      </div>
+                      <button type="button" className="action-button action-secondary" onClick={() => setPriorityPumpWellNo('')}>清除定位</button>
+                    </div>
+                  )}
                   <div className="app-card overflow-hidden border-t-4 border-t-emerald-500">
                     <button
                       type="button"
@@ -8120,7 +8082,7 @@ export default function App() {
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                               <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
                                 <div className="text-sm font-bold text-slate-700">数据行数</div>
-                                <div className="mt-2 text-2xl font-bold text-slate-900">{pumpAnalysisUpload.rows.length}</div>
+                                <div className="mt-2 text-2xl font-bold text-slate-900">{priorityPumpTrackingRows.length}</div>
                               </div>
                               <div className="rounded-lg border border-slate-100 bg-slate-50 p-4">
                                 <div className="text-sm font-bold text-slate-700">匹配记录</div>
