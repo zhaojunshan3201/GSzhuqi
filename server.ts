@@ -71,7 +71,6 @@ import {
 } from "./src/lib/blockProductionGrouping.ts";
 import { calculateBlockDeclineRate } from "./src/lib/blockProductionGenerator.ts";
 
-import { normalizeForecastBlock } from "./src/lib/injectionTenDayForecast.ts";
 import {
   buildInjectionPeriodIssues,
   buildWaterCutIssues,
@@ -796,20 +795,32 @@ function buildPriorityBlockDeclines(productionRows: any[], asOfDate: string) {
   const targetYear = target.getUTCFullYear();
   const targetMonth = `${targetYear}-${String(target.getUTCMonth() + 1).padStart(2, "0")}`;
   const previousYear = targetYear - 1;
-  const blocks = new Map<string, Map<string, number>>();
+  const blocks = new Map<string, Map<string, Map<string, number>>>();
 
   for (const row of productionRows) {
     const block = normalizeProductionBlockGroup(row.block);
     if (!block || !isValidPriorityDate(row.date)) continue;
-    const daily = blocks.get(block) || new Map<string, number>();
-    blocks.set(block, daily);
+    const rawBlocks = blocks.get(block) || new Map<string, Map<string, number>>();
+    const rawBlock = String(row.block);
+    const rawDaily = rawBlocks.get(rawBlock) || new Map<string, number>();
+    rawBlocks.set(rawBlock, rawDaily);
+    blocks.set(block, rawBlocks);
     const oil = priorityNumber(row.oil);
     if (oil == null || oil < 0) continue;
-    daily.set(row.date, (daily.get(row.date) || 0) + oil);
+    rawDaily.set(row.date, (rawDaily.get(row.date) || 0) + oil);
   }
 
-  return [...blocks.entries()].map(([block, daily]) => {
-    const roundedDaily = [...daily.entries()].map(([date, oil]) => ({
+  return [...blocks.entries()].map(([block, rawBlocks]) => {
+    const groupedDaily = new Map<string, number>();
+    for (const rawDaily of rawBlocks.values()) {
+      for (const [date, oil] of rawDaily) {
+        groupedDaily.set(
+          date,
+          (groupedDaily.get(date) || 0) + Number(oil.toFixed(1)),
+        );
+      }
+    }
+    const roundedDaily = [...groupedDaily.entries()].map(([date, oil]) => ({
       date,
       oil: Number(oil.toFixed(1)),
     }));

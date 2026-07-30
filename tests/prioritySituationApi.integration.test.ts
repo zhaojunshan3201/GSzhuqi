@@ -106,7 +106,10 @@ async function seedDatabase(filename: string) {
       ['检泵跟踪.xlsx', JSON.stringify(['井号', '状态', '本次检泵开日期', '检泵前日产油']), JSON.stringify(pumpRows)],
     );
 
-    const previousYearOil = [300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 350];
+    const previousYearOil = [
+      300.04, 300.04, 300.04, 300.04, 300.04, 300.04,
+      300.04, 300.04, 300.04, 300.04, 300.04, 350.04,
+    ];
     for (let month = 1; month <= 12; month += 1) {
       await insertProduction(
         '区块井',
@@ -121,8 +124,8 @@ async function seedDatabase(filename: string) {
         '3624块(北)L5',
       );
     }
-    await insertProduction('区块井', '2026-06-10', 8, '高3624');
-    await insertProduction('区块井', '2026-06-20', 8, '高3624');
+    await insertProduction('区块井', '2026-06-10', 8.04, '高3624');
+    await insertProduction('区块井', '2026-06-20', 8.04, '高3624');
     await insertProduction('GROUP-TARGET', '2026-06-10', 2.04, '3624块(北)L5');
     for (let month = 1; month <= 12; month += 1) {
       await insertProduction('跨年区块井', `2024-${String(month).padStart(2, '0')}-15`, 100, '跨年区');
@@ -383,7 +386,7 @@ test('聚合六类重点情况并对缺少单一来源保持整体可用', { tim
     assert.equal(body.data.soakingWells[0].wellNo, '焖井-当前');
     assert.equal(body.data.soakingWells[0].soakingDays, 25);
 
-    // 验证区块生产动态分组与按区块日汇总后保留一位小数的共同口径。
+    // 验证原始区块分别按日舍入，再按生产动态规范组合并的 summary 口径。
     const declines = body.data.blockDeclines.filter((row: any) => row.block === '高3624');
     assert.equal(declines.length, 1);
     const [decline] = declines;
