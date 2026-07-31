@@ -140,26 +140,6 @@ export function buildWaterCutIssues(
   });
 }
 
-export function calculateBlockDeclineRate(
-  previousYearOil: number,
-  monthlyAverageOil: number,
-  yearDays: number,
-): number | null {
-  if (
-    !Number.isFinite(previousYearOil)
-    || previousYearOil <= 0
-    || !Number.isFinite(monthlyAverageOil)
-    || monthlyAverageOil < 0
-    || !Number.isFinite(yearDays)
-    || yearDays <= 0
-  ) return null;
-
-  const annualizedOil = monthlyAverageOil * yearDays;
-  if (!Number.isFinite(annualizedOil)) return null;
-  const rate = ((previousYearOil - annualizedOil) / previousYearOil) * 100;
-  return Number.isFinite(rate) ? Number(rate.toFixed(1)) : null;
-}
-
 export function buildInjectionPeriodIssues(rows: InjectionPeriodRow[]): PriorityIssue[] {
   return rows.flatMap((row) => {
     if (

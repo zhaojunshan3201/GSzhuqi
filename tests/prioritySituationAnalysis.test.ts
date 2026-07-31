@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   buildInjectionPeriodIssues,
   buildWaterCutIssues,
-  calculateBlockDeclineRate,
   calculatePumpRecoveryRate,
   calculateSoakingDays,
   mergePriorityIssues,
@@ -112,24 +111,6 @@ test('含水输入仅接受0到100之间的有限值，并忽略无效的最近�
     ],
   );
   assert.equal(issues[0].deviation, 100);
-});
-
-test('区块递减率按年度折算口径计算并保留1位小数', () => {
-  assert.equal(calculateBlockDeclineRate(3650, 8, 365), 20);
-  assert.equal(calculateBlockDeclineRate(3000, 7.123, 365), 13.3);
-});
-
-test('区块递减率在输入超出有效范围或不是有限数时返回null', () => {
-  assert.equal(calculateBlockDeclineRate(0, 8, 365), null);
-  assert.equal(calculateBlockDeclineRate(-1, 8, 365), null);
-  assert.equal(calculateBlockDeclineRate(Number.NaN, 8, 365), null);
-  assert.equal(calculateBlockDeclineRate(3650, -1, 365), null);
-  assert.equal(calculateBlockDeclineRate(3650, Number.POSITIVE_INFINITY, 365), null);
-  assert.equal(calculateBlockDeclineRate(3650, 8, 0), null);
-  assert.equal(calculateBlockDeclineRate(3650, 8, -365), null);
-  assert.equal(calculateBlockDeclineRate(3650, 8, Number.NaN), null);
-  assert.equal(calculateBlockDeclineRate(Number.MAX_VALUE, Number.MAX_VALUE, 2), null);
-  assert.equal(calculateBlockDeclineRate(Number.MIN_VALUE, Number.MAX_VALUE, 1), null);
 });
 
 test('注汽同期同时保留变好与变差井，并按变化率绝对值倒序', () => {

@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
   calculateBlockDeclineRate,
   calculateDeclineRateSeries,
 } from '../src/lib/blockProductionGenerator.ts';
+
+test('keeps the block decline rate formula out of priority situation analysis', () => {
+  const source = readFileSync(
+    new URL('../src/lib/prioritySituationAnalysis.ts', import.meta.url),
+    'utf8',
+  );
+
+  assert.doesNotMatch(source, /export function calculateBlockDeclineRate/);
+});
 
 test('calculates block decline rate using the target year day count', () => {
   assert.equal(calculateBlockDeclineRate(36_500, 80, 2026), 20);
