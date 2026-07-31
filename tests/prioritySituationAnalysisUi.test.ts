@@ -50,6 +50,15 @@ test('priority situation workspace includes categories, shared upload and suppor
   assert.match(source, /重点异常处置清单/);
   assert.match(source, /上月递减率/);
   assert.match(source, /区块生产动态生成器递减率口径/);
+  assert.match(source, /label:\s*\{\s*show:\s*true/);
+  assert.match(
+    source,
+    /position:\s*Number\(item\.declineRate\)\s*>=\s*0\s*\?\s*'right'\s*:\s*'left'/,
+  );
+  assert.match(
+    source,
+    /Number\(params\.value\)\.toFixed\(1\).*%/,
+  );
   assert.match(source, /当前焖井/);
 });
 

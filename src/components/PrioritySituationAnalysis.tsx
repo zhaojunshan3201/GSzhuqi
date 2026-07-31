@@ -101,11 +101,32 @@ export function PrioritySituationAnalysis({ data, loading, error, uploading, onR
   const chartOption = useMemo(() => {
     const rows = (data?.blockDeclines ?? []).filter((item) => item.declineRate != null).slice(0, 10).reverse();
     return {
-      grid: { left: 78, right: 28, top: 18, bottom: 22 },
+      grid: { left: 88, right: 56, top: 18, bottom: 22 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+      xAxis: {
+        type: 'value',
+        boundaryGap: ['12%', '12%'],
+        axisLabel: { formatter: '{value}%' },
+      },
       yAxis: { type: 'category', data: rows.map((item) => item.block), axisTick: { show: false } },
-      series: [{ type: 'bar', data: rows.map((item) => ({ value: item.declineRate, itemStyle: { color: Number(item.declineRate) > 0 ? '#dc2626' : '#16a34a' } })), barMaxWidth: 24 }],
+      series: [{
+        type: 'bar',
+        label: {
+          show: true,
+          color: '#334155',
+          formatter: (params: { value: number }) => `${Number(params.value).toFixed(1)}%`,
+        },
+        data: rows.map((item) => ({
+          value: item.declineRate,
+          label: {
+            position: Number(item.declineRate) >= 0 ? 'right' : 'left',
+          },
+          itemStyle: {
+            color: Number(item.declineRate) > 0 ? '#dc2626' : '#16a34a',
+          },
+        })),
+        barMaxWidth: 24,
+      }],
     };
   }, [data]);
 
