@@ -49,6 +49,7 @@ test('priority situation workspace includes categories, shared upload and suppor
   assert.match(source, /上传跟踪表/);
   assert.match(source, /重点异常处置清单/);
   assert.match(source, /上月递减率/);
+  assert.match(source, /区块生产动态生成器递减率口径/);
   assert.match(source, /当前焖井/);
 });
 
