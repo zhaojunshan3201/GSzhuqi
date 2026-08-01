@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
 from pathlib import Path
 
 from docx import Document
@@ -34,42 +36,63 @@ def main() -> None:
             f"expected {TRUSTED_SOURCE_SHA256}, got {source_hash_before}"
         )
 
-    document = Document(SOURCE)
-    found: set[str] = set()
+    if SOURCE.resolve() == OUTPUT.resolve():
+        raise RuntimeError("Output path must differ from the source DOCX")
+    try:
+        if OUTPUT.exists() and os.path.samefile(SOURCE, OUTPUT):
+            raise RuntimeError("Output DOCX must not be a hard link alias of the source DOCX")
+    except FileNotFoundError:
+        pass
 
-    for paragraph in document.paragraphs:
+    document = Document(SOURCE)
+    paragraphs = document.paragraphs
+    occurrences = {placeholder: 0 for placeholder in FIGURES}
+
+    for paragraph in paragraphs:
+        placeholder = paragraph.text.strip()
+        if placeholder in occurrences:
+            occurrences[placeholder] += 1
+
+    invalid = {placeholder: count for placeholder, count in occurrences.items() if count != 1}
+    if invalid:
+        details = ", ".join(
+            f"{placeholder!r}: expected 1, found {count}" for placeholder, count in invalid.items()
+        )
+        raise RuntimeError(f"Placeholder occurrence mismatch ({details})")
+
+    for paragraph in paragraphs:
         placeholder = paragraph.text.strip()
         if placeholder not in FIGURES:
             continue
-
         paragraph.clear()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         paragraph.paragraph_format.keep_with_next = True
         paragraph.add_run().add_picture(str(FIGURES[placeholder]), width=Mm(146))
-        found.add(placeholder)
 
-    required = set(FIGURES)
-    if found != required:
-        missing = required - found
-        unexpected = found - required
-        details = []
-        if missing:
-            details.append(f"missing: {sorted(missing)}")
-        if unexpected:
-            details.append(f"unexpected: {sorted(unexpected)}")
-        raise RuntimeError("Placeholder mismatch (" + "; ".join(details) + ")")
+    temporary_output: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{OUTPUT.stem}-",
+            suffix=".docx",
+            dir=OUTPUT.parent,
+            delete=False,
+        ) as temporary_file:
+            temporary_output = Path(temporary_file.name)
 
-    if SOURCE.resolve() == OUTPUT.resolve():
-        raise RuntimeError("Output path must differ from the source DOCX")
-
-    document.save(OUTPUT)
-
-    source_hash_after = sha256(SOURCE)
-    if source_hash_after != source_hash_before:
-        raise RuntimeError(
-            "Source DOCX changed during figure insertion: "
-            f"before {source_hash_before}, after {source_hash_after}"
-        )
+        document.save(temporary_output)
+        source_hash_after = sha256(SOURCE)
+        if source_hash_after != source_hash_before or source_hash_after != TRUSTED_SOURCE_SHA256:
+            raise RuntimeError(
+                "Source DOCX changed during figure insertion: "
+                f"before {source_hash_before}, after {source_hash_after}"
+            )
+        os.replace(temporary_output, OUTPUT)
+    finally:
+        if temporary_output is not None:
+            try:
+                temporary_output.unlink()
+            except FileNotFoundError:
+                pass
 
 
 if __name__ == "__main__":
