@@ -8,7 +8,7 @@
     </marker>
     <style>
       .level-label, .card-title, .subtitle, .section-label, .body-copy, .case-copy,
-      .metric, .effect-value, .effect-label, .arrow-label, .band-title, .band-copy {
+      .metric, .block-metric, .effect-value, .effect-label, .arrow-label, .band-title, .band-copy {
         font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
       }
       .level-label { font-size: 20px; font-weight: 700; fill: #FFFFFF; }
@@ -18,7 +18,8 @@
       .body-copy { font-size: 18px; font-weight: 500; fill: #1F2D3D; }
       .case-copy { font-size: 18.5px; font-weight: 700; fill: #1F2D3D; }
       .metric { font-size: 29px; font-weight: 700; fill: #D43B3B; }
-      .effect-value { font-size: 20px; font-weight: 700; fill: #6685A4; }
+      .block-metric { font-size: 29px; font-weight: 700; fill: #2F6FB5; }
+      .effect-value { font-size: 18px; font-weight: 700; fill: #6685A4; }
       .effect-label { font-size: 14.5px; font-weight: 600; fill: #40576E; }
       .arrow-label { font-size: 14.5px; font-weight: 700; fill: #B73232; }
       .band-title { font-size: 21px; font-weight: 700; fill: #FFFFFF; }
@@ -101,7 +102,7 @@
 
   <rect x="800" y="314" width="92" height="28" rx="6" fill="#2F6FB5"/>
   <text x="846" y="334" class="section-label" text-anchor="middle">应用效果</text>
-  <text x="924" y="379" class="metric" text-anchor="middle" fill="#2F6FB5">2200 → 2050 t</text>
+  <text x="924" y="379" class="block-metric" text-anchor="middle">2200 → 2050 t</text>
   <text x="924" y="412" class="body-copy" text-anchor="middle">单井注汽量下降</text>
 
   <!-- 逐级上推与经验推广 -->
