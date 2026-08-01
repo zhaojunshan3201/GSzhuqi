@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 590" role="img" aria-labelledby="title description">
+  <title id="title">三级协同典型应用成效</title>
+  <desc id="description">单井精细诊断、井组注采平衡和区块整体调控的三级协同应用案例与成效。</desc>
+  <defs>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#D43B3B"/>
+    </marker>
+    <style>
+      .level-label, .card-title, .subtitle, .section-label, .body-copy, .case-copy,
+      .metric, .effect-value, .effect-label, .arrow-label, .band-title, .band-copy {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+      }
+      .level-label { font-size: 20px; font-weight: 700; fill: #FFFFFF; }
+      .card-title { font-size: 24px; font-weight: 700; fill: #1F2D3D; }
+      .subtitle { font-size: 18.5px; font-weight: 500; fill: #52687E; }
+      .section-label { font-size: 18px; font-weight: 700; fill: #FFFFFF; }
+      .body-copy { font-size: 18px; font-weight: 500; fill: #1F2D3D; }
+      .case-copy { font-size: 18.5px; font-weight: 700; fill: #1F2D3D; }
+      .metric { font-size: 29px; font-weight: 700; fill: #D43B3B; }
+      .effect-value { font-size: 20px; font-weight: 700; fill: #6685A4; }
+      .effect-label { font-size: 14.5px; font-weight: 600; fill: #40576E; }
+      .arrow-label { font-size: 14.5px; font-weight: 700; fill: #B73232; }
+      .band-title { font-size: 21px; font-weight: 700; fill: #FFFFFF; }
+      .band-copy { font-size: 19.5px; font-weight: 600; fill: #FFFFFF; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1120" height="590" fill="#FFFFFF"/>
+  <rect x="18" y="18" width="1084" height="554" rx="18" fill="#FFFFFF" stroke="#C7D2DE" stroke-width="2"/>
+
+  <!-- 单井 -->
+  <rect x="52" y="52" width="288" height="392" rx="14" fill="#FDF0F0" stroke="#E8BBBB" stroke-width="1.5"/>
+  <rect x="52" y="52" width="288" height="7" rx="3.5" fill="#D43B3B"/>
+  <circle cx="82" cy="84" r="20" fill="#D43B3B"/>
+  <text x="82" y="91" class="level-label" text-anchor="middle">井</text>
+  <text x="112" y="91" class="card-title">单井精细诊断</text>
+  <text x="72" y="122" class="subtitle">找准“热”损失与“油”潜力</text>
+
+  <rect x="72" y="143" width="92" height="28" rx="6" fill="#D43B3B"/>
+  <text x="118" y="163" class="section-label" text-anchor="middle">数据诊断</text>
+  <text x="72" y="188" class="body-copy"><tspan x="72" dy="0">锅炉出口 → 井口 → </tspan><tspan x="72" dy="22">井底温压与干度</tspan></text>
+  <text x="72" y="234" class="body-copy">吸汽剖面 + 产液/产油/含水动态</text>
+  <line x1="72" y1="247" x2="320" y2="247" stroke="#E3CACA" stroke-width="1"/>
+  <text x="72" y="268" class="body-copy"><tspan x="72" dy="0">识别沿程热损失与未动用</tspan><tspan x="72" dy="22">潜力层段</tspan></text>
+  <text x="72" y="312" class="body-copy">输出单井措施调整依据</text>
+
+  <rect x="72" y="326" width="92" height="28" rx="6" fill="#D43B3B"/>
+  <text x="118" y="346" class="section-label" text-anchor="middle">应用效果</text>
+  <text x="196" y="383" class="metric" text-anchor="middle">+6 个百分点</text>
+  <text x="196" y="415" class="body-copy" text-anchor="middle">井底蒸汽干度较管控前提升</text>
+
+  <!-- 井组 -->
+  <rect x="408" y="52" width="304" height="392" rx="14" fill="#F0F4F8" stroke="#C1CFDC" stroke-width="1.5"/>
+  <rect x="408" y="52" width="304" height="7" rx="3.5" fill="#6685A4"/>
+  <circle cx="438" cy="84" r="20" fill="#6685A4"/>
+  <text x="438" y="91" class="level-label" text-anchor="middle">组</text>
+  <text x="468" y="91" class="card-title">井组注采平衡</text>
+  <text x="428" y="122" class="subtitle">平衡注采关系、抑制井间汽窜</text>
+
+  <rect x="428" y="143" width="92" height="28" rx="6" fill="#6685A4"/>
+  <text x="474" y="163" class="section-label" text-anchor="middle">协同措施</text>
+  <text x="428" y="194" class="body-copy">同步/背靠背注汽 · 轮注轮采</text>
+  <text x="428" y="222" class="body-copy">分层/分段精准注汽 · 分级汽窜治理</text>
+  <line x1="428" y1="238" x2="692" y2="238" stroke="#CCD7E1" stroke-width="1"/>
+  <text x="428" y="267" class="case-copy">高3624块典型井组</text>
+  <text x="428" y="295" class="body-copy">实施分段注汽 17 井次</text>
+
+  <rect x="428" y="314" width="92" height="28" rx="6" fill="#6685A4"/>
+  <text x="474" y="334" class="section-label" text-anchor="middle">应用效果</text>
+
+  <rect x="432" y="352" width="80" height="72" rx="7" fill="#FFFFFF" stroke="#C4D1DD"/>
+  <text x="472" y="378" class="effect-value" text-anchor="middle">−195 t</text>
+  <text x="472" y="400" class="effect-label" text-anchor="middle">
+    <tspan x="472" dy="0">平均周期</tspan><tspan x="472" dy="18">注汽量</tspan>
+  </text>
+
+  <rect x="520" y="352" width="80" height="72" rx="7" fill="#FFFFFF" stroke="#C4D1DD"/>
+  <text x="560" y="378" class="effect-value" text-anchor="middle">−215 t</text>
+  <text x="560" y="409" class="effect-label" text-anchor="middle">注窜占产</text>
+
+  <rect x="608" y="352" width="80" height="72" rx="7" fill="#FFFFFF" stroke="#C4D1DD"/>
+  <text x="648" y="378" class="effect-value" text-anchor="middle">+15%</text>
+  <text x="648" y="409" class="effect-label" text-anchor="middle">周期油汽比</text>
+
+  <!-- 区块 -->
+  <rect x="780" y="52" width="288" height="392" rx="14" fill="#EDF4FB" stroke="#B8CDE2" stroke-width="1.5"/>
+  <rect x="780" y="52" width="288" height="7" rx="3.5" fill="#2F6FB5"/>
+  <circle cx="810" cy="84" r="20" fill="#2F6FB5"/>
+  <text x="810" y="91" class="level-label" text-anchor="middle">区</text>
+  <text x="840" y="91" class="card-title">区块整体调控</text>
+  <text x="800" y="122" class="subtitle">优井网、优参数、转方式</text>
+
+  <rect x="800" y="143" width="92" height="28" rx="6" fill="#2F6FB5"/>
+  <text x="846" y="163" class="section-label" text-anchor="middle">战略调控</text>
+  <text x="800" y="188" class="body-copy"><tspan x="800" dy="0">井网/井距重构 · “654”</tspan><tspan x="800" dy="22">注汽优化</tspan></text>
+  <text x="800" y="234" class="body-copy">四情景预测 · 热量与能量统筹</text>
+  <line x1="800" y1="247" x2="1048" y2="247" stroke="#C9D8E7" stroke-width="1"/>
+  <text x="800" y="272" class="case-copy">高246区块拉大井距</text>
+  <text x="800" y="298" class="body-copy">减少无效热循环，提升油汽比</text>
+
+  <rect x="800" y="314" width="92" height="28" rx="6" fill="#2F6FB5"/>
+  <text x="846" y="334" class="section-label" text-anchor="middle">应用效果</text>
+  <text x="924" y="379" class="metric" text-anchor="middle" fill="#2F6FB5">2200 → 2050 t</text>
+  <text x="924" y="412" class="body-copy" text-anchor="middle">单井注汽量下降</text>
+
+  <!-- 逐级上推与经验推广 -->
+  <line x1="350" y1="232" x2="398" y2="232" stroke="#D43B3B" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow-red)"/>
+  <text x="374" y="214" class="arrow-label" text-anchor="middle">依据上推</text>
+  <line x1="722" y1="232" x2="770" y2="232" stroke="#D43B3B" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow-red)"/>
+  <text x="746" y="214" class="arrow-label" text-anchor="middle">经验推广</text>
+
+  <!-- 总体成效 -->
+  <rect x="52" y="472" width="1016" height="66" rx="12" fill="#172F4B"/>
+  <text x="76" y="513" class="band-title">三级协同总体成效</text>
+  <line x1="280" y1="487" x2="280" y2="523" stroke="#6F87A0" stroke-width="1.5"/>
+  <text x="310" y="513" class="band-copy">选井效率提升 80% 以上</text>
+  <line x1="575" y1="487" x2="575" y2="523" stroke="#6F87A0" stroke-width="1.5"/>
+  <text x="605" y="513" class="band-copy">异常响应 15–30 天 → 1–3 天</text>
+</svg>
