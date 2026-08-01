@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from docx import Document
-from PIL import Image
+from docx.oxml.ns import qn
+from PIL import Image, ImageChops
 
 
 ARTIFACT_DIR = Path(__file__).resolve().parent
@@ -17,9 +19,16 @@ FIGURE_2_SVG = ARTIFACT_DIR / "figure-2-three-tier-collaboration-example.svg"
 FIGURE_1_PNG = ARTIFACT_DIR / "figure-1-three-tier-control-architecture.png"
 FIGURE_2_PNG = ARTIFACT_DIR / "figure-2-three-tier-collaboration-example.png"
 OUTPUT_DOCX = ARTIFACT_DIR / "高采三区数智化注采管理系统的构建与应用-三级管控插图完成版.docx"
-SOURCE_DOCX = Path(
+DEFAULT_SOURCE_DOCX = Path(
     r"C:\Users\31541\Desktop\油水井\高采三区数智化注采管理系统的构建与应用(高升采油厂采三)7.13-完善版4.docx"
 )
+# PAPER_SOURCE_DOCX may relocate an identical, trusted source DOCX for another machine.
+TRUSTED_SOURCE_SHA256 = "c5b356318a4484bc18e3e54325df1321332ae7f3c01a0497fb5ec1347479ba32"
+
+
+def source_docx_path() -> Path:
+    """Use PAPER_SOURCE_DOCX when set; otherwise use the project source path."""
+    return Path(os.environ.get("PAPER_SOURCE_DOCX", str(DEFAULT_SOURCE_DOCX)))
 
 
 class ThreeTierArtifactTests(unittest.TestCase):
@@ -40,9 +49,9 @@ class ThreeTierArtifactTests(unittest.TestCase):
                 f"SVG contains an empty text node: {path}",
             )
 
-        document_text = "".join(root.itertext())
+        visible_text = "".join("".join(node.itertext()) for node in text_nodes)
         for phrase in required_text:
-            self.assertIn(phrase, document_text, f"Missing SVG text {phrase!r} in {path}")
+            self.assertIn(phrase, visible_text, f"Missing visible SVG text {phrase!r} in {path}")
 
     def assert_png(self, path: Path, expected_height: int) -> None:
         self.require_file(path)
@@ -52,6 +61,30 @@ class ThreeTierArtifactTests(unittest.TestCase):
             for point in ((0, 0), (2399, 0), (0, expected_height - 1), (2399, expected_height - 1)):
                 pixel = image.getpixel(point)
                 self.assertEqual(pixel[:3], (255, 255, 255), f"Corner {point} is not white in {path}")
+            white_background = Image.new("RGB", image.size, "white")
+            self.assertIsNotNone(
+                ImageChops.difference(image.convert("RGB"), white_background).getbbox(),
+                f"PNG is entirely white: {path}",
+            )
+
+    def assert_caption_follows_png(self, document: Document, caption: str, png_path: Path) -> None:
+        self.require_file(png_path)
+        paragraphs = document.paragraphs
+        caption_indexes = [index for index, paragraph in enumerate(paragraphs) if paragraph.text == caption]
+        self.assertEqual(len(caption_indexes), 1, f"Missing or duplicate caption: {caption}")
+        self.assertGreater(caption_indexes[0], 0, f"Caption has no preceding paragraph: {caption}")
+
+        image_paragraph = paragraphs[caption_indexes[0] - 1]
+        drawing = image_paragraph._p.find(".//" + qn("w:drawing"))
+        self.assertIsNotNone(drawing, f"Caption does not immediately follow an image paragraph: {caption}")
+        blip = drawing.find(".//" + qn("a:blip"))
+        self.assertIsNotNone(blip, f"Image paragraph has no embedded image: {caption}")
+        relationship_id = blip.get(qn("r:embed"))
+        self.assertTrue(relationship_id, f"Embedded image has no relationship id: {caption}")
+        embedded_image = document.part.rels[relationship_id].target_part.blob
+        embedded_hash = hashlib.sha256(embedded_image).hexdigest()
+        expected_hash = hashlib.sha256(png_path.read_bytes()).hexdigest()
+        self.assertEqual(embedded_hash, expected_hash, f"Caption is paired with the wrong image: {caption}")
 
     def test_figure_1_svg(self) -> None:
         self.assert_svg(
@@ -81,12 +114,15 @@ class ThreeTierArtifactTests(unittest.TestCase):
         self.assert_png(FIGURE_2_PNG, 1264)
 
     def test_completed_docx_replaces_placeholders_and_adds_figures(self) -> None:
-        self.require_file(SOURCE_DOCX)
+        source_docx = source_docx_path()
+        self.require_file(source_docx)
         self.require_file(OUTPUT_DOCX)
-        self.assertNotEqual(SOURCE_DOCX.resolve(), OUTPUT_DOCX.resolve())
+        self.assertNotEqual(source_docx.resolve(), OUTPUT_DOCX.resolve())
+        self.assertFalse(os.path.samefile(source_docx, OUTPUT_DOCX), "Output DOCX must not be the source DOCX or its hard link")
 
-        source_hash_before = hashlib.sha256(SOURCE_DOCX.read_bytes()).hexdigest()
-        source = Document(SOURCE_DOCX)
+        source_hash_before = hashlib.sha256(source_docx.read_bytes()).hexdigest()
+        self.assertEqual(source_hash_before, TRUSTED_SOURCE_SHA256, "Source DOCX does not match the trusted baseline")
+        source = Document(source_docx)
         output = Document(OUTPUT_DOCX)
         output_text = "\n".join(paragraph.text for paragraph in output.paragraphs)
 
@@ -95,8 +131,10 @@ class ThreeTierArtifactTests(unittest.TestCase):
         self.assertIn("图1  系统三级管控架构示意图", output_text)
         self.assertIn("图2  井→组→区块三级协同管控效果示例", output_text)
         self.assertGreaterEqual(len(output.inline_shapes), len(source.inline_shapes) + 2)
+        self.assert_caption_follows_png(output, "图1  系统三级管控架构示意图", FIGURE_1_PNG)
+        self.assert_caption_follows_png(output, "图2  井→组→区块三级协同管控效果示例", FIGURE_2_PNG)
 
-        source_hash_after = hashlib.sha256(SOURCE_DOCX.read_bytes()).hexdigest()
+        source_hash_after = hashlib.sha256(source_docx.read_bytes()).hexdigest()
         self.assertEqual(source_hash_before, source_hash_after, "Source DOCX changed during verification")
 
 
