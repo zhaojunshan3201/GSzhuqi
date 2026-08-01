@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 620" role="img" aria-labelledby="title description">
+  <title id="title">注汽全流程三级管控架构</title>
+  <desc id="description">区块级、井组级与单井级协同管控，并由统一数据底座支撑的数字化闭环架构。</desc>
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2F6FB5"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#D43B3B"/>
+    </marker>
+    <style>
+      text {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+        fill: #1F2D3D;
+      }
+      .card-title {
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .card-detail {
+        font-size: 16.5px;
+        font-weight: 500;
+      }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1120" height="620" fill="#FFFFFF"/>
+  <rect x="18" y="18" width="1084" height="584" rx="18" fill="#FFFFFF" stroke="#C7D2DE" stroke-width="2"/>
+
+  <rect x="55" y="48" width="1010" height="54" rx="12" fill="#172F4B"/>
+  <text x="80" y="82" font-size="21" font-weight="700" fill="#FFFFFF">注汽全流程数字化闭环</text>
+  <line x1="304" y1="60" x2="304" y2="90" stroke="#7390AD" stroke-width="1.5"/>
+  <text x="326" y="81" font-size="16.5" font-weight="500" fill="#FFFFFF">选井决策 → 方案与计划 → 施工监控 → 焖井转抽 → 生产响应 → 效果评价 → 优化复盘</text>
+
+  <line x1="116" y1="461" x2="116" y2="143" stroke="#2F6FB5" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow-blue)"/>
+  <text x="86" y="302" font-size="16" font-weight="700" fill="#2F6FB5" text-anchor="middle" transform="rotate(-90 86 302)">诊断信息逐级上推</text>
+
+  <line x1="1004" y1="143" x2="1004" y2="461" stroke="#D43B3B" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow-red)"/>
+  <text x="1037" y="302" font-size="16" font-weight="700" fill="#D43B3B" text-anchor="middle" transform="rotate(90 1037 302)">调控决策逐级反馈</text>
+
+  <rect x="150" y="128" width="820" height="105" rx="14" fill="#EDF4FB" stroke="#B8CDE2" stroke-width="1.5"/>
+  <rect x="150" y="128" width="9" height="105" rx="4.5" fill="#2F6FB5"/>
+  <circle cx="205" cy="180.5" r="31" fill="#2F6FB5"/>
+  <text x="205" y="188" font-size="22" font-weight="700" fill="#FFFFFF" text-anchor="middle">区</text>
+  <text x="255" y="160" class="card-title" fill="#244E7A">区块级｜整体态势把控与战略调控</text>
+  <text x="255" y="191" class="card-detail">系统概览 · 重点情况 · 注汽驾驶舱 · 注采状态地图 · 区块分析</text>
+  <text x="255" y="217" class="card-detail">产量预测 · 注汽优化预测 · 检泵分析 · 外输跟踪</text>
+
+  <rect x="150" y="250" width="820" height="105" rx="14" fill="#F0F4F8" stroke="#C1CFDC" stroke-width="1.5"/>
+  <rect x="150" y="250" width="9" height="105" rx="4.5" fill="#6685A4"/>
+  <circle cx="205" cy="302.5" r="31" fill="#6685A4"/>
+  <text x="205" y="310" font-size="22" font-weight="700" fill="#FFFFFF" text-anchor="middle">组</text>
+  <text x="255" y="282" class="card-title" fill="#496984">井组级｜注采关系平衡与优化</text>
+  <text x="255" y="313" class="card-detail">措施选井 · 方案与计划 · 施工监控 · 焖井转抽 · 措施分析</text>
+  <text x="255" y="339" class="card-detail">占产分析 · 注窜项目台账 · 汽窜分级治理与效果验证</text>
+
+  <rect x="150" y="372" width="820" height="105" rx="14" fill="#FDF0F0" stroke="#E8BBBB" stroke-width="1.5"/>
+  <rect x="150" y="372" width="9" height="105" rx="4.5" fill="#D43B3B"/>
+  <circle cx="205" cy="424.5" r="31" fill="#D43B3B"/>
+  <text x="205" y="432" font-size="22" font-weight="700" fill="#FFFFFF" text-anchor="middle">井</text>
+  <text x="255" y="404" class="card-title" fill="#A52E2E">单井级｜精准诊断与效果评价</text>
+  <text x="255" y="435" class="card-detail">单井分析 · 含水化验 · 井温监控 · 措施跟踪 · ABCD分级管理</text>
+  <text x="255" y="461" class="card-detail">注汽质量诊断 · 吸汽剖面诊断 · 生产动态与剩余潜力识别</text>
+
+  <rect x="55" y="505" width="1010" height="64" rx="12" fill="#F2F6FA" stroke="#9FB2C6" stroke-width="1.5"/>
+  <rect x="55" y="505" width="162" height="64" rx="12" fill="#172F4B"/>
+  <path d="M 205 505 H 217 V 569 H 205 Z" fill="#172F4B"/>
+  <text x="136" y="544" font-size="20" font-weight="700" fill="#FFFFFF" text-anchor="middle">统一数据底座</text>
+  <text x="238" y="529" font-size="16.5" font-weight="600">生产日报 · 含水化验 · 泵况检测 · 占产记录 · 措施台账 · 注汽日数据 · 井温测试 · 注窜关系</text>
+  <text x="238" y="554" font-size="16.5" font-weight="500">Oracle / Excel → SQLite缓存｜以井号（JH）为主键、以日期为时间轴｜字段、日期、数值完整性校验</text>
+</svg>
