@@ -11,6 +11,11 @@ import { createChannelingProject, createChannelingRelation, initChannelingProjec
 const h = { injector: '\u6ce8\u4e95', producer: '\u91c7\u6cb9\u4e95', impact: '\u5f71\u54cd\u7b49\u7ea7', confidence: '\u7f6e\u4fe1\u5ea6', source: '\u6765\u6e90', high: '\u9ad8', medium: '\u4e2d', low: '\u4f4e', suspected: '\u7591\u4f3c\u8bc6\u522b', imported: '\u5bfc\u5165' };
 function workbookWithRows(rows: unknown[][]): XLSX.WorkBook { const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'relations'); return workbook; }
 const matrixWorkbook = (rows: unknown[][]) => workbookWithRows(rows);
+function matrixWorkbookWithFormattedWell(): XLSX.WorkBook {
+  const workbook = matrixWorkbook([['注汽井', '井号1'], ['Z1', 24]]);
+  workbook.Sheets.relations.B2.z = '000';
+  return workbook;
+}
 async function withStore(run: (db: any) => Promise<void>) { const directory = await mkdtemp(path.join(os.tmpdir(), 'channeling-relation-import-')); const db = await open({ filename: path.join(directory, 'test.db'), driver: sqlite3.Database }); try { await initChannelingProjectTables(db); await run(db); } finally { await db.close(); await rm(directory, { recursive: true, force: true }); } }
 test('parses the existing detailed template and adds the selected channeling type', () => { const preview = parseChannelingRelationRows(workbookWithRows([[h.injector, h.producer, h.impact, h.confidence, h.source], ['Z1', 'C1', h.high, 80, h.suspected]]), 'nitrogen'); assert.deepEqual(preview.valid, [{ rowNumber: 2, injectorWellNo: 'Z1', producerWellNo: 'C1', channelingType: 'nitrogen', impactLevel: 'high', confidence: 0.8, source: 'suspected' }]); assert.deepEqual(preview.invalid, []); assert.deepEqual(preview.duplicates, []); assert.deepEqual(preview.selfRelations, []); });
 
@@ -23,6 +28,11 @@ test('expands variable 井号N columns into directed relations without changing 
     { rowNumber: 2, injectorWellNo: '高3-6-莲H1', producerWellNo: '高3-6-024', channelingType: 'steam' },
     { rowNumber: 2, injectorWellNo: '高3-6-莲H1', producerWellNo: '高3-6-0245', channelingType: 'steam' },
   ]);
+});
+
+test('preserves the displayed leading zeros of formatted numeric well cells', () => {
+  const preview = parseChannelingRelationRows(matrixWorkbookWithFormattedWell(), 'steam');
+  assert.equal(preview.valid[0].producerWellNo, '024');
 });
 
 test('classifies self-relations and duplicate directed relations', () => {
@@ -46,9 +56,36 @@ test('reports a matrix row with related wells but no injection well as invalid',
   assert.equal(preview.valid.length, 1);
 });
 
+test('reports a matrix row with an injection well but no related wells as invalid', () => {
+  const preview = parseChannelingRelationRows(matrixWorkbook([
+    ['注汽井', '井号1'],
+    ['Z1', ''],
+    ['Z2', 'C2'],
+  ]), 'steam');
+  assert.deepEqual(preview.invalid, [{ row: 2, reason: '关联井不能为空' }]);
+  assert.equal(preview.valid.length, 1);
+});
+
+test('classifies duplicate directed relations across matrix rows', () => {
+  const preview = parseChannelingRelationRows(matrixWorkbook([
+    ['注汽井', '井号1'],
+    ['Z1', 'C1'],
+    ['Z1', 'C1'],
+  ]), 'steam');
+  assert.deepEqual(preview.valid.map((row) => row.rowNumber), [2]);
+  assert.deepEqual(preview.duplicates.map((row) => row.rowNumber), [3]);
+});
+
 test('rejects invalid matrix headers', () => {
   assert.throws(
     () => parseChannelingRelationRows(matrixWorkbook([['井名', '关联井'], ['A', 'B']]), 'steam'),
+    /表头必须包含“注汽井”和至少一个“井号N”列/,
+  );
+});
+
+test('rejects matrix-intent headers when column A is not 注汽井', () => {
+  assert.throws(
+    () => parseChannelingRelationRows(matrixWorkbook([['注井', '井号1'], ['A', 'B']]), 'steam'),
     /表头必须包含“注汽井”和至少一个“井号N”列/,
   );
 });

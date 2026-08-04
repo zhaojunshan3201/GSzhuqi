@@ -50,18 +50,21 @@ export function parseChannelingRelationRows(workbook: XLSX.WorkBook, channelingT
   if (!['steam', 'nitrogen'].includes(channelingType)) throw new Error('注窜类型无效');
   const sheetName = workbook.SheetNames[0];
   if (!sheetName || !workbook.Sheets[sheetName]) throw new Error('workbook has no worksheet');
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, defval: null, raw: true });
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
   if (!rows[0]) throw new Error('workbook is missing headers');
   const normalized = rows[0].map(normalizeHeader);
-  if (normalized[0] === '注汽井') {
+  const hasMatrixMarker = normalized.some((value) => /^井号[1-9]\d*$/.test(value));
+  if (normalized[0] === '注汽井' || hasMatrixMarker) {
     const relationColumns = normalized
       .map((value, index) => ({ value, index }))
       .filter(({ value, index }) => index > 0 && /^井号[1-9]\d*$/.test(value))
       .map(({ index }) => index);
-    if (!relationColumns.length || normalized.slice(1).some((value) => value && !/^井号[1-9]\d*$/.test(value))) {
+    if (normalized[0] !== '注汽井' || !relationColumns.length || normalized.slice(1).some((value) => value && !/^井号[1-9]\d*$/.test(value))) {
       throw new Error('表头必须包含“注汽井”和至少一个“井号N”列');
     }
-    return parseMatrixRows(rows, relationColumns, channelingType);
+    const formattedRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: false });
+    return parseMatrixRows(formattedRows, relationColumns, channelingType);
   }
   if (!normalized.some((value) => Object.values(headers).some((label) => normalizeHeader(label) === value))) {
     throw new Error('表头必须包含“注汽井”和至少一个“井号N”列');
@@ -79,6 +82,10 @@ function parseMatrixRows(rows: unknown[][], relationColumns: number[], channelin
     const related = relationColumns.map((column) => textAt(row, column)).filter((value): value is string => Boolean(value));
     if (!injectorWellNo) {
       if (related.length) result.invalid.push({ row: rowNumber, reason: '注汽井不能为空' });
+      return;
+    }
+    if (!related.length) {
+      result.invalid.push({ row: rowNumber, reason: '关联井不能为空' });
       return;
     }
     for (const producerWellNo of related) {
