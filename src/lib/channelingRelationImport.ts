@@ -26,14 +26,19 @@ export type ChannelingRelationImportPreviewRows = {
 
 export type ChannelingRelationImport = {
   id: number;
-  projectId: number;
+  projectId: number | null;
   fileName: string;
+  channelingType: ChannelingType;
   status: 'preview' | 'confirmed';
   validCount: number;
+  duplicateCount: number;
+  selfRelationCount: number;
   invalidCount: number;
   createdAt: string;
   confirmedAt: string | null;
   valid?: ChannelingRelationImportRow[];
+  duplicates?: ChannelingRelationImportRow[];
+  selfRelations?: ChannelingRelationImportRow[];
   invalid?: Array<{ row: number; reason: string }>;
 };
 
@@ -117,26 +122,57 @@ function parseDetailedRows(rows: unknown[][], channelingType: ChannelingType): C
 
 export async function initChannelingRelationImportTables(db: DatabaseLike): Promise<void> {
   await db.exec(`CREATE TABLE IF NOT EXISTS channeling_relation_imports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, file_name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'preview',
-    valid_count INTEGER NOT NULL DEFAULT 0, invalid_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, confirmed_at TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, file_name TEXT NOT NULL, channeling_type TEXT NOT NULL DEFAULT 'steam', status TEXT NOT NULL DEFAULT 'preview',
+    valid_count INTEGER NOT NULL DEFAULT 0, duplicate_count INTEGER NOT NULL DEFAULT 0, self_relation_count INTEGER NOT NULL DEFAULT 0, invalid_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, confirmed_at TEXT,
     FOREIGN KEY(project_id) REFERENCES channeling_projects(id)
   ); CREATE TABLE IF NOT EXISTS channeling_relation_import_rows (
     id INTEGER PRIMARY KEY AUTOINCREMENT, import_id INTEGER NOT NULL, row_class TEXT NOT NULL, row_number INTEGER NOT NULL,
     snapshot_json TEXT NOT NULL, FOREIGN KEY(import_id) REFERENCES channeling_relation_imports(id)
   ); CREATE INDEX IF NOT EXISTS idx_channeling_relation_import_rows_import ON channeling_relation_import_rows(import_id, row_class);`);
+  const columns = await db.all("SELECT name, [notnull] AS required FROM pragma_table_info('channeling_relation_imports')");
+  const names = new Set(columns.map((column) => column.name));
+  const projectId = columns.find((column) => column.name === 'project_id');
+  if (projectId?.required) {
+    const foreignKeys = (await db.get('PRAGMA foreign_keys'))?.foreign_keys;
+    if (foreignKeys) await db.exec('PRAGMA foreign_keys=OFF');
+    try {
+      await db.exec('BEGIN');
+      await db.exec(`CREATE TABLE channeling_relation_imports_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, file_name TEXT NOT NULL, channeling_type TEXT NOT NULL DEFAULT 'steam', status TEXT NOT NULL DEFAULT 'preview',
+        valid_count INTEGER NOT NULL DEFAULT 0, duplicate_count INTEGER NOT NULL DEFAULT 0, self_relation_count INTEGER NOT NULL DEFAULT 0, invalid_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, confirmed_at TEXT,
+        FOREIGN KEY(project_id) REFERENCES channeling_projects(id)
+      )`);
+      await db.exec(`INSERT INTO channeling_relation_imports_new (id, project_id, file_name, channeling_type, status, valid_count, duplicate_count, self_relation_count, invalid_count, created_at, confirmed_at)
+        SELECT id, project_id, file_name, ${names.has('channeling_type') ? 'channeling_type' : "'steam'"}, status, valid_count, ${names.has('duplicate_count') ? 'duplicate_count' : '0'}, ${names.has('self_relation_count') ? 'self_relation_count' : '0'}, invalid_count, created_at, confirmed_at FROM channeling_relation_imports`);
+      await db.exec('DROP TABLE channeling_relation_imports; ALTER TABLE channeling_relation_imports_new RENAME TO channeling_relation_imports; COMMIT');
+    } catch (error) {
+      try { await db.exec('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      if (foreignKeys) await db.exec('PRAGMA foreign_keys=ON');
+    }
+  } else {
+    for (const definition of ["channeling_type TEXT NOT NULL DEFAULT 'steam'", 'duplicate_count INTEGER NOT NULL DEFAULT 0', 'self_relation_count INTEGER NOT NULL DEFAULT 0']) {
+      try { await db.exec(`ALTER TABLE channeling_relation_imports ADD COLUMN ${definition}`); } catch (error: any) { if (!String(error.message).includes('duplicate column name')) throw error; }
+    }
+  }
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_channeling_relation_import_rows_import ON channeling_relation_import_rows(import_id, row_class)');
 }
 
-export async function createChannelingRelationPreview(db: DatabaseLike, projectId: number, fileName: string, rows: ChannelingRelationImportPreviewRows): Promise<ChannelingRelationImport> {
-  if (!Number.isInteger(projectId) || projectId <= 0) throw new Error('projectId is required');
+export async function createChannelingRelationPreview(db: DatabaseLike, projectId: number | null, fileName: string, channelingType: ChannelingType, rows: ChannelingRelationImportPreviewRows): Promise<ChannelingRelationImport> {
+  if (projectId !== null && (!Number.isInteger(projectId) || projectId <= 0)) throw new Error('projectId is invalid');
+  if (!['steam', 'nitrogen'].includes(channelingType)) throw new Error('channelingType is invalid');
   if (!fileName.trim()) throw new Error('fileName is required');
   await initChannelingProjectTables(db);
   await initChannelingRelationImportTables(db);
-  if (!await db.get('SELECT id FROM channeling_projects WHERE id = ?', [projectId])) throw new Error('Project not found');
+  if (projectId !== null && !await db.get('SELECT id FROM channeling_projects WHERE id = ?', [projectId])) throw new Error('Project not found');
   const now = new Date().toISOString();
-  const result = await db.run(`INSERT INTO channeling_relation_imports (project_id, file_name, status, valid_count, invalid_count, created_at) VALUES (?, ?, 'preview', ?, ?, ?)`, [projectId, fileName.trim(), rows.valid.length, rows.invalid.length, now]);
+  const result = await db.run(`INSERT INTO channeling_relation_imports (project_id, file_name, channeling_type, status, valid_count, duplicate_count, self_relation_count, invalid_count, created_at) VALUES (?, ?, ?, 'preview', ?, ?, ?, ?, ?)`, [projectId, fileName.trim(), channelingType, rows.valid.length, rows.duplicates.length, rows.selfRelations.length, rows.invalid.length, now]);
   const importId = result.lastID!;
-  for (const value of rows.valid) await db.run(`INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, 'valid', ?, ?)`, [importId, value.rowNumber, JSON.stringify(value)]);
-  for (const value of rows.invalid) await db.run(`INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, 'invalid', ?, ?)`, [importId, value.row, JSON.stringify(value)]);
+  for (const [rowClass, values] of [['valid', rows.valid], ['duplicate', rows.duplicates], ['self_relation', rows.selfRelations]] as const) {
+    for (const value of values) await db.run('INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, ?, ?, ?)', [importId, rowClass, value.rowNumber, JSON.stringify(value)]);
+  }
+  for (const value of rows.invalid) await db.run("INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, 'invalid', ?, ?)", [importId, value.row, JSON.stringify(value)]);
   return readImport(db, importId, true);
 }
 
@@ -149,32 +185,46 @@ function queueConfirmation<T>(db: DatabaseLike, operation: () => Promise<T>): Pr
   return current;
 }
 
-export async function confirmChannelingRelationImport(db: DatabaseLike, importId: number): Promise<ChannelingRelationImport> {
+export async function confirmChannelingRelationImport(db: DatabaseLike, importId: number, projectId: number): Promise<ChannelingRelationImport> {
   return queueConfirmation(db, async () => {
+    if (!Number.isInteger(projectId) || projectId <= 0) throw new Error('projectId is required');
     await initChannelingProjectTables(db);
     await initChannelingRelationImportTables(db);
     let began = false;
     try {
-      await db.exec('BEGIN');
+      await db.exec('BEGIN IMMEDIATE');
       began = true;
-    const batch = await db.get('SELECT * FROM channeling_relation_imports WHERE id = ?', [importId]);
-    if (!batch) throw new Error('channeling relation import not found');
-    if (batch.status !== 'preview') throw new Error('only preview imports can be confirmed');
-    const rows = await db.all("SELECT snapshot_json FROM channeling_relation_import_rows WHERE import_id = ? AND row_class = 'valid' ORDER BY id", [importId]);
-    const today = new Date().toISOString().slice(0, 10);
-    for (const stored of rows) {
-      const row = JSON.parse(stored.snapshot_json) as ChannelingRelationImportRow;
-      const source = row.source ?? 'import';
-      await createChannelingRelation(db, {
-        projectId: batch.project_id, injectionWell: row.injectorWellNo, productionWell: row.producerWellNo,
-        reservoirLayer: row.reservoirLayer ?? '\u672a\u63d0\u4f9b', impactLevel: row.impactLevel ?? 'medium', confidence: row.confidence ?? 0.5,
-        source, status: source === 'suspected' ? 'suspected' : 'confirmed', evidence: row.evidence ?? '\u672a\u63d0\u4f9b',
-        effectiveStartDate: row.effectiveStartDate ?? today, effectiveEndDate: row.effectiveEndDate ?? today, owner: row.owner ?? '\u0045\u0078\u0063\u0065\u006c\u5bfc\u5165',
-      });
-    }
-    const now = new Date().toISOString();
-    await db.run("UPDATE channeling_relation_imports SET status = 'confirmed', confirmed_at = ? WHERE id = ?", [now, importId]);
+      const project = await db.get('SELECT id FROM channeling_projects WHERE id = ?', [projectId]);
+      if (!project) throw new Error('Project not found');
+      const batch = await db.get('SELECT * FROM channeling_relation_imports WHERE id = ?', [importId]);
+      if (!batch) throw new Error('channeling relation import not found');
+      if (batch.status !== 'preview') throw new Error('only preview imports can be confirmed');
+      if (batch.project_id !== null && batch.project_id !== projectId) throw new Error('preview belongs to another project');
+      const rows = await db.all("SELECT id, snapshot_json FROM channeling_relation_import_rows WHERE import_id = ? AND row_class = 'valid' ORDER BY id", [importId]);
+      const remaining: ChannelingRelationImportRow[] = [];
+      let newDuplicates = 0;
+      for (const stored of rows) {
+        const row = JSON.parse(stored.snapshot_json) as ChannelingRelationImportRow;
+        const duplicate = await db.get('SELECT id FROM channeling_relations WHERE project_id = ? AND channeling_type = ? AND injection_well = ? AND production_well = ?', [projectId, batch.channeling_type, row.injectorWellNo, row.producerWellNo]);
+        if (duplicate) {
+          await db.run("UPDATE channeling_relation_import_rows SET row_class = 'duplicate' WHERE id = ?", [stored.id]);
+          newDuplicates++;
+        } else remaining.push(row);
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      for (const row of remaining) {
+        const source = row.source ?? 'import';
+        await createChannelingRelation(db, {
+          projectId, channelingType: batch.channeling_type, injectionWell: row.injectorWellNo, productionWell: row.producerWellNo,
+          reservoirLayer: row.reservoirLayer ?? '\u672a\u63d0\u4f9b', impactLevel: row.impactLevel ?? 'medium', confidence: row.confidence ?? 0.5,
+          source, status: source === 'suspected' ? 'suspected' : 'confirmed', evidence: row.evidence ?? '\u672a\u63d0\u4f9b',
+          effectiveStartDate: row.effectiveStartDate ?? today, effectiveEndDate: row.effectiveEndDate ?? today, owner: row.owner ?? '\u0045\u0078\u0063\u0065\u006c\u5bfc\u5165',
+        });
+      }
+      const now = new Date().toISOString();
+      await db.run("UPDATE channeling_relation_imports SET project_id = ?, status = 'confirmed', valid_count = ?, duplicate_count = duplicate_count + ?, confirmed_at = ? WHERE id = ?", [projectId, remaining.length, newDuplicates, now, importId]);
       await db.exec('COMMIT');
+      began = false;
       return readImport(db, importId, false);
     } catch (error) {
       if (began) await db.exec('ROLLBACK');
@@ -189,13 +239,20 @@ export async function listChannelingRelationImports(db: DatabaseLike, projectId?
   return Promise.all((await db.all(`SELECT id FROM channeling_relation_imports${where} ORDER BY created_at DESC, id DESC`, projectId === undefined ? [] : [projectId])).map((row) => readImport(db, row.id, false)));
 }
 
+export async function getChannelingRelationImport(db: DatabaseLike, id: number): Promise<ChannelingRelationImport> {
+  await initChannelingRelationImportTables(db);
+  return readImport(db, id, true);
+}
+
 async function readImport(db: DatabaseLike, id: number, includeRows: boolean): Promise<ChannelingRelationImport> {
   const row = await db.get('SELECT * FROM channeling_relation_imports WHERE id = ?', [id]);
   if (!row) throw new Error('channeling relation import not found');
-  const result: ChannelingRelationImport = { id: row.id, projectId: row.project_id, fileName: row.file_name, status: row.status, validCount: row.valid_count, invalidCount: row.invalid_count, createdAt: row.created_at, confirmedAt: row.confirmed_at };
+  const result: ChannelingRelationImport = { id: row.id, projectId: row.project_id, fileName: row.file_name, channelingType: row.channeling_type, status: row.status, validCount: row.valid_count, duplicateCount: row.duplicate_count, selfRelationCount: row.self_relation_count, invalidCount: row.invalid_count, createdAt: row.created_at, confirmedAt: row.confirmed_at };
   if (includeRows) {
     const stored = await db.all('SELECT row_class, snapshot_json FROM channeling_relation_import_rows WHERE import_id = ? ORDER BY id', [id]);
     result.valid = stored.filter((item) => item.row_class === 'valid').map((item) => JSON.parse(item.snapshot_json));
+    result.duplicates = stored.filter((item) => item.row_class === 'duplicate').map((item) => JSON.parse(item.snapshot_json));
+    result.selfRelations = stored.filter((item) => item.row_class === 'self_relation').map((item) => JSON.parse(item.snapshot_json));
     result.invalid = stored.filter((item) => item.row_class === 'invalid').map((item) => JSON.parse(item.snapshot_json));
   }
   return result;
