@@ -1810,10 +1810,11 @@ async function initLocalDb() {
   if (userCount.count === 0) {
     await localDb.run(
       "INSERT INTO users (username, password, name, role) VALUES (?, ?, ?, ?)",
-      ["admin", "123456", "登录失败，请重试", "admin"]
+      ["admin", "123456", "系统管理员", "admin"]
     );
     console.log("Default admin user created: admin/123456");
   }
+  await localDb.run("UPDATE users SET name = ? WHERE username = ? AND name = ?", ["系统管理员", "admin", "登录失败，请重试"]);
 
   const latestLocalDate = await getLocalLatestDate();
   await setSyncMeta("last_local_data_date", latestLocalDate);
@@ -4788,7 +4789,7 @@ app.post("/api/register", async (req, res) => {
     try { res.json({ success: true, data: await listChannelingRelationImports(localDb, projectId) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
-  app.get("/api/channeling-relation-imports/:id", async (req, res) => {
+  app.get("/api/channeling-relation-imports/:id", requireChannelingAdminMiddleware, async (req, res) => {
     const importId = Number(req.params.id);
     if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id \u5fc5\u987b\u4e3a\u6b63\u6574\u6570" });
     try { res.json({ success: true, data: await getChannelingRelationImport(localDb, importId) }); }

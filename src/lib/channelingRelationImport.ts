@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 
-import { createChannelingRelation, initChannelingProjectTables, type ChannelingType, type DatabaseLike, type ImpactLevel, type RelationSource } from './channelingProjectStore.ts';
+import { createChannelingRelationUnlocked, initChannelingProjectTables, type ChannelingType, type DatabaseLike, type ImpactLevel, type RelationSource } from './channelingProjectStore.ts';
+import { withChannelingWriteLock } from './channelingWriteQueue.ts';
 
 export type ChannelingRelationImportRow = {
   rowNumber: number;
@@ -171,7 +172,7 @@ export async function createChannelingRelationPreview(db: DatabaseLike, projectI
   for (const row of [...rows.valid, ...rows.duplicates, ...rows.selfRelations]) {
     if (row.channelingType !== channelingType) throw new Error('row channelingType must match batch channelingType');
   }
-  return queueTransaction(db, async () => {
+  return withChannelingWriteLock(db, async () => {
     await initChannelingProjectTables(db);
     await initChannelingRelationImportTables(db);
     if (projectId !== null && !await db.get('SELECT id FROM channeling_projects WHERE id = ?', [projectId])) throw new Error('Project not found');
@@ -196,17 +197,8 @@ export async function createChannelingRelationPreview(db: DatabaseLike, projectI
   });
 }
 
-const transactionQueues = new WeakMap<DatabaseLike, Promise<void>>();
-
-function queueTransaction<T>(db: DatabaseLike, operation: () => Promise<T>): Promise<T> {
-  const previous = transactionQueues.get(db) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
-  transactionQueues.set(db, current.then(() => undefined, () => undefined));
-  return current;
-}
-
 export async function confirmChannelingRelationImport(db: DatabaseLike, importId: number, projectId: number): Promise<ChannelingRelationImport> {
-  return queueTransaction(db, async () => {
+  return withChannelingWriteLock(db, async () => {
     if (!Number.isInteger(projectId) || projectId <= 0) throw new Error('projectId is required');
     await initChannelingProjectTables(db);
     await initChannelingRelationImportTables(db);
@@ -234,7 +226,7 @@ export async function confirmChannelingRelationImport(db: DatabaseLike, importId
       const today = new Date().toISOString().slice(0, 10);
       for (const row of remaining) {
         const source = row.source ?? 'import';
-        await createChannelingRelation(db, {
+        await createChannelingRelationUnlocked(db, {
           projectId, channelingType: batch.channeling_type, injectionWell: row.injectorWellNo, productionWell: row.producerWellNo,
           reservoirLayer: row.reservoirLayer ?? '\u672a\u63d0\u4f9b', impactLevel: row.impactLevel ?? 'medium', confidence: row.confidence ?? 0.5,
           source, status: source === 'suspected' ? 'suspected' : 'confirmed', evidence: row.evidence ?? '\u672a\u63d0\u4f9b',

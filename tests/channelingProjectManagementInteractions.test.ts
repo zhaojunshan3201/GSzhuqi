@@ -170,3 +170,39 @@ test('switching projects clears prior relation and import actions before the new
   await act(async () => { root.unmount(); });
   dom.window.close();
 });
+
+test('a delayed confirmation cannot restore the project or type filter active when it started', async () => {
+  const dom = setupDom();
+  const host = document.getElementById('root')!;
+  const root = createRoot(host);
+  const secondProject = { ...project, id: 8, projectName: '第二项目', block: '二区' };
+  const confirmation = deferred<Response>();
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project, secondProject]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-relation-imports/preview') return payload(preview);
+    if (url === `/api/channeling-relation-imports/${preview.id}/confirm`) return confirmation.promise;
+    if (url === '/api/channeling-projects/8/relations?channelingType=nitrogen') return payload([relation('当前氮气井', 'nitrogen')]);
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]);
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  await act(async () => { root.render(createElement(ChannelingProjectManagement, { role: 'admin' })); });
+  await uploadPreview(host);
+  const confirm = [...host.querySelectorAll('button')].find((item) => item.textContent === '确认导入') as HTMLButtonElement;
+  await act(async () => { confirm.click(); });
+  const secondProjectButton = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes('第二项目')) as HTMLButtonElement;
+  await act(async () => { secondProjectButton.click(); });
+  const typeFilter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement;
+  await act(async () => { typeFilter.value = 'nitrogen'; typeFilter.dispatchEvent(new Event('change', { bubbles: true })); });
+  assert.match(host.textContent || '', /当前氮气井/);
+
+  await act(async () => { confirmation.resolve(await payload({ ...preview, status: 'confirmed', projectId: 7 })); await confirmation.promise; });
+  assert.ok(secondProjectButton.className.includes('bg-red-50'), 'the project selected while confirming remains active');
+  assert.equal(typeFilter.value, 'nitrogen');
+  assert.match(host.textContent || '', /当前氮气井/);
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+});

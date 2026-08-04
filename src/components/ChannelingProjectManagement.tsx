@@ -33,6 +33,8 @@ export function ChannelingProjectManagement({ role }: Props) {
   const confirmingImportIdRef = useRef<number | null>(null);
   const relationRequestRef = useRef<AbortController | null>(null);
   const relationProjectIdRef = useRef<number | null>(null);
+  const viewSelectionRef = useRef({ selectedId, channelingType: relationFilters.channelingType });
+  viewSelectionRef.current = { selectedId, channelingType: relationFilters.channelingType };
   const selected = projects.find((item) => item.id === selectedId);
   const visibleProjects = useMemo(() => projects.filter((item) => (!projectFilters.block || item.block.includes(projectFilters.block)) && (!projectFilters.status || item.status === projectFilters.status)), [projects, projectFilters]);
   const visibleRelations = useMemo(() => relations.filter((item) => (!relationFilters.channelingType || item.channelingType === relationFilters.channelingType) && (!relationFilters.status || item.status === relationFilters.status) && (!relationFilters.source || item.source === relationFilters.source)), [relations, relationFilters]);
@@ -128,6 +130,7 @@ export function ChannelingProjectManagement({ role }: Props) {
     if (!preview || !previewProjectId || confirmingImportIdRef.current !== null || !projects.some((project) => project.id === previewProjectId)) return;
     const batchId = preview.id;
     const projectId = previewProjectId;
+    const viewSelection = viewSelectionRef.current;
     confirmingImportIdRef.current = batchId;
     setConfirming(true);
     try {
@@ -140,11 +143,12 @@ export function ChannelingProjectManagement({ role }: Props) {
     }
     setPreview((current) => current?.id === batchId ? null : current);
     setValidRowsExpanded(false);
-    setSelectedId(projectId);
+    const viewIsUnchanged = () => viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType;
+    if (viewIsUnchanged()) setSelectedId(projectId);
     setMessage('关系导入已确认并写入所选项目。', 'success');
     try {
       await load();
-      await loadRelations(projectId);
+      if (viewIsUnchanged()) await loadRelations(projectId);
     } catch {
       setMessage('关系已确认，但刷新失败，请稍后手动刷新项目数据。', 'warning');
     } finally {
@@ -155,6 +159,7 @@ export function ChannelingProjectManagement({ role }: Props) {
   const confirmImport = async (id: number) => {
     if (confirmingImportIdRef.current !== null) return;
     confirmingImportIdRef.current = id;
+    const viewSelection = viewSelectionRef.current;
     setConfirming(true);
     try {
       await request(`/api/channeling-relation-imports/${id}/confirm`, { method: 'POST' });
@@ -168,7 +173,7 @@ export function ChannelingProjectManagement({ role }: Props) {
     setPreview((current) => current?.id === id ? null : current);
     setMessage('关系导入已确认。', 'success');
     try {
-      if (selected) await loadRelations(selected.id);
+      if (selected && viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType) await loadRelations(selected.id);
     } catch {
       setMessage('关系已确认，但刷新失败，请稍后手动刷新项目数据。', 'warning');
     } finally {

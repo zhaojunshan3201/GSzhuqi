@@ -7,7 +7,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import * as XLSX from 'xlsx';
 import { confirmChannelingRelationImport, createChannelingRelationPreview, getChannelingRelationImport, initChannelingRelationImportTables, parseChannelingRelationRows } from '../src/lib/channelingRelationImport.ts';
-import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingRelations, updateChannelingRelation } from '../src/lib/channelingProjectStore.ts';
+import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingProjects, listChannelingRelations, updateChannelingRelation } from '../src/lib/channelingProjectStore.ts';
 const h = { injector: '\u6ce8\u4e95', producer: '\u91c7\u6cb9\u4e95', impact: '\u5f71\u54cd\u7b49\u7ea7', confidence: '\u7f6e\u4fe1\u5ea6', source: '\u6765\u6e90', high: '\u9ad8', medium: '\u4e2d', low: '\u4f4e', suspected: '\u7591\u4f3c\u8bc6\u522b', imported: '\u5bfc\u5165' };
 function workbookWithRows(rows: unknown[][]): XLSX.WorkBook { const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'relations'); return workbook; }
 const matrixWorkbook = (rows: unknown[][]) => workbookWithRows(rows);
@@ -155,6 +155,33 @@ test('rolls back relation inserts and preview confirmation when confirmation fai
   await assert.rejects(() => confirmChannelingRelationImport(failingDb, preview.id, project.id), /forced relation failure/);
   assert.equal((await getChannelingRelationImport(db, preview.id)).status, 'preview');
   assert.equal((await listChannelingRelations(db, { projectId: project.id })).length, 0);
+}); });
+
+test('a failed confirmation rollback cannot consume a concurrent channeling project write', async () => { await withStore(async (db) => {
+  const project = await createChannelingProject(db, { projectName: 'target', block: 'A', owner: 'owner' });
+  const preview = await createChannelingRelationPreview(db, null, 'rollback-concurrent.xlsx', 'steam', { valid: [{ rowNumber: 2, injectorWellNo: 'Z1', producerWellNo: 'C1', channelingType: 'steam' }], duplicates: [], selfRelations: [], invalid: [] });
+  const originalRun = db.run.bind(db);
+  let rejectInsert!: () => void;
+  let markInsertStarted!: () => void;
+  const insertStarted = new Promise<void>((resolve) => { markInsertStarted = resolve; });
+  const insertFailure = new Promise<void>((resolve) => { rejectInsert = resolve; });
+  db.run = async (sql: string, params?: unknown[]) => {
+    if (sql.startsWith('INSERT INTO channeling_relations ')) {
+      markInsertStarted();
+      await insertFailure;
+      throw new Error('forced concurrent relation failure');
+    }
+    return originalRun(sql, params);
+  };
+  const confirmation = confirmChannelingRelationImport(db, preview.id, project.id);
+  await insertStarted;
+  const concurrentProject = createChannelingProject(db, { projectName: 'concurrent', block: 'B', owner: 'owner' });
+  rejectInsert();
+  await assert.rejects(confirmation, /forced concurrent relation failure/);
+  const created = await concurrentProject;
+  db.run = originalRun;
+  assert.equal((await listChannelingProjects(db)).some((item) => item.id === created.id && item.projectName === 'concurrent'), true);
+  assert.equal((await getChannelingRelationImport(db, preview.id)).status, 'preview');
 }); });
 
 

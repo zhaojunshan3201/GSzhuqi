@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, type SpawnOptionsWithStdioTuple } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
 import * as XLSX from 'xlsx';
 
-const relation = { injectionWell: 'עA-1', productionWell: '��A-2', reservoirLayer: 'S1', impactLevel: 'high', confidence: .8, status: 'confirmed', source: 'manual', evidence: '����', effectiveStartDate: '2026-07-01', effectiveEndDate: '2026-12-31', owner: '�' };
+const relation = { injectionWell: '注A-1', productionWell: '采A-2', reservoirLayer: 'S1', impactLevel: 'high', confidence: .8, status: 'confirmed', source: 'manual', evidence: '测试', effectiveStartDate: '2026-07-01', effectiveEndDate: '2026-12-31', owner: '李工' };
 
 function matrixWorkbookBuffer(dataRows: unknown[][] = [['Z1', 'P1', 'Z1', 'P1'], ['', 'P2', '', '']]): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -37,7 +39,7 @@ async function stopServer(child: ReturnType<typeof spawn>): Promise<void> {
 test('channeling endpoints enforce request contracts over HTTP', { timeout: 30000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channeling-api-'));
   const port = 38000 + Math.floor(Math.random() * 1000);
-  const serverOptions = { cwd: process.cwd(), env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: path.join(directory, 'test.db'), CHANNELING_TEST_FORCE_ERROR: '1', AUTH_TOKEN_SECRET: 'channeling-integration-test-secret' }, stdio: ['ignore', 'pipe', 'pipe'] as const };
+  const serverOptions: SpawnOptionsWithStdioTuple<'ignore', 'pipe', 'pipe'> = { cwd: process.cwd(), env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: path.join(directory, 'test.db'), CHANNELING_TEST_FORCE_ERROR: '1', AUTH_TOKEN_SECRET: 'channeling-integration-test-secret' }, stdio: ['ignore', 'pipe', 'pipe'] };
   let child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], serverOptions);
   try {
     await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('server did not start')), 15000); child.stdout.on('data', (data) => { if (String(data).includes('Server running')) { clearTimeout(timer); resolve(); } }); child.once('error', reject); child.once('exit', (code) => reject(new Error(`server exited ${code}`))); });
@@ -52,12 +54,21 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     assert.equal(forgedTokenResponse.status, 401);
     const login = await request('/api/login', { method: 'POST', body: JSON.stringify({ username: 'admin', password: '123456' }) });
     assert.equal(login.status, 200);
-    const token = (await login.json() as any).token;
+    const loginPayload = await login.json() as any;
+    assert.equal(loginPayload.user.name, '系统管理员');
+    const token = loginPayload.token;
     assert.ok(token);
-    const authorized = { authorization: `Bearer ${token}` };
+    let authorized = { authorization: `Bearer ${token}` };
     await stopServer(child);
+    const seededDb = await open({ filename: path.join(directory, 'test.db'), driver: sqlite3.Database });
+    await seededDb.run("UPDATE users SET name = '登录失败，请重试' WHERE username = 'admin'");
+    await seededDb.close();
     child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], serverOptions);
     await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('restarted server did not start')), 15000); child.stdout.on('data', (data) => { if (String(data).includes('Server running')) { clearTimeout(timer); resolve(); } }); child.once('error', reject); child.once('exit', (code) => reject(new Error(`restarted server exited ${code}`))); });
+    const migratedLogin = await request('/api/login', { method: 'POST', body: JSON.stringify({ username: 'admin', password: '123456' }) });
+    const migratedLoginPayload = await migratedLogin.json() as any;
+    assert.equal(migratedLoginPayload.user.name, '系统管理员');
+    authorized = { authorization: `Bearer ${migratedLoginPayload.token}` };
     const multipartRequest = (url: string, body: FormData, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${port}${url}`, { method: 'POST', headers, body });
     assert.equal((await multipartRequest('/api/channeling-relation-imports/preview', importForm('nitrogen'))).status, 401);
     const userPayload = Buffer.from(JSON.stringify({ username: 'operator', role: 'user' })).toString('base64url');
@@ -75,12 +86,14 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     assert.equal(preview.projectId, null); assert.equal(preview.channelingType, 'nitrogen');
     assert.deepEqual({ valid: preview.validCount, duplicates: preview.duplicateCount, selfRelations: preview.selfRelationCount, invalid: preview.invalidCount }, { valid: 1, duplicates: 1, selfRelations: 1, invalid: 1 });
     assert.equal(preview.valid.length, 1); assert.equal(preview.duplicates.length, 1); assert.equal(preview.selfRelations.length, 1); assert.equal(preview.invalid.length, 1);
-    const detailResponse = await request(`/api/channeling-relation-imports/${preview.id}`);
+    assert.equal((await request(`/api/channeling-relation-imports/${preview.id}`)).status, 401);
+    assert.equal((await request(`/api/channeling-relation-imports/${preview.id}`, { headers: { authorization: `Bearer ${userToken}` } })).status, 403);
+    const detailResponse = await request(`/api/channeling-relation-imports/${preview.id}`, { headers: authorized });
     assert.equal(detailResponse.status, 200);
     const detail = (await detailResponse.json() as any).data;
     assert.equal(detail.projectId, null); assert.equal(detail.valid.length, 1); assert.equal(detail.duplicates.length, 1); assert.equal(detail.selfRelations.length, 1); assert.equal(detail.invalid.length, 1);
-    assert.equal((await request('/api/channeling-relation-imports/no')).status, 400);
-    assert.equal((await request('/api/channeling-relation-imports/99999')).status, 404);
+    assert.equal((await request('/api/channeling-relation-imports/no', { headers: authorized })).status, 400);
+    assert.equal((await request('/api/channeling-relation-imports/99999', { headers: authorized })).status, 404);
     assert.equal((await request(`/api/channeling-relation-imports/${preview.id}/confirm`, { method: 'POST', headers: authorized, body: JSON.stringify({}) })).status, 400);
     const projectResponse = await request('/api/channeling-projects', { method: 'POST', headers: authorized, body: JSON.stringify({ projectName: 'project', block: 'A', owner: 'tester' }) });
     assert.equal(projectResponse.status, 201); const project = (await projectResponse.json() as any).data;

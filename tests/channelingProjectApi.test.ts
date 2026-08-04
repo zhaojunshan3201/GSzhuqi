@@ -25,7 +25,7 @@ test('registers standalone relationship import preview, detail and confirmation 
   const server = await readFile(new URL('../server.ts', import.meta.url), 'utf8');
   assert.match(server, /app\.post\("\/api\/channeling-relation-imports\/preview"/);
   assert.match(server, /app\.post\("\/api\/channeling-relation-imports\/preview", requireChannelingAdminMiddleware, channelingRelationImportUploadMiddleware/);
-  assert.match(server, /app\.get\("\/api\/channeling-relation-imports\/:id"/);
+  assert.match(server, /app\.get\("\/api\/channeling-relation-imports\/:id", requireChannelingAdminMiddleware/);
   assert.match(server, /getChannelingRelationImport/);
   assert.match(server, /confirmChannelingRelationImport\(localDb, importId, projectId\)/);
   assert.match(server, /getChannelingRelationImport\(localDb, importId\)/);
