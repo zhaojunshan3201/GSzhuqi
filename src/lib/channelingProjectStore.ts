@@ -1,4 +1,5 @@
 export type DatabaseLike = { exec(sql: string): Promise<void>; run(sql: string, params?: unknown[]): Promise<{ lastID?: number }>; get(sql: string, params?: unknown[]): Promise<any>; all(sql: string, params?: unknown[]): Promise<any[]> };
+export type ChannelingType = 'steam' | 'nitrogen';
 export type ImpactLevel = 'high' | 'medium' | 'low';
 export type RelationStatus = 'confirmed' | 'suspected' | 'released';
 export type RelationSource = 'manual' | 'import' | 'suspected';

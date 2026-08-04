@@ -1,12 +1,13 @@
 import * as XLSX from 'xlsx';
 
-import { createChannelingRelation, initChannelingProjectTables, type DatabaseLike, type ImpactLevel, type RelationSource } from './channelingProjectStore.ts';
+import { createChannelingRelation, initChannelingProjectTables, type ChannelingType, type DatabaseLike, type ImpactLevel, type RelationSource } from './channelingProjectStore.ts';
 
 export type ChannelingRelationImportRow = {
   rowNumber: number;
   injectorWellNo: string;
   producerWellNo: string;
-  impactLevel: ImpactLevel;
+  channelingType: ChannelingType;
+  impactLevel?: ImpactLevel;
   reservoirLayer?: string;
   confidence?: number;
   source?: RelationSource;
@@ -18,6 +19,8 @@ export type ChannelingRelationImportRow = {
 
 export type ChannelingRelationImportPreviewRows = {
   valid: ChannelingRelationImportRow[];
+  duplicates: ChannelingRelationImportRow[];
+  selfRelations: ChannelingRelationImportRow[];
   invalid: Array<{ row: number; reason: string }>;
 };
 
@@ -43,21 +46,66 @@ type HeaderName = keyof typeof headers;
 type Columns = Record<HeaderName, number | undefined>;
 const requiredHeaders: readonly HeaderName[] = ['injectorWellNo', 'producerWellNo', 'impactLevel'];
 
-export function parseChannelingRelationRows(workbook: XLSX.WorkBook): ChannelingRelationImportPreviewRows {
+export function parseChannelingRelationRows(workbook: XLSX.WorkBook, channelingType: ChannelingType = 'steam'): ChannelingRelationImportPreviewRows {
+  if (!['steam', 'nitrogen'].includes(channelingType)) throw new Error('注窜类型无效');
   const sheetName = workbook.SheetNames[0];
   if (!sheetName || !workbook.Sheets[sheetName]) throw new Error('workbook has no worksheet');
   const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, defval: null, raw: true });
   if (!rows[0]) throw new Error('workbook is missing headers');
+  const normalized = rows[0].map(normalizeHeader);
+  if (normalized[0] === '注汽井') {
+    const relationColumns = normalized
+      .map((value, index) => ({ value, index }))
+      .filter(({ value, index }) => index > 0 && /^井号[1-9]\d*$/.test(value))
+      .map(({ index }) => index);
+    if (!relationColumns.length || normalized.slice(1).some((value) => value && !/^井号[1-9]\d*$/.test(value))) {
+      throw new Error('表头必须包含“注汽井”和至少一个“井号N”列');
+    }
+    return parseMatrixRows(rows, relationColumns, channelingType);
+  }
+  if (!normalized.some((value) => Object.values(headers).some((label) => normalizeHeader(label) === value))) {
+    throw new Error('表头必须包含“注汽井”和至少一个“井号N”列');
+  }
+  return parseDetailedRows(rows, channelingType);
+}
+
+function parseMatrixRows(rows: unknown[][], relationColumns: number[], channelingType: ChannelingType): ChannelingRelationImportPreviewRows {
+  const result: ChannelingRelationImportPreviewRows = { valid: [], duplicates: [], selfRelations: [], invalid: [] };
+  const seen = new Set<string>();
+  rows.slice(1).forEach((row, index) => {
+    if (row.every(isBlank)) return;
+    const rowNumber = index + 2;
+    const injectorWellNo = textAt(row, 0);
+    const related = relationColumns.map((column) => textAt(row, column)).filter((value): value is string => Boolean(value));
+    if (!injectorWellNo) {
+      if (related.length) result.invalid.push({ row: rowNumber, reason: '注汽井不能为空' });
+      return;
+    }
+    for (const producerWellNo of related) {
+      const relation = { rowNumber, injectorWellNo, producerWellNo, channelingType };
+      if (injectorWellNo === producerWellNo) result.selfRelations.push(relation);
+      else {
+        const key = `${channelingType}\u0000${injectorWellNo}\u0000${producerWellNo}`;
+        if (seen.has(key)) result.duplicates.push(relation);
+        else { seen.add(key); result.valid.push(relation); }
+      }
+    }
+  });
+  if (!result.valid.length && !result.duplicates.length && !result.selfRelations.length) throw new Error('工作表中没有可识别的注窜关系');
+  return result;
+}
+
+function parseDetailedRows(rows: unknown[][], channelingType: ChannelingType): ChannelingRelationImportPreviewRows {
   const columns = findColumns(rows[0]);
   const valid: ChannelingRelationImportRow[] = [];
   const invalid: Array<{ row: number; reason: string }> = [];
   rows.slice(1).forEach((row, index) => {
     if (row.every(isBlank)) return;
     const rowNumber = index + 2;
-    try { valid.push({ rowNumber, ...parseRow(row, columns) }); }
+    try { valid.push({ rowNumber, ...parseRow(row, columns), channelingType }); }
     catch (error: any) { invalid.push({ row: rowNumber, reason: error.message }); }
   });
-  return { valid, invalid };
+  return { valid, duplicates: [], selfRelations: [], invalid };
 }
 
 export async function initChannelingRelationImportTables(db: DatabaseLike): Promise<void> {
@@ -112,7 +160,7 @@ export async function confirmChannelingRelationImport(db: DatabaseLike, importId
       const source = row.source ?? 'import';
       await createChannelingRelation(db, {
         projectId: batch.project_id, injectionWell: row.injectorWellNo, productionWell: row.producerWellNo,
-        reservoirLayer: row.reservoirLayer ?? '\u672a\u63d0\u4f9b', impactLevel: row.impactLevel, confidence: row.confidence ?? 0.5,
+        reservoirLayer: row.reservoirLayer ?? '\u672a\u63d0\u4f9b', impactLevel: row.impactLevel ?? 'medium', confidence: row.confidence ?? 0.5,
         source, status: source === 'suspected' ? 'suspected' : 'confirmed', evidence: row.evidence ?? '\u672a\u63d0\u4f9b',
         effectiveStartDate: row.effectiveStartDate ?? today, effectiveEndDate: row.effectiveEndDate ?? today, owner: row.owner ?? '\u0045\u0078\u0063\u0065\u006c\u5bfc\u5165',
       });
@@ -156,7 +204,7 @@ function findColumns(headerRow: unknown[]): Columns {
   }
   return columns;
 }
-function parseRow(row: unknown[], columns: Columns): ChannelingRelationImportRow {
+function parseRow(row: unknown[], columns: Columns): Omit<ChannelingRelationImportRow, 'rowNumber' | 'channelingType'> {
   const injectorWellNo = required(textAt(row, columns.injectorWellNo), '\u6ce8\u4e95');
   const producerWellNo = required(textAt(row, columns.producerWellNo), '\u91c7\u6cb9\u4e95');
   const impactLevel = parseImpactLevel(textAt(row, columns.impactLevel));
