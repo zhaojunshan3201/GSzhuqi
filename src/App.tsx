@@ -52,6 +52,7 @@ import { AxonLandingPage } from './components/AxonLandingPage';
 import { DatacoreLandingPage } from './components/DatacoreLandingPage';
 import { PrioritySituationAnalysis, type PrioritySituationData } from './components/PrioritySituationAnalysis';
 import { derivePriorityTrackingImportYear, filterPumpTrackingRowsByWell, mergePriorityIssueMeasureQuery, type PriorityCategory, type PriorityIssue } from './lib/prioritySituationAnalysis';
+import { createInitialAuthState } from './lib/authSession';
 
 // --- Types ---
 interface Well {
@@ -2169,12 +2170,13 @@ const DashboardChartSkeleton = ({ title }: { title: string }) => (
 );
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [showLanding, setShowLanding] = useState(() => window.location.pathname === '/axon');
-  const [showDatacoreLanding, setShowDatacoreLanding] = useState(() => window.location.pathname !== '/axon');
+  const [initialAuth] = useState(() => createInitialAuthState(window.localStorage, window.location.pathname));
+  const [isLoggedIn, setIsLoggedIn] = useState(initialAuth.isLoggedIn);
+  const [showLanding, setShowLanding] = useState(initialAuth.showLanding);
+  const [showDatacoreLanding, setShowDatacoreLanding] = useState(initialAuth.showDatacoreLanding);
   const [showDatacoreLogin, setShowDatacoreLogin] = useState(false);
   const [showAccessLogin, setShowAccessLogin] = useState(false);
-  const [user, setUser] = useState<UserInfo | null>(null);
+  const [user, setUser] = useState<UserInfo | null>(initialAuth.user);
   const [activeTab, _setActiveTab] = useState<SidebarTab>('dashboard');
   // Task 5 consumes this selected project when the plan view gains drill-down support.
   const [injectionPlanProjectId, setInjectionPlanProjectId] = useState<number | null>(null);
@@ -2498,23 +2500,6 @@ export default function App() {
   const [globalError, setGlobalError] = useState('');
 
 
-  // Check for existing session
-  useEffect(() => {
-    const savedUser = localStorage.getItem('oil_system_user');
-    if (!savedUser) return;
-
-    try {
-      const parsedUser = JSON.parse(savedUser);
-      if (parsedUser?.name && parsedUser?.role) {
-        setUser(parsedUser);
-        setIsLoggedIn(true);
-      } else {
-        localStorage.removeItem('oil_system_user');
-      }
-    } catch {
-      localStorage.removeItem('oil_system_user');
-    }
-  }, []);
 
   useEffect(() => {
     const handleAuthExpired = () => {
