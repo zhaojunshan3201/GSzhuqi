@@ -1828,7 +1828,7 @@ const Login = ({ onLogin, globalError, overlay = false, onCancel }: { onLogin: (
 
       if (data.success) {
         if (isRegister) {
-          setSuccess('导入成功！已更新数据');
+          setSuccess('注册成功，请登录');
           setIsRegister(false);
           setPassword('');
         } else {
@@ -1839,7 +1839,7 @@ const Login = ({ onLogin, globalError, overlay = false, onCancel }: { onLogin: (
         setError(data.message || '操作失败');
       }
     } catch (err) {
-      setError('导入失败，请检查文件格式');
+      setError('无法连接服务器，请确认服务已启动');
     } finally {
       setLoading(false);
     }
