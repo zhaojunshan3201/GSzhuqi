@@ -168,30 +168,45 @@ export async function createChannelingRelationPreview(db: DatabaseLike, projectI
   if (projectId !== null && (!Number.isInteger(projectId) || projectId <= 0)) throw new Error('projectId is invalid');
   if (!['steam', 'nitrogen'].includes(channelingType)) throw new Error('channelingType is invalid');
   if (!fileName.trim()) throw new Error('fileName is required');
-  await initChannelingProjectTables(db);
-  await initChannelingRelationImportTables(db);
-  if (projectId !== null && !await db.get('SELECT id FROM channeling_projects WHERE id = ?', [projectId])) throw new Error('Project not found');
-  const now = new Date().toISOString();
-  const result = await db.run(`INSERT INTO channeling_relation_imports (project_id, file_name, channeling_type, status, valid_count, duplicate_count, self_relation_count, invalid_count, created_at) VALUES (?, ?, ?, 'preview', ?, ?, ?, ?, ?)`, [projectId, fileName.trim(), channelingType, rows.valid.length, rows.duplicates.length, rows.selfRelations.length, rows.invalid.length, now]);
-  const importId = result.lastID!;
-  for (const [rowClass, values] of [['valid', rows.valid], ['duplicate', rows.duplicates], ['self_relation', rows.selfRelations]] as const) {
-    for (const value of values) await db.run('INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, ?, ?, ?)', [importId, rowClass, value.rowNumber, JSON.stringify(value)]);
+  for (const row of [...rows.valid, ...rows.duplicates, ...rows.selfRelations]) {
+    if (row.channelingType !== channelingType) throw new Error('row channelingType must match batch channelingType');
   }
-  for (const value of rows.invalid) await db.run("INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, 'invalid', ?, ?)", [importId, value.row, JSON.stringify(value)]);
-  return readImport(db, importId, true);
+  return queueTransaction(db, async () => {
+    await initChannelingProjectTables(db);
+    await initChannelingRelationImportTables(db);
+    if (projectId !== null && !await db.get('SELECT id FROM channeling_projects WHERE id = ?', [projectId])) throw new Error('Project not found');
+    let began = false;
+    try {
+      await db.exec('BEGIN IMMEDIATE');
+      began = true;
+      const now = new Date().toISOString();
+      const result = await db.run(`INSERT INTO channeling_relation_imports (project_id, file_name, channeling_type, status, valid_count, duplicate_count, self_relation_count, invalid_count, created_at) VALUES (?, ?, ?, 'preview', ?, ?, ?, ?, ?)`, [projectId, fileName.trim(), channelingType, rows.valid.length, rows.duplicates.length, rows.selfRelations.length, rows.invalid.length, now]);
+      const importId = result.lastID!;
+      for (const [rowClass, values] of [['valid', rows.valid], ['duplicate', rows.duplicates], ['self_relation', rows.selfRelations]] as const) {
+        for (const value of values) await db.run('INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, ?, ?, ?)', [importId, rowClass, value.rowNumber, JSON.stringify(value)]);
+      }
+      for (const value of rows.invalid) await db.run("INSERT INTO channeling_relation_import_rows (import_id, row_class, row_number, snapshot_json) VALUES (?, 'invalid', ?, ?)", [importId, value.row, JSON.stringify(value)]);
+      await db.exec('COMMIT');
+      began = false;
+      return readImport(db, importId, true);
+    } catch (error) {
+      if (began) await db.exec('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
-const confirmationQueues = new WeakMap<DatabaseLike, Promise<void>>();
+const transactionQueues = new WeakMap<DatabaseLike, Promise<void>>();
 
-function queueConfirmation<T>(db: DatabaseLike, operation: () => Promise<T>): Promise<T> {
-  const previous = confirmationQueues.get(db) ?? Promise.resolve();
+function queueTransaction<T>(db: DatabaseLike, operation: () => Promise<T>): Promise<T> {
+  const previous = transactionQueues.get(db) ?? Promise.resolve();
   const current = previous.catch(() => undefined).then(operation);
-  confirmationQueues.set(db, current.then(() => undefined, () => undefined));
+  transactionQueues.set(db, current.then(() => undefined, () => undefined));
   return current;
 }
 
 export async function confirmChannelingRelationImport(db: DatabaseLike, importId: number, projectId: number): Promise<ChannelingRelationImport> {
-  return queueConfirmation(db, async () => {
+  return queueTransaction(db, async () => {
     if (!Number.isInteger(projectId) || projectId <= 0) throw new Error('projectId is required');
     await initChannelingProjectTables(db);
     await initChannelingRelationImportTables(db);

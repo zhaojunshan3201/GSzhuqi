@@ -31,6 +31,7 @@ export async function initChannelingProjectTables(db: DatabaseLike) {
     try { await db.exec(`ALTER TABLE channeling_projects ADD COLUMN ${definition}`); } catch (error: any) { if (!String(error.message).includes('duplicate column name')) throw error; }
   }
   try { await db.exec("ALTER TABLE channeling_relations ADD COLUMN channeling_type TEXT NOT NULL DEFAULT 'steam'"); } catch (error: any) { if (!String(error.message).includes('duplicate column name')) throw error; }
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_channeling_relations_pair ON channeling_relations(project_id, channeling_type, injection_well, production_well)');
 }
 
 function required(value: unknown, field: string): string { if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required`); return value.trim(); }

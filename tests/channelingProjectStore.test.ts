@@ -21,19 +21,19 @@ async function withStore(run: (db: any) => Promise<void>) {
   try { await initChannelingProjectTables(db); await run(db); } finally { await db.close(); await rm(directory, { recursive: true, force: true }); }
 }
 
-const projectInput = () => ({ projectName: 'æ³¨çªœæ²»ç†ä¸€æœŸ', block: 'AåŒº', owner: 'æŽå·¥' });
+const projectInput = () => ({ projectName: '×¢´ÜÖÎÀíÒ»ÆÚ', block: 'AÇø', owner: 'Àî¹¤' });
 const relationInput = (projectId: number) => ({
-  projectId, channelingType: 'steam' as const, injectionWell: 'æ³¨A-1', productionWell: 'é‡‡A-2', reservoirLayer: 'S1', impactLevel: 'high' as const,
-  confidence: 0.85, status: 'confirmed' as const, source: 'manual' as const, evidence: 'ç¤ºè¸ªå‰‚å“åº”',
-  effectiveStartDate: '2026-07-01', effectiveEndDate: '2026-12-31', owner: 'æŽå·¥',
+  projectId, channelingType: 'steam' as const, injectionWell: '×¢A-1', productionWell: '²ÉA-2', reservoirLayer: 'S1', impactLevel: 'high' as const,
+  confidence: 0.85, status: 'confirmed' as const, source: 'manual' as const, evidence: 'Ê¾×Ù¼ÁÏìÓ¦',
+  effectiveStartDate: '2026-07-01', effectiveEndDate: '2026-12-31', owner: 'Àî¹¤',
 });
 
 test('creates and lists channeling projects', async () => {
   await withStore(async (db) => {
     const created = await createChannelingProject(db, projectInput());
-    assert.equal(created.projectName, 'æ³¨çªœæ²»ç†ä¸€æœŸ');
-    assert.equal(created.block, 'AåŒº');
-    assert.equal((await listChannelingProjects(db, { block: 'AåŒº' })).length, 1);
+    assert.equal(created.projectName, '×¢´ÜÖÎÀíÒ»ÆÚ');
+    assert.equal(created.block, 'AÇø');
+    assert.equal((await listChannelingProjects(db, { block: 'AÇø' })).length, 1);
     await assert.rejects(() => createChannelingProject(db, { ...projectInput(), projectName: '' }), /projectName/);
   });
 });
@@ -44,7 +44,7 @@ test('creates relations and filters by project, status, source, and block', asyn
     const relation = await createChannelingRelation(db, relationInput(project.id));
     assert.equal(relation.confidence, 0.85);
     assert.equal(relation.channelingType, 'steam');
-    assert.deepEqual((await listChannelingRelations(db, { projectId: project.id, channelingType: 'steam', status: 'confirmed', source: 'manual', block: 'AåŒº' })).map((item) => item.id), [relation.id]);
+    assert.deepEqual((await listChannelingRelations(db, { projectId: project.id, channelingType: 'steam', status: 'confirmed', source: 'manual', block: 'AÇø' })).map((item) => item.id), [relation.id]);
   });
 });
 
@@ -80,7 +80,8 @@ test('rejects invalid relation list enum filters instead of silently returning n
   });
 });
 
-test('migrates existing relations with steam as the safe default', async () => {
+
+test('migrates existing relations with steam as the safe default and creates a non-unique pair index', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channeling-project-store-migration-'));
   const db = await open({ filename: path.join(directory, 'test.db'), driver: sqlite3.Database });
   try {
@@ -90,5 +91,7 @@ test('migrates existing relations with steam as the safe default', async () => {
       INSERT INTO channeling_relations VALUES (1, 1, 'Z1', 'C1', 'S1', 'medium', .5, 'confirmed', 'manual', 'e', '2026-01-01', '2026-01-01', 'o', 'now', 'now');`);
     await initChannelingProjectTables(db);
     assert.equal((await listChannelingRelations(db))[0].channelingType, 'steam');
+    const index = await db.get("SELECT name, [unique] AS isUnique FROM pragma_index_list('channeling_relations') WHERE name = 'idx_channeling_relations_pair'");
+    assert.deepEqual(index, { name: 'idx_channeling_relations_pair', isUnique: 0 });
   } finally { await db.close(); await rm(directory, { recursive: true, force: true }); }
 });

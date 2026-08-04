@@ -143,7 +143,7 @@ test('migrates old non-null import batches without losing row data or its index'
     const migrated = await getChannelingRelationImport(db, 1);
     assert.equal(migrated.channelingType, 'steam'); assert.equal(migrated.valid?.length, 1);
     assert.equal((await db.get("SELECT [notnull] AS required FROM pragma_table_info('channeling_relation_imports') WHERE name='project_id'")).required, 0);
-    assert.ok(await db.get("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_channeling_relation_import_rows_import'"));
+    assert.ok(await db.get("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_channeling_relation_import_rows_import'")); assert.equal((await db.get('PRAGMA foreign_keys')).foreign_keys, 1); assert.deepEqual(await db.all('PRAGMA foreign_key_check'), []);
   } finally { await db.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -170,4 +170,16 @@ test('classifies detailed self-pairs and duplicates and confirms only one valid 
   assert.equal(relations.length, 1);
   assert.equal(relations[0].source, 'suspected');
   assert.equal(relations[0].status, 'suspected');
+}); });
+
+
+test('rolls back the entire preview when a snapshot insert fails', async () => { await withStore(async (db) => {
+  const failingDb = { exec: db.exec.bind(db), get: db.get.bind(db), all: db.all.bind(db), run: async (sql: string, params?: unknown[]) => { if (sql.startsWith('INSERT INTO channeling_relation_import_rows ')) throw new Error('forced snapshot failure'); return db.run(sql, params); } };
+  await assert.rejects(() => createChannelingRelationPreview(failingDb, null, 'atomic.xlsx', 'steam', { valid: [{ rowNumber: 2, injectorWellNo: 'Z1', producerWellNo: 'C1', channelingType: 'steam' }], duplicates: [], selfRelations: [], invalid: [] }), /forced snapshot failure/);
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM channeling_relation_imports')).count, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS count FROM channeling_relation_import_rows')).count, 0);
+}); });
+
+test('rejects preview rows whose channeling type contradicts the batch type', async () => { await withStore(async (db) => {
+  await assert.rejects(() => createChannelingRelationPreview(db, null, 'mismatch.xlsx', 'steam', { valid: [{ rowNumber: 2, injectorWellNo: 'Z1', producerWellNo: 'C1', channelingType: 'nitrogen' }], duplicates: [], selfRelations: [], invalid: [] }), /channelingType/);
 }); });
