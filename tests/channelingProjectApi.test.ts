@@ -14,7 +14,10 @@ test('patch route permits only documented editable relation fields and maps unex
   const server = await readFile(new URL('../server.ts', import.meta.url), 'utf8');
   assert.match(server, /const allowedRelationPatchFields = new Set/);
   assert.match(server, /allowedRelationPatchFields = new Set\(\[[^\]]*"channelingType"/);
-  assert.match(server, /Object\.keys\(req\.body \|\| \{\}\)\.some\(\(key\) => !allowedRelationPatchFields\.has\(key\)\)/);
+  assert.match(server, /Array\.isArray\(req\.body\)/);
+  assert.match(server, /Object\.getPrototypeOf\(req\.body\) !== Object\.prototype/);
+  assert.match(server, /Object\.keys\(req\.body\)\.length === 0/);
+  assert.match(server, /Object\.keys\(req\.body\)\.some\(\(key\) => !allowedRelationPatchFields\.has\(key\)\)/);
   assert.match(server, /channelingErrorStatus/);
 });
 
@@ -25,7 +28,9 @@ test('registers standalone relationship import preview, detail and confirmation 
   assert.match(server, /app\.get\("\/api\/channeling-relation-imports\/:id"/);
   assert.match(server, /getChannelingRelationImport/);
   assert.match(server, /confirmChannelingRelationImport\(localDb, importId, projectId\)/);
+  assert.match(server, /getChannelingRelationImport\(localDb, importId\)/);
   assert.match(server, /channelingType: typeof req\.query\.channelingType === "string" \? req\.query\.channelingType : undefined/);
+  assert.match(server, /req\.query\.channelingType !== undefined && typeof req\.query\.channelingType !== "string"/);
   assert.match(server, /channelingType: req\.body\?\.channelingType \?\? "steam"/);
   assert.match(server, /\\u4e0a\\u4f20\\u6587\\u4ef6\\u8fc7\\u5927/);
 });

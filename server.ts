@@ -4737,6 +4737,7 @@ app.post("/api/register", async (req, res) => {
   app.get("/api/channeling-projects/:id/relations", async (req, res) => {
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    if (req.query.channelingType !== undefined && typeof req.query.channelingType !== "string") return res.status(400).json({ success: false, message: "channelingType is invalid" });
     try {
       forceChannelingTestError(req);
       if (!await localDb.get("SELECT id FROM channeling_projects WHERE id = ?", [projectId])) return res.status(404).json({ success: false, message: "Project not found" });
@@ -4767,14 +4768,16 @@ app.post("/api/register", async (req, res) => {
   app.post("/api/channeling-projects/:id/relation-imports/preview", requireChannelingAdminMiddleware, channelingRelationImportUploadMiddleware, async (req, res) => {
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
+    const file = (req as express.Request & { file?: { originalname: string; buffer: Buffer } }).file;
+    if (!file) return res.status(400).json({ success: false, message: "\u8bf7\u4e0a\u4f20 Excel \u6587\u4ef6\uff08.xlsx \u6216 .xls\uff09" });
+    if (!/\.xlsx?$/i.test(file.originalname)) return res.status(400).json({ success: false, message: "\u4ec5\u652f\u6301 .xlsx \u6216 .xls \u6587\u4ef6" });
+    const requestedType = typeof req.body?.channelingType === "string" ? req.body.channelingType : "steam";
+    if (requestedType !== "steam" && requestedType !== "nitrogen") return res.status(400).json({ success: false, message: "channelingType \u5fc5\u987b\u4e3a steam \u6216 nitrogen" });
+    const channelingType: ChannelingType = requestedType;
+    let rows;
+    try { rows = parseChannelingRelationRows(XLSX.read(file.buffer, { type: "buffer" }), channelingType); }
+    catch (error: any) { return res.status(400).json({ success: false, message: `Excel \u89e3\u6790\u5931\u8d25\uff1a${error.message}` }); }
     try {
-      const file = (req as express.Request & { file?: { originalname: string; buffer: Buffer } }).file;
-      if (!file) return res.status(400).json({ success: false, message: "\u8bf7\u4e0a\u4f20 Excel \u6587\u4ef6\uff08.xlsx \u6216 .xls\uff09" });
-      if (!/\.xlsx?$/i.test(file.originalname)) return res.status(400).json({ success: false, message: "\u4ec5\u652f\u6301 .xlsx \u6216 .xls \u6587\u4ef6" });
-      const requestedType = typeof req.body?.channelingType === "string" ? req.body.channelingType : "steam";
-      if (requestedType !== "steam" && requestedType !== "nitrogen") return res.status(400).json({ success: false, message: "channelingType \u5fc5\u987b\u4e3a steam \u6216 nitrogen" });
-      const channelingType: ChannelingType = requestedType;
-      const rows = parseChannelingRelationRows(XLSX.read(file.buffer, { type: "buffer" }), channelingType);
       const data = await createChannelingRelationPreview(localDb, projectId, decodeUploadedFileName(file.originalname), channelingType, rows);
       res.status(201).json({ success: true, data });
     } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
@@ -4795,16 +4798,21 @@ app.post("/api/register", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
     const importId = Number(req.params.id);
     if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
-    const projectId = req.body?.projectId;
-    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "projectId \u5fc5\u987b\u4e3a\u6b63\u6574\u6570" });
-    try { forceChannelingTestError(req); res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId, projectId) }); }
+    const requestedProjectId = req.body?.projectId;
+    if (requestedProjectId !== undefined && (!Number.isInteger(requestedProjectId) || requestedProjectId <= 0)) return res.status(400).json({ success: false, message: "projectId \u5fc5\u987b\u4e3a\u6b63\u6574\u6570" });
+    try {
+      forceChannelingTestError(req);
+      const projectId = requestedProjectId ?? (await getChannelingRelationImport(localDb, importId)).projectId;
+      if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "\u672a\u7ed1\u5b9a\u9879\u76ee\u7684\u9884\u89c8\u5fc5\u987b\u63d0\u4f9b projectId" });
+      res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId, projectId) });
+    }
     catch (error: any) { const status = error.message === "channeling relation import not found" || error.message === "Project not found" ? 404 : error.message === "only preview imports can be confirmed" || error.message === "preview belongs to another project" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-relations/:id", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
-    if (!req.body || typeof req.body !== "object" || Object.keys(req.body || {}).some((key) => !allowedRelationPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported relation patch field" });
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || Object.getPrototypeOf(req.body) !== Object.prototype || Object.keys(req.body).length === 0 || Object.keys(req.body).some((key) => !allowedRelationPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported relation patch field" });
     try { forceChannelingTestError(req); res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });

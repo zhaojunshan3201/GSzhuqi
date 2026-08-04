@@ -9,21 +9,29 @@ import * as XLSX from 'xlsx';
 
 const relation = { injectionWell: '◊¢A-1', productionWell: '≤…A-2', reservoirLayer: 'S1', impactLevel: 'high', confidence: .8, status: 'confirmed', source: 'manual', evidence: '≤‚ ‘', effectiveStartDate: '2026-07-01', effectiveEndDate: '2026-12-31', owner: '¿Óπ§' };
 
-function matrixWorkbookBuffer(): Buffer {
+function matrixWorkbookBuffer(dataRows: unknown[][] = [['Z1', 'P1', 'Z1', 'P1'], ['', 'P2', '', '']]): Buffer {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
     ['\u6ce8\u6c7d\u4e95', '\u4e95\u53f71', '\u4e95\u53f72', '\u4e95\u53f73'],
-    ['Z1', 'P1', 'Z1', 'P1'],
-    ['', 'P2', '', ''],
+    ...dataRows,
   ]), 'relations');
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 }
 
-function importForm(channelingType?: string, fileName = 'relations.xlsx'): FormData {
+function importForm(channelingType?: string, fileName = 'relations.xlsx', buffer = matrixWorkbookBuffer()): FormData {
   const form = new FormData();
-  form.append('file', new Blob([new Uint8Array(matrixWorkbookBuffer())]), fileName);
+  form.append('file', new Blob([new Uint8Array(buffer)]), fileName);
   if (channelingType !== undefined) form.append('channelingType', channelingType);
   return form;
+}
+
+async function stopServer(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 2000); timer.unref();
+    child.once('exit', () => { clearTimeout(timer); resolve(); });
+    child.kill();
+  });
 }
 
 test('channeling endpoints enforce request contracts over HTTP', { timeout: 30000 }, async () => {
@@ -47,8 +55,7 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     const token = (await login.json() as any).token;
     assert.ok(token);
     const authorized = { authorization: `Bearer ${token}` };
-    child.kill();
-    await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    await stopServer(child);
     child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], serverOptions);
     await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('restarted server did not start')), 15000); child.stdout.on('data', (data) => { if (String(data).includes('Server running')) { clearTimeout(timer); resolve(); } }); child.once('error', reject); child.once('exit', (code) => reject(new Error(`restarted server exited ${code}`))); });
     const multipartRequest = (url: string, body: FormData, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${port}${url}`, { method: 'POST', headers, body });
@@ -77,10 +84,18 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     assert.equal((await request(`/api/channeling-relation-imports/${preview.id}/confirm`, { method: 'POST', headers: authorized, body: JSON.stringify({}) })).status, 400);
     const projectResponse = await request('/api/channeling-projects', { method: 'POST', headers: authorized, body: JSON.stringify({ projectName: 'project', block: 'A', owner: 'tester' }) });
     assert.equal(projectResponse.status, 201); const project = (await projectResponse.json() as any).data;
-    const legacyPreviewResponse = await multipartRequest(`/api/channeling-projects/${project.id}/relation-imports/preview`, importForm(), authorized);
+    const malformedBytes = Buffer.from([0, 1, 2, 3]);
+    const unrecognizedWorkbook = XLSX.write({ SheetNames: ['bad'], Sheets: { bad: XLSX.utils.aoa_to_sheet([['unexpected'], ['value']]) } }, { type: 'buffer', bookType: 'xlsx' });
+    assert.equal((await multipartRequest('/api/channeling-relation-imports/preview', importForm('steam', 'broken.xlsx', malformedBytes), authorized)).status, 400);
+    assert.equal((await multipartRequest(`/api/channeling-projects/${project.id}/relation-imports/preview`, importForm('steam', 'broken.xlsx', malformedBytes), authorized)).status, 400);
+    assert.equal((await multipartRequest('/api/channeling-relation-imports/preview', importForm('steam', 'headers.xlsx', unrecognizedWorkbook), authorized)).status, 400);
+    assert.equal((await multipartRequest(`/api/channeling-projects/${project.id}/relation-imports/preview`, importForm('steam', 'headers.xlsx', unrecognizedWorkbook), authorized)).status, 400);
+    const legacyPreviewResponse = await multipartRequest(`/api/channeling-projects/${project.id}/relation-imports/preview`, importForm(undefined, 'legacy.xlsx', matrixWorkbookBuffer([['ZL', 'PL', '', '']])), authorized);
     assert.equal(legacyPreviewResponse.status, 201);
     const legacyPreview = (await legacyPreviewResponse.json() as any).data;
     assert.equal(legacyPreview.projectId, project.id); assert.equal(legacyPreview.channelingType, 'steam');
+    const legacyConfirmResponse = await request(`/api/channeling-relation-imports/${legacyPreview.id}/confirm`, { method: 'POST', headers: authorized });
+    assert.equal(legacyConfirmResponse.status, 200); assert.equal((await legacyConfirmResponse.json() as any).data.projectId, project.id);
     const created = await request(`/api/channeling-projects/${project.id}/relations`, { method: 'POST', headers: authorized, body: JSON.stringify({ ...relation, injectionWell: 'Z1', productionWell: 'P1' }) });
     assert.equal(created.status, 201); const item = (await created.json() as any).data;
     assert.equal(item.channelingType, 'steam');
@@ -93,9 +108,10 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     assert.equal((await request('/api/channeling-relation-imports/99999/confirm', { method: 'POST', headers: authorized, body: JSON.stringify({ projectId: project.id }) })).status, 404);
     const steamRelations = await request(`/api/channeling-projects/${project.id}/relations?channelingType=steam`); const steamItems = (await steamRelations.json() as any).data;
     const nitrogenRelations = await request(`/api/channeling-projects/${project.id}/relations?channelingType=nitrogen`); const nitrogenItems = (await nitrogenRelations.json() as any).data;
-    assert.equal(steamRelations.status, 200); assert.equal(nitrogenRelations.status, 200); assert.equal(steamItems.length, 1); assert.equal(nitrogenItems.length, 1);
-    assert.equal(steamItems[0].injectionWell, nitrogenItems[0].injectionWell); assert.equal(steamItems[0].productionWell, nitrogenItems[0].productionWell);
+    assert.equal(steamRelations.status, 200); assert.equal(nitrogenRelations.status, 200); assert.equal(steamItems.length, 2); assert.equal(nitrogenItems.length, 1);
+    const matchingSteam = steamItems.find((entry: any) => entry.injectionWell === 'Z1'); assert.ok(matchingSteam); assert.equal(matchingSteam.productionWell, nitrogenItems[0].productionWell);
     assert.equal((await request(`/api/channeling-projects/${project.id}/relations?channelingType=water`)).status, 400);
+    assert.equal((await request(`/api/channeling-projects/${project.id}/relations?channelingType=steam&channelingType=nitrogen`)).status, 400);
     const explicitTypeResponse = await request(`/api/channeling-projects/${project.id}/relations`, { method: 'POST', headers: authorized, body: JSON.stringify({ ...relation, channelingType: 'nitrogen', injectionWell: 'Z2', productionWell: 'P2' }) });
     assert.equal(explicitTypeResponse.status, 201); const explicitTypeItem = (await explicitTypeResponse.json() as any).data;
     assert.equal(explicitTypeItem.channelingType, 'nitrogen');
@@ -107,6 +123,8 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     assert.equal((await request('/api/channeling-projects/99999/relations')).status, 404);
     assert.equal((await request('/api/channeling-relations/99999', { method: 'PATCH', headers: authorized, body: JSON.stringify({ status: 'released' }) })).status, 404);
     assert.equal((await request(`/api/channeling-relations/${item.id}`, { method: 'PATCH', headers: authorized, body: JSON.stringify({ projectId: 2 }) })).status, 400);
+    assert.equal((await request(`/api/channeling-relations/${item.id}`, { method: 'PATCH', headers: authorized, body: JSON.stringify({}) })).status, 400);
+    assert.equal((await request(`/api/channeling-relations/${item.id}`, { method: 'PATCH', headers: authorized, body: JSON.stringify([]) })).status, 400);
     assert.equal((await request(`/api/channeling-projects/${project.id}/relations`, { headers: { 'x-channeling-force-error': '1' } })).status, 500);
-  } finally { child.kill(); await new Promise<void>((resolve) => child.once('exit', () => resolve())); await rm(directory, { recursive: true, force: true }); }
+  } finally { await stopServer(child); await rm(directory, { recursive: true, force: true }); }
 });
