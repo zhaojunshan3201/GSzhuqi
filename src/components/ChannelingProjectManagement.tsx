@@ -32,6 +32,7 @@ export function ChannelingProjectManagement({ role }: Props) {
   const [validRowsExpanded, setValidRowsExpanded] = useState(false);
   const confirmingImportIdRef = useRef<number | null>(null);
   const relationRequestRef = useRef<AbortController | null>(null);
+  const relationProjectIdRef = useRef<number | null>(null);
   const selected = projects.find((item) => item.id === selectedId);
   const visibleProjects = useMemo(() => projects.filter((item) => (!projectFilters.block || item.block.includes(projectFilters.block)) && (!projectFilters.status || item.status === projectFilters.status)), [projects, projectFilters]);
   const visibleRelations = useMemo(() => relations.filter((item) => (!relationFilters.channelingType || item.channelingType === relationFilters.channelingType) && (!relationFilters.status || item.status === relationFilters.status) && (!relationFilters.source || item.source === relationFilters.source)), [relations, relationFilters]);
@@ -55,6 +56,10 @@ export function ChannelingProjectManagement({ role }: Props) {
     relationRequestRef.current?.abort();
     const controller = new AbortController();
     relationRequestRef.current = controller;
+    if (relationProjectIdRef.current !== projectId) {
+      relationProjectIdRef.current = projectId;
+      setImports([]);
+    }
     setRelations([]);
     const typeQuery = relationFilters.channelingType ? `?channelingType=${encodeURIComponent(relationFilters.channelingType)}` : '';
     try {
@@ -69,7 +74,7 @@ export function ChannelingProjectManagement({ role }: Props) {
       throw error;
     }
   };
-  useEffect(() => { if (selectedId) void loadRelations(selectedId).catch(() => setMessage('关系加载失败，请稍后重试。')); else { relationRequestRef.current?.abort(); setRelations([]); setImports([]); } }, [selectedId, relationFilters.channelingType]);
+  useEffect(() => { if (selectedId) void loadRelations(selectedId).catch(() => setMessage('关系加载失败，请稍后重试。')); else { relationRequestRef.current?.abort(); relationProjectIdRef.current = null; setRelations([]); setImports([]); } }, [selectedId, relationFilters.channelingType]);
   useEffect(() => () => relationRequestRef.current?.abort(), []);
   useEffect(() => {
     if (!preview) return;

@@ -136,3 +136,37 @@ test('an older relation response cannot replace the latest type-filter result', 
   await act(async () => { root.unmount(); });
   dom.window.close();
 });
+
+test('switching projects clears prior relation and import actions before the new response', async () => {
+  const dom = setupDom();
+  const host = document.getElementById('root')!;
+  const root = createRoot(host);
+  const secondProject = { ...project, id: 8, projectName: '第二项目', block: '二区' };
+  const nextRelations = deferred<Response>();
+  const nextImports = deferred<Response>();
+  const oldImport = { ...preview, id: 41, projectId: 7, fileName: '旧项目关系.xlsx' };
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project, secondProject]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7/relations') return payload([relation('旧项目井', 'steam')]);
+    if (url === '/api/channeling-projects/7/relation-imports') return payload([oldImport]);
+    if (url === '/api/channeling-projects/8/relations') return nextRelations.promise;
+    if (url === '/api/channeling-projects/8/relation-imports') return nextImports.promise;
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  await act(async () => { root.render(createElement(ChannelingProjectManagement, { role: 'admin' })); });
+  assert.match(host.textContent || '', /旧项目井/);
+  assert.match(host.textContent || '', /旧项目关系\.xlsx/);
+
+  const projectButton = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes('第二项目')) as HTMLButtonElement;
+  await act(async () => { projectButton.click(); });
+  assert.doesNotMatch(host.textContent || '', /旧项目井/);
+  assert.doesNotMatch(host.textContent || '', /旧项目关系\.xlsx/);
+  assert.equal([...host.querySelectorAll('button')].some((item) => item.textContent === '确认导入'), false, 'stale import action is removed while the next project loads');
+
+  await act(async () => { nextRelations.resolve(await payload([])); nextImports.resolve(await payload([])); await Promise.all([nextRelations.promise, nextImports.promise]); });
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+});
