@@ -37,6 +37,13 @@ test('channeling UI exposes the primary Chinese labels', () => {
   const oilWellMap = readSource('src/components/OilWellMap.tsx');
 
   assert.match(projectManagement, /注窜项目台账/);
+  assert.match(projectManagement, /注窜关系识别/);
+  assert.match(projectManagement, /注汽窜/);
+  assert.match(projectManagement, /注氮气窜/);
+  assert.match(projectManagement, /有效关系/);
+  assert.match(projectManagement, /重复关系/);
+  assert.match(projectManagement, /自身关系/);
+  assert.match(projectManagement, /无效行/);
   assert.match(oilWellMap, /关系图层/);
 });
 
