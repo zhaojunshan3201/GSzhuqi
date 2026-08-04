@@ -62,6 +62,7 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     await stopServer(child);
     const seededDb = await open({ filename: path.join(directory, 'test.db'), driver: sqlite3.Database });
     await seededDb.run("UPDATE users SET name = '登录失败，请重试' WHERE username = 'admin'");
+    await seededDb.run("INSERT INTO users (username, password, name, role) VALUES (?, ?, ?, ?)", ['ordinary-user', 'password', '登录失败，请重试', 'user']);
     await seededDb.close();
     child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], serverOptions);
     await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('restarted server did not start')), 15000); child.stdout.on('data', (data) => { if (String(data).includes('Server running')) { clearTimeout(timer); resolve(); } }); child.once('error', reject); child.once('exit', (code) => reject(new Error(`restarted server exited ${code}`))); });
@@ -69,6 +70,8 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     const migratedLoginPayload = await migratedLogin.json() as any;
     assert.equal(migratedLoginPayload.user.name, '系统管理员');
     authorized = { authorization: `Bearer ${migratedLoginPayload.token}` };
+    const ordinaryLogin = await request('/api/login', { method: 'POST', body: JSON.stringify({ username: 'ordinary-user', password: 'password' }) });
+    assert.equal((await ordinaryLogin.json() as any).user.name, '登录失败，请重试');
     const multipartRequest = (url: string, body: FormData, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${port}${url}`, { method: 'POST', headers, body });
     assert.equal((await multipartRequest('/api/channeling-relation-imports/preview', importForm('nitrogen'))).status, 401);
     const userPayload = Buffer.from(JSON.stringify({ username: 'operator', role: 'user' })).toString('base64url');

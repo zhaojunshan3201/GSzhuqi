@@ -1814,7 +1814,7 @@ async function initLocalDb() {
     );
     console.log("Default admin user created: admin/123456");
   }
-  await localDb.run("UPDATE users SET name = ? WHERE username = ? AND name = ?", ["系统管理员", "admin", "登录失败，请重试"]);
+  await localDb.run("UPDATE users SET name = ? WHERE username = ? AND role = ? AND name = ?", ["系统管理员", "admin", "admin", "登录失败，请重试"]);
 
   const latestLocalDate = await getLocalLatestDate();
   await setSyncMeta("last_local_data_date", latestLocalDate);
@@ -4735,6 +4735,11 @@ app.post("/api/register", async (req, res) => {
   const forceChannelingTestError = (req: any) => {
     if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-error") === "1") throw new Error("forced channeling runtime error");
   };
+  async function confirmChannelingRelationImportWithDedicatedConnection(importId: number, projectId: number) {
+    const channelingDb = await open({ filename: DB_FILE, driver: sqlite3.Database });
+    try { return await confirmChannelingRelationImport(channelingDb, importId, projectId); }
+    finally { await channelingDb.close(); }
+  }
   app.get("/api/channeling-projects/:id/relations", async (req, res) => {
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
@@ -4805,7 +4810,7 @@ app.post("/api/register", async (req, res) => {
       forceChannelingTestError(req);
       const projectId = requestedProjectId ?? (await getChannelingRelationImport(localDb, importId)).projectId;
       if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "\u672a\u7ed1\u5b9a\u9879\u76ee\u7684\u9884\u89c8\u5fc5\u987b\u63d0\u4f9b projectId" });
-      res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId, projectId) });
+      res.json({ success: true, data: await confirmChannelingRelationImportWithDedicatedConnection(importId, projectId) });
     }
     catch (error: any) { const status = error.message === "channeling relation import not found" || error.message === "Project not found" ? 404 : error.message === "only preview imports can be confirmed" || error.message === "preview belongs to another project" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
   });
