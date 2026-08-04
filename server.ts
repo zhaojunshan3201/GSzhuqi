@@ -59,8 +59,8 @@ import { buildInjectionStatusMap } from "./src/lib/injectionStatusMap.ts";
 import { createInjectionStatusMapHandler } from "./src/lib/injectionStatusMapHandler.ts";
 import { buildInjectionPlanActualComparison, type ComparisonStatus } from "./src/lib/injectionPlanActualComparison.ts";
 import { createInjectionProject, initInjectionProjectTables, listInjectionProjects, listProjectPendingItems, transitionInjectionProject, updatePlanStatus } from "./src/lib/injectionProjectStore.ts";
-import { createChannelingProject, createChannelingRelation, deleteChannelingProject, deleteChannelingRelation, initChannelingProjectTables, listChannelingGovernanceTodos, listChannelingProjects, listChannelingRelations, updateChannelingProject, updateChannelingRelation } from "./src/lib/channelingProjectStore.ts";
-import { confirmChannelingRelationImport, createChannelingRelationPreview, initChannelingRelationImportTables, listChannelingRelationImports, parseChannelingRelationRows } from "./src/lib/channelingRelationImport.ts";
+import { createChannelingProject, createChannelingRelation, deleteChannelingProject, deleteChannelingRelation, initChannelingProjectTables, listChannelingGovernanceTodos, listChannelingProjects, listChannelingRelations, updateChannelingProject, updateChannelingRelation, type ChannelingType } from "./src/lib/channelingProjectStore.ts";
+import { confirmChannelingRelationImport, createChannelingRelationPreview, getChannelingRelationImport, initChannelingRelationImportTables, listChannelingRelationImports, parseChannelingRelationRows } from "./src/lib/channelingRelationImport.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -3207,7 +3207,7 @@ function handleMeasureImportUpload(upload: ReturnType<typeof multer>) {
         return;
       }
       if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-        res.status(400).json({ success: false, message: `_______________________________________________?${Math.floor(MEASURE_IMPORT_FILE_LIMIT_BYTES / (1024 * 1024))}MB _________` });
+        res.status(400).json({ success: false, message: `\u4e0a\u4f20\u6587\u4ef6\u8fc7\u5927\uff0c\u8bf7\u9009\u62e9\u4e0d\u8d85\u8fc7 ${Math.floor(MEASURE_IMPORT_FILE_LIMIT_BYTES / (1024 * 1024))}MB \u7684 Excel \u6587\u4ef6` });
         return;
       }
       res.status(400).json({ success: false, message: "导入文件读取失败: " + err.message });
@@ -4701,6 +4701,9 @@ app.post("/api/register", async (req, res) => {
     if (role === "admin") return true;
     res.status(403).json({ success: false, message: "Channeling admin permission is required" }); return false;
   };
+  const requireChannelingAdminMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (requireChannelingAdmin(req, res)) next();
+  };
   app.post("/api/channeling-projects", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
     try { res.status(201).json({ success: true, data: await createChannelingProject(localDb, req.body) }); }
@@ -4726,7 +4729,7 @@ app.post("/api/register", async (req, res) => {
     try { await deleteChannelingProject(localDb, id); res.status(204).end(); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
-  const allowedRelationPatchFields = new Set(["injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
+  const allowedRelationPatchFields = new Set(["channelingType", "injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
   const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") || error.message?.includes("Invalid governance status transition") ? 400 : 500;
   const forceChannelingTestError = (req: any) => {
     if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-error") === "1") throw new Error("forced channeling runtime error");
@@ -4737,25 +4740,42 @@ app.post("/api/register", async (req, res) => {
     try {
       forceChannelingTestError(req);
       if (!await localDb.get("SELECT id FROM channeling_projects WHERE id = ?", [projectId])) return res.status(404).json({ success: false, message: "Project not found" });
-      res.json({ success: true, data: await listChannelingRelations(localDb, { projectId, status: typeof req.query.status === "string" ? req.query.status : undefined, source: typeof req.query.source === "string" ? req.query.source : undefined, block: typeof req.query.block === "string" ? req.query.block : undefined }) });
+      res.json({ success: true, data: await listChannelingRelations(localDb, { projectId, channelingType: typeof req.query.channelingType === "string" ? req.query.channelingType : undefined, status: typeof req.query.status === "string" ? req.query.status : undefined, source: typeof req.query.source === "string" ? req.query.source : undefined, block: typeof req.query.block === "string" ? req.query.block : undefined }) });
     } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-projects/:id/relations", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
-    try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, projectId }) }); }
+    try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, channelingType: req.body?.channelingType ?? "steam", projectId }) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
-  app.post("/api/channeling-projects/:id/relation-imports/preview", channelingRelationImportUploadMiddleware, async (req, res) => {
-    if (!requireChannelingAdmin(req, res)) return;
+  app.post("/api/channeling-relation-imports/preview", requireChannelingAdminMiddleware, channelingRelationImportUploadMiddleware, async (req, res) => {
+    const file = (req as express.Request & { file?: { originalname: string; buffer: Buffer } }).file;
+    if (!file) return res.status(400).json({ success: false, message: "\u8bf7\u4e0a\u4f20 Excel \u6587\u4ef6\uff08.xlsx \u6216 .xls\uff09" });
+    if (!/\.xlsx?$/i.test(file.originalname)) return res.status(400).json({ success: false, message: "\u4ec5\u652f\u6301 .xlsx \u6216 .xls \u6587\u4ef6" });
+    const channelingType = typeof req.body?.channelingType === "string" ? req.body.channelingType : undefined;
+    if (channelingType !== "steam" && channelingType !== "nitrogen") return res.status(400).json({ success: false, message: "channelingType \u5fc5\u987b\u4e3a steam \u6216 nitrogen" });
+    let rows;
+    try { rows = parseChannelingRelationRows(XLSX.read(file.buffer, { type: "buffer" }), channelingType); }
+    catch (error: any) { return res.status(400).json({ success: false, message: `Excel \u89e3\u6790\u5931\u8d25\uff1a${error.message}` }); }
+    try {
+      const data = await createChannelingRelationPreview(localDb, null, decodeUploadedFileName(file.originalname), channelingType, rows);
+      res.status(201).json({ success: true, data });
+    } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
+  });
+  app.post("/api/channeling-projects/:id/relation-imports/preview", requireChannelingAdminMiddleware, channelingRelationImportUploadMiddleware, async (req, res) => {
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     try {
       const file = (req as express.Request & { file?: { originalname: string; buffer: Buffer } }).file;
-      if (!file) return res.status(400).json({ success: false, message: "Excel file is required" });
-      if (!/\.xlsx?$/i.test(file.originalname)) return res.status(400).json({ success: false, message: "only .xlsx and .xls files are supported" });
-      const data = await createChannelingRelationPreview(localDb, projectId, decodeUploadedFileName(file.originalname), parseChannelingRelationRows(XLSX.read(file.buffer, { type: "buffer" })));
+      if (!file) return res.status(400).json({ success: false, message: "\u8bf7\u4e0a\u4f20 Excel \u6587\u4ef6\uff08.xlsx \u6216 .xls\uff09" });
+      if (!/\.xlsx?$/i.test(file.originalname)) return res.status(400).json({ success: false, message: "\u4ec5\u652f\u6301 .xlsx \u6216 .xls \u6587\u4ef6" });
+      const requestedType = typeof req.body?.channelingType === "string" ? req.body.channelingType : "steam";
+      if (requestedType !== "steam" && requestedType !== "nitrogen") return res.status(400).json({ success: false, message: "channelingType \u5fc5\u987b\u4e3a steam \u6216 nitrogen" });
+      const channelingType: ChannelingType = requestedType;
+      const rows = parseChannelingRelationRows(XLSX.read(file.buffer, { type: "buffer" }), channelingType);
+      const data = await createChannelingRelationPreview(localDb, projectId, decodeUploadedFileName(file.originalname), channelingType, rows);
       res.status(201).json({ success: true, data });
     } catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
@@ -4765,12 +4785,20 @@ app.post("/api/register", async (req, res) => {
     try { res.json({ success: true, data: await listChannelingRelationImports(localDb, projectId) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
+  app.get("/api/channeling-relation-imports/:id", async (req, res) => {
+    const importId = Number(req.params.id);
+    if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id \u5fc5\u987b\u4e3a\u6b63\u6574\u6570" });
+    try { res.json({ success: true, data: await getChannelingRelationImport(localDb, importId) }); }
+    catch (error: any) { res.status(error.message === "channeling relation import not found" ? 404 : 500).json({ success: false, message: error.message }); }
+  });
   app.post("/api/channeling-relation-imports/:id/confirm", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
     const importId = Number(req.params.id);
     if (!Number.isInteger(importId) || importId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
-    try { res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId) }); }
-    catch (error: any) { const status = error.message === "channeling relation import not found" ? 404 : error.message === "only preview imports can be confirmed" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
+    const projectId = req.body?.projectId;
+    if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "projectId \u5fc5\u987b\u4e3a\u6b63\u6574\u6570" });
+    try { forceChannelingTestError(req); res.json({ success: true, data: await confirmChannelingRelationImport(localDb, importId, projectId) }); }
+    catch (error: any) { const status = error.message === "channeling relation import not found" || error.message === "Project not found" ? 404 : error.message === "only preview imports can be confirmed" || error.message === "preview belongs to another project" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-relations/:id", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
