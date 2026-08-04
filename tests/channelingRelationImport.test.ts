@@ -156,3 +156,18 @@ test('rolls back relation inserts and preview confirmation when confirmation fai
   assert.equal((await getChannelingRelationImport(db, preview.id)).status, 'preview');
   assert.equal((await listChannelingRelations(db, { projectId: project.id })).length, 0);
 }); });
+
+
+test('classifies detailed self-pairs and duplicates and confirms only one valid relation', async () => { await withStore(async (db) => {
+  const project = await createChannelingProject(db, { projectName: 'project', block: 'A', owner: 'owner' });
+  const parsed = parseChannelingRelationRows(workbookWithRows([[h.injector, h.producer, h.impact, h.source], ['Z1', 'Z1', h.high, h.suspected], ['Z1', 'C1', h.high, h.suspected], ['Z1', 'C1', h.high, h.suspected]]), 'steam');
+  assert.deepEqual(parsed.selfRelations.map((row) => row.rowNumber), [2]);
+  assert.deepEqual(parsed.valid.map((row) => row.rowNumber), [3]);
+  assert.deepEqual(parsed.duplicates.map((row) => row.rowNumber), [4]);
+  const preview = await createChannelingRelationPreview(db, null, 'detailed.xlsx', 'steam', parsed);
+  await confirmChannelingRelationImport(db, preview.id, project.id);
+  const relations = await listChannelingRelations(db, { projectId: project.id });
+  assert.equal(relations.length, 1);
+  assert.equal(relations[0].source, 'suspected');
+  assert.equal(relations[0].status, 'suspected');
+}); });

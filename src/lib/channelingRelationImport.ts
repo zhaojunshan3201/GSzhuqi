@@ -109,15 +109,20 @@ function parseMatrixRows(rows: unknown[][], relationColumns: number[], channelin
 
 function parseDetailedRows(rows: unknown[][], channelingType: ChannelingType): ChannelingRelationImportPreviewRows {
   const columns = findColumns(rows[0]);
-  const valid: ChannelingRelationImportRow[] = [];
-  const invalid: Array<{ row: number; reason: string }> = [];
+  const result: ChannelingRelationImportPreviewRows = { valid: [], duplicates: [], selfRelations: [], invalid: [] };
+  const seen = new Set<string>();
   rows.slice(1).forEach((row, index) => {
     if (row.every(isBlank)) return;
     const rowNumber = index + 2;
-    try { valid.push({ rowNumber, ...parseRow(row, columns), channelingType }); }
-    catch (error: any) { invalid.push({ row: rowNumber, reason: error.message }); }
+    try {
+      const relation = { rowNumber, ...parseRow(row, columns), channelingType };
+      const key = `${channelingType}\u0000${relation.injectorWellNo}\u0000${relation.producerWellNo}`;
+      if (relation.injectorWellNo === relation.producerWellNo) result.selfRelations.push(relation);
+      else if (seen.has(key)) result.duplicates.push(relation);
+      else { seen.add(key); result.valid.push(relation); }
+    } catch (error: any) { result.invalid.push({ row: rowNumber, reason: error.message }); }
   });
-  return { valid, duplicates: [], selfRelations: [], invalid };
+  return result;
 }
 
 export async function initChannelingRelationImportTables(db: DatabaseLike): Promise<void> {
