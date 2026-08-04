@@ -30,8 +30,8 @@ test("channeling relation recognition stays available before project selection a
   assert.ok(typeControls < selectedDetail, "type controls should render outside selected project detail");
   assert.match(component, /\/api\/channeling-relation-imports\/preview/);
   assert.match(component, /body\.append\('channelingType', channelingType\)/);
-  assert.match(component, /\/api\/channeling-relation-imports\/\$\{preview\.id\}\/confirm/);
-  assert.match(component, /JSON\.stringify\(\{ projectId: previewProjectId \}\)/);
+  assert.match(component, /\/api\/channeling-relation-imports\/\$\{batchId\}\/confirm/);
+  assert.match(component, /JSON\.stringify\(\{ projectId \}\)/);
   assert.match(component, /没有项目可确认，请先通过上方表单新建项目/);
   assert.match(component, /展开全部有效关系/);
   assert.match(component, /\{isAdmin && <div className="mt-4 flex flex-wrap items-end gap-3"/);
