@@ -1805,6 +1805,11 @@ async function initLocalDb() {
   await initMonthlyInjectionPlanImportTables(localDb);
   await initExternalTransferTables(localDb);
 
+  const userColumns = await localDb.all("PRAGMA table_info(users)");
+  if (!userColumns.some((column: any) => column.name === "name")) {
+    await localDb.exec("ALTER TABLE users ADD COLUMN name TEXT");
+  }
+
   // Bootstrap default admin if no users exist
   const userCount = await localDb.get("SELECT COUNT(*) as count FROM users");
   if (userCount.count === 0) {
@@ -1814,7 +1819,7 @@ async function initLocalDb() {
     );
     console.log("Default admin user created: admin/123456");
   }
-  await localDb.run("UPDATE users SET name = ? WHERE username = ? AND role = ? AND name = ?", ["系统管理员", "admin", "admin", "登录失败，请重试"]);
+  await localDb.run("UPDATE users SET name = ? WHERE username = ? AND role = ? AND (name IS NULL OR name = ?)", ["系统管理员", "admin", "admin", "登录失败，请重试"]);
 
   const latestLocalDate = await getLocalLatestDate();
   await setSyncMeta("last_local_data_date", latestLocalDate);
