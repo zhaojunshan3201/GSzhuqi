@@ -9,6 +9,7 @@ import { open } from 'sqlite';
 import {
   correctTrackingEvent,
   createTrackingEvent,
+  createTrackingEventUnlocked,
   getTrackingEvent,
   initChannelingTrackingTables,
   listTrackingEventLinks,
@@ -122,6 +123,50 @@ test('rejects invalid event fields and links', async () => {
       () => listTrackingEvents(db, { subjectType: 'project', subjectId: -1 }),
       /link is invalid/,
     );
+  });
+});
+
+test('reserves corrected events and supersedes links for the correction workflow', async () => {
+  await withStore(async (db) => {
+    const correctedPayload = { ...validInput(), eventType: 'corrected', supersedesEventId: 404 } as any;
+    await assert.rejects(
+      () => createTrackingEvent(db, correctedPayload),
+      /eventType corrected is reserved for corrections/,
+    );
+    await assert.rejects(
+      () => createTrackingEventUnlocked(db, correctedPayload),
+      /eventType corrected is reserved for corrections/,
+    );
+    await assert.rejects(
+      () => createTrackingEvent(db, { ...validInput(), supersedesEventId: 1 } as any),
+      /supersedesEventId is reserved for corrections/,
+    );
+    await assert.rejects(
+      () => createTrackingEventUnlocked(db, { ...validInput(), supersedesEventId: undefined } as any),
+      /supersedesEventId is reserved for corrections/,
+    );
+    assert.equal((await db.get('SELECT COUNT(*) AS count FROM channeling_tracking_events')).count, 0);
+  });
+});
+
+test('normalizes null evidence and rejects non-string evidence before opening a transaction', async () => {
+  await withStore(async (db) => {
+    const withoutEvidence = await createTrackingEvent(db, { ...validInput(), evidence: null });
+    assert.equal(withoutEvidence.evidence, '');
+
+    const exec = db.exec.bind(db);
+    let transactionStarts = 0;
+    db.exec = async (sql: string) => {
+      if (sql === 'BEGIN IMMEDIATE') transactionStarts += 1;
+      return exec(sql);
+    };
+    for (const evidence of [12, { note: 'invalid' }, ['invalid']]) {
+      await assert.rejects(
+        () => createTrackingEvent(db, { ...validInput(), evidence } as any),
+        /evidence is invalid/,
+      );
+    }
+    assert.equal(transactionStarts, 0);
   });
 });
 

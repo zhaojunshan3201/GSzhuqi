@@ -5,15 +5,14 @@ export type TrackingSubjectType = 'project' | 'relation' | 'well';
 export type TrackingEventType = 'discovered' | 'measure_planned' | 'executed' | 'evaluated' | 'reviewed' | 'closed' | 'recurred' | 'status_changed' | 'relation_confirmed' | 'relation_released' | 'corrected';
 export type TrackingLink = { subjectType: TrackingSubjectType; subjectId: number };
 export type TrackingEventInput = {
-  eventType: TrackingEventType;
+  eventType: Exclude<TrackingEventType, 'corrected'>;
   occurredOn: string;
   content: string;
-  evidence?: string;
+  evidence?: string | null;
   owner: string;
   createdBy: string;
   links: TrackingLink[];
   metricsSnapshot?: unknown;
-  supersedesEventId?: number | null;
 };
 export type TrackingEvent = {
   id: number;
@@ -70,6 +69,12 @@ function required(value: unknown, field: string): string {
   return value.trim();
 }
 
+function normalizeEvidence(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') throw new Error('evidence is invalid');
+  return value.trim();
+}
+
 function calendarDate(value: unknown): string {
   const date = typeof value === 'string' ? value : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -93,13 +98,25 @@ function dedupeLinks(links: TrackingLink[]): TrackingLink[] {
   return [...new Map(links.map((link) => [`${link.subjectType}:${link.subjectId}`, link])).values()];
 }
 
-function validateTrackingEvent(input: TrackingEventInput): void {
+type InternalTrackingEventInput = Omit<TrackingEventInput, 'eventType'> & {
+  eventType: TrackingEventType;
+  supersedesEventId?: number | null;
+};
+
+function validateTrackingEvent(input: InternalTrackingEventInput): void {
   if (!eventTypes.has(input.eventType)) throw new Error('eventType is invalid');
   calendarDate(input.occurredOn);
   required(input.content, 'content');
+  normalizeEvidence(input.evidence);
   required(input.owner, 'owner');
   required(input.createdBy, 'createdBy');
   validateLinks(input.links);
+}
+
+function validateNormalTrackingEvent(input: InternalTrackingEventInput): void {
+  if (input.eventType === 'corrected') throw new Error('eventType corrected is reserved for corrections');
+  if (Object.hasOwn(input, 'supersedesEventId')) throw new Error('supersedesEventId is reserved for corrections');
+  validateTrackingEvent(input);
 }
 
 async function validateTrackingSubjects(db: DatabaseLike, links: TrackingLink[]): Promise<void> {
@@ -111,7 +128,7 @@ async function validateTrackingSubjects(db: DatabaseLike, links: TrackingLink[])
   }
 }
 
-export async function createTrackingEventUnlocked(db: DatabaseLike, input: TrackingEventInput): Promise<TrackingEvent> {
+async function createTrackingEventRecordUnlocked(db: DatabaseLike, input: InternalTrackingEventInput): Promise<TrackingEvent> {
   validateTrackingEvent(input);
   const links = dedupeLinks(input.links);
   await validateTrackingSubjects(db, links);
@@ -119,7 +136,7 @@ export async function createTrackingEventUnlocked(db: DatabaseLike, input: Track
   const metricsSnapshotJson = input.metricsSnapshot === undefined ? null : JSON.stringify(input.metricsSnapshot);
   const result = await db.run(
     'INSERT INTO channeling_tracking_events (event_type, occurred_on, content, evidence, owner, metrics_snapshot_json, supersedes_event_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [input.eventType, input.occurredOn, input.content.trim(), input.evidence?.trim() || '', input.owner.trim(), metricsSnapshotJson, input.supersedesEventId ?? null, input.createdBy.trim(), now],
+    [input.eventType, input.occurredOn, input.content.trim(), normalizeEvidence(input.evidence), input.owner.trim(), metricsSnapshotJson, input.supersedesEventId ?? null, input.createdBy.trim(), now],
   );
   const eventId = Number(result.lastID);
   for (const link of links) {
@@ -131,7 +148,13 @@ export async function createTrackingEventUnlocked(db: DatabaseLike, input: Track
   return getTrackingEvent(db, eventId);
 }
 
-export function createTrackingEvent(db: DatabaseLike, input: TrackingEventInput): Promise<TrackingEvent> {
+export async function createTrackingEventUnlocked(db: DatabaseLike, input: TrackingEventInput): Promise<TrackingEvent> {
+  validateNormalTrackingEvent(input as InternalTrackingEventInput);
+  return createTrackingEventRecordUnlocked(db, input);
+}
+
+export async function createTrackingEvent(db: DatabaseLike, input: TrackingEventInput): Promise<TrackingEvent> {
+  validateNormalTrackingEvent(input as InternalTrackingEventInput);
   return withChannelingWriteLock(db, async () => {
     await db.exec('BEGIN IMMEDIATE');
     try {
@@ -193,16 +216,17 @@ export async function listTrackingEvents(db: DatabaseLike, subject: TrackingLink
   return Promise.all(rows.map((row) => getTrackingEvent(db, row.id)));
 }
 
-type TrackingCorrectionInput = Omit<TrackingEventInput, 'eventType' | 'links' | 'metricsSnapshot' | 'supersedesEventId'> & { reason: string };
+type TrackingCorrectionInput = Omit<TrackingEventInput, 'eventType' | 'links' | 'metricsSnapshot'> & { reason: string };
 
-export function correctTrackingEvent(db: DatabaseLike, id: number, input: TrackingCorrectionInput): Promise<TrackingEvent> {
+export async function correctTrackingEvent(db: DatabaseLike, id: number, input: TrackingCorrectionInput): Promise<TrackingEvent> {
+  normalizeEvidence(input.evidence);
   return withChannelingWriteLock(db, async () => {
     await db.exec('BEGIN IMMEDIATE');
     try {
       const reason = required(input.reason, 'reason');
       const original = await getTrackingEvent(db, id);
       if (original.voidedAt) throw new Error('Tracking event already corrected');
-      const corrected = await createTrackingEventUnlocked(db, {
+      const corrected = await createTrackingEventRecordUnlocked(db, {
         ...input,
         eventType: 'corrected',
         links: original.links,
