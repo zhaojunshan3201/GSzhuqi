@@ -62,8 +62,9 @@ import { createInjectionProject, initInjectionProjectTables, listInjectionProjec
 import { createChannelingProject, createChannelingRelation, deleteChannelingProject, deleteChannelingRelation, initChannelingProjectTables, listChannelingGovernanceTodos, listChannelingProjects, listChannelingRelations, updateChannelingProject, updateChannelingRelation, type ChannelingType } from "./src/lib/channelingProjectStore.ts";
 import { confirmChannelingRelationImport, createChannelingRelationPreview, getChannelingRelationImport, initChannelingRelationImportTables, listChannelingRelationImports, parseChannelingRelationRows } from "./src/lib/channelingRelationImport.ts";
 import { createWellProfile, getWellProfile, initChannelingWellTables, listWellProfiles, updateWellProfile } from "./src/lib/channelingWellStore.ts";
-import { correctTrackingEvent, createTrackingEvent, initChannelingTrackingTables, listTrackingEvents, type TrackingSubjectType } from "./src/lib/channelingTrackingStore.ts";
+import { correctTrackingEvent, createTrackingEvent, createTrackingEventUnlocked, initChannelingTrackingTables, listTrackingEvents, type TrackingSubjectType } from "./src/lib/channelingTrackingStore.ts";
 import { getProjectSummary, getRelationMetrics, getWellMetrics, initChannelingMetricIndexes, validateComparisonRange, validateMetricRange } from "./src/lib/channelingMetrics.ts";
+import { withChannelingWriteLock } from "./src/lib/channelingWriteQueue.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -4750,7 +4751,7 @@ app.post("/api/register", async (req, res) => {
     const message = String(error?.message || "");
     if (message.endsWith("not found")) return 404;
     if (message.includes("changed; refresh and retry") || message.includes("already corrected")) return 409;
-    if (message === "eventType corrected is reserved for corrections") return 400;
+    if (/^eventType \w+ is reserved for (dedicated tracking flows|corrections)$/.test(message) || message === "metricsSnapshot is reserved for server-generated events") return 400;
     if (message.includes(" is invalid") || message.includes(" is required") || message.includes("must be") || message.includes("date range")) return 400;
     return 500;
   };
@@ -4791,12 +4792,36 @@ app.post("/api/register", async (req, res) => {
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) throw new Error("body is invalid");
     return value as Record<string, any>;
   };
+  type ChannelingWellAssociation = { roles: Array<"injector" | "producer">; relationCount: number; projectCount: number };
+  const loadChannelingWellAssociations = async (id?: number): Promise<Map<number, ChannelingWellAssociation>> => {
+    const rows = await localDb.all(`SELECT w.id,
+      (EXISTS(SELECT 1 FROM channeling_relations r WHERE UPPER(TRIM(r.injection_well)) = w.normalized_well_no)
+        OR EXISTS(SELECT 1 FROM injection_stage_rows s WHERE UPPER(TRIM(s.well_no)) = w.normalized_well_no)) AS injector,
+      (EXISTS(SELECT 1 FROM channeling_relations r WHERE UPPER(TRIM(r.production_well)) = w.normalized_well_no)
+        OR EXISTS(SELECT 1 FROM production p WHERE UPPER(TRIM(p.jh)) = w.normalized_well_no)) AS producer,
+      (SELECT COUNT(*) FROM channeling_relations r WHERE UPPER(TRIM(r.injection_well)) = w.normalized_well_no OR UPPER(TRIM(r.production_well)) = w.normalized_well_no) AS relationCount,
+      (SELECT COUNT(DISTINCT r.project_id) FROM channeling_relations r WHERE UPPER(TRIM(r.injection_well)) = w.normalized_well_no OR UPPER(TRIM(r.production_well)) = w.normalized_well_no) AS projectCount
+      FROM channeling_well_profiles w${id === undefined ? "" : " WHERE w.id = ?"}`, id === undefined ? [] : [id]);
+    return new Map(rows.map((row: any): [number, ChannelingWellAssociation] => {
+      const roles: Array<"injector" | "producer"> = [];
+      if (row.injector) roles.push("injector");
+      if (row.producer) roles.push("producer");
+      return [row.id, { roles, relationCount: Number(row.relationCount), projectCount: Number(row.projectCount) }];
+    }));
+  };
 
   app.get("/api/channeling-wells", async (req, res) => {
     try {
       const query = singleChannelingQuery(req.query.query, "query");
       const block = singleChannelingQuery(req.query.block, "block");
-      res.json({ success: true, data: await listWellProfiles(localDb, { query, block }) });
+      const role = singleChannelingQuery(req.query.role, "role");
+      if (role !== undefined && role !== "injector" && role !== "producer") throw new Error("role is invalid");
+      const requestedRole = role as "injector" | "producer" | undefined;
+      const profiles = await listWellProfiles(localDb, { query, block });
+      const associations = await loadChannelingWellAssociations();
+      const data = profiles.map((profile) => ({ ...profile, roles: associations.get(profile.id)?.roles ?? [] }))
+        .filter((profile) => requestedRole === undefined || profile.roles.includes(requestedRole));
+      res.json({ success: true, data });
     } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-wells", async (req, res) => {
@@ -4810,7 +4835,12 @@ app.post("/api/register", async (req, res) => {
     } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.get("/api/channeling-wells/:id", async (req, res) => {
-    try { res.json({ success: true, data: await getWellProfile(localDb, positiveChannelingId(req.params.id)) }); }
+    try {
+      const id = positiveChannelingId(req.params.id);
+      const profile = await getWellProfile(localDb, id);
+      const associations = await loadChannelingWellAssociations(id);
+      res.json({ success: true, data: { ...profile, ...associations.get(id) } });
+    }
     catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.patch("/api/channeling-wells/:id", async (req, res) => {
@@ -4867,8 +4897,14 @@ app.post("/api/register", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
     try {
       const body = plainChannelingBody(req.body);
+      const manualEventTypes = new Set(["discovered", "measure_planned", "executed", "reviewed", "closed", "recurred"]);
+      const reservedEventTypes = new Set(["evaluated", "status_changed", "relation_confirmed", "relation_released", "corrected"]);
+      if (body.eventType === "corrected") throw new Error("eventType corrected is reserved for corrections");
+      if (reservedEventTypes.has(body.eventType)) throw new Error(`eventType ${body.eventType} is reserved for dedicated tracking flows`);
+      if (!manualEventTypes.has(body.eventType)) throw new Error("eventType is invalid");
+      if (Object.hasOwn(body, "metricsSnapshot")) throw new Error("metricsSnapshot is reserved for server-generated events");
       const createdBy = authenticatedUser(req)!.username;
-      res.status(201).json({ success: true, data: await createTrackingEvent(localDb, { eventType: body.eventType, occurredOn: body.occurredOn, content: body.content, evidence: body.evidence, owner: body.owner, links: body.links, metricsSnapshot: body.metricsSnapshot, createdBy }) });
+      res.status(201).json({ success: true, data: await createTrackingEvent(localDb, { eventType: body.eventType, occurredOn: body.occurredOn, content: body.content, evidence: body.evidence, owner: body.owner, links: body.links, createdBy }) });
     } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-tracking-events/:id/corrections", async (req, res) => {
@@ -4890,18 +4926,29 @@ app.post("/api/register", async (req, res) => {
       if (typeof body.owner !== "string" || !body.owner.trim()) throw new Error("owner is required");
       const rangeBody = plainChannelingBody(body.range);
       const range = channelingComparisonRange(rangeBody);
-      const relation = await localDb.get("SELECT * FROM channeling_relations WHERE id = ?", [relationId]);
-      if (!relation) throw new Error("Relation not found");
-      const profiles = await localDb.all("SELECT id, normalized_well_no FROM channeling_well_profiles WHERE normalized_well_no IN (UPPER(TRIM(?)), UPPER(TRIM(?)))", [relation.injection_well, relation.production_well]);
-      const injectionProfile = profiles.find((profile: any) => profile.normalized_well_no === String(relation.injection_well).trim().toUpperCase());
-      const productionProfile = profiles.find((profile: any) => profile.normalized_well_no === String(relation.production_well).trim().toUpperCase());
-      if (!injectionProfile || !productionProfile) throw new Error("Well profile not found");
-      const metricsSnapshot = await getRelationMetrics(localDb, relationId, range);
       const createdBy = authenticatedUser(req)!.username;
-      const data = await createTrackingEvent(localDb, {
-        eventType: "evaluated", occurredOn: body.occurredOn, content: body.conclusion, evidence: body.evidence,
-        owner: body.owner, createdBy, metricsSnapshot,
-        links: [{ subjectType: "project", subjectId: relation.project_id }, { subjectType: "relation", subjectId: relationId }, { subjectType: "well", subjectId: injectionProfile.id }, { subjectType: "well", subjectId: productionProfile.id }],
+      const data = await withChannelingWriteLock(localDb, async () => {
+        await localDb.exec("BEGIN IMMEDIATE");
+        try {
+          const relation = await localDb.get("SELECT * FROM channeling_relations WHERE id = ?", [relationId]);
+          if (!relation) throw new Error("Relation not found");
+          const profiles = await localDb.all("SELECT id, normalized_well_no FROM channeling_well_profiles WHERE normalized_well_no IN (UPPER(TRIM(?)), UPPER(TRIM(?)))", [relation.injection_well, relation.production_well]);
+          const injectionProfile = profiles.find((profile: any) => profile.normalized_well_no === String(relation.injection_well).trim().toUpperCase());
+          const productionProfile = profiles.find((profile: any) => profile.normalized_well_no === String(relation.production_well).trim().toUpperCase());
+          if (!injectionProfile || !productionProfile) throw new Error("Well profile not found");
+          const metricsSnapshot = await getRelationMetrics(localDb, relationId, range);
+          const event = await createTrackingEventUnlocked(localDb, {
+            eventType: "evaluated", occurredOn: body.occurredOn, content: body.conclusion, evidence: body.evidence,
+            owner: body.owner, createdBy, metricsSnapshot,
+            links: [{ subjectType: "project", subjectId: relation.project_id }, { subjectType: "relation", subjectId: relationId }, { subjectType: "well", subjectId: injectionProfile.id }, { subjectType: "well", subjectId: productionProfile.id }],
+          });
+          if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-evaluation-after-event") === "1") throw new Error("forced evaluation transaction error");
+          await localDb.exec("COMMIT");
+          return event;
+        } catch (error) {
+          await localDb.exec("ROLLBACK");
+          throw error;
+        }
       });
       res.status(201).json({ success: true, data });
     } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }

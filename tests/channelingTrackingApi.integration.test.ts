@@ -24,7 +24,7 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
   const port = 39000 + Math.floor(Math.random() * 1000);
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: databaseFile, AUTH_TOKEN_SECRET: secret },
+    env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: databaseFile, AUTH_TOKEN_SECRET: secret, CHANNELING_TEST_FORCE_ERROR: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let db: Awaited<ReturnType<typeof open>> | undefined;
@@ -82,10 +82,17 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     await db.run("INSERT INTO production (jh, rq, liquid, oil, water_cut, block) VALUES (' p-1 ', '2026-01-01', 20, 10, .5, 'A'), ('P-1', '2026-01-02', 30, 15, .5, 'A'), ('P-1', '2026-01-03', 40, 20, .5, 'A')");
     const stageImport = await db.run("INSERT INTO injection_selection_imports (source_type, source_file, imported_at, row_count, skipped_row_count, error_messages_json) VALUES ('stage', 'fixture.xlsx', '2026-01-01T00:00:00.000Z', 1, 0, '[]')");
     await db.run("INSERT INTO injection_stage_rows (import_id, well_no, cycle_no, start_date, end_date, steam_volume, temperature, pressure, dryness, production_hours, raw_json) VALUES (?, ' i-1 ', 1, '2026-01-01', '2026-01-03', 100, 250, 12, .7, 48, '{}')", [stageImport.lastID]);
+    await db.run("INSERT INTO injection_stage_rows (import_id, well_no, cycle_no, start_date, end_date, steam_volume, raw_json) VALUES (?, 'p-1', 2, '2026-01-01', '2026-01-03', 50, '{}')", [stageImport.lastID]);
 
     const wells = await request('/api/channeling-wells?query=i-1&block=A');
-    assert.equal(wells.status, 200); assert.equal((await json(wells)).length, 1);
-    assert.equal((await request(`/api/channeling-wells/${injector.id}`)).status, 200);
+    assert.equal(wells.status, 200); assert.deepEqual((await json(wells))[0].roles, ['injector']);
+    const injectorWells = await json(await request('/api/channeling-wells?role=injector'));
+    assert.deepEqual(injectorWells.map((well: any) => well.normalizedWellNo).sort(), ['I-1', 'P-1']);
+    const producerWells = await json(await request('/api/channeling-wells?role=producer'));
+    assert.deepEqual(producerWells.map((well: any) => well.normalizedWellNo), ['P-1']);
+    const producerDetail = await json(await request(`/api/channeling-wells/${producer.id}`));
+    assert.deepEqual(producerDetail.roles, ['injector', 'producer']);
+    assert.equal(producerDetail.relationCount, 1); assert.equal(producerDetail.projectCount, 1);
     const related = await json(await request(`/api/channeling-wells/${injector.id}/relations`));
     assert.equal(related.length, 1); assert.equal(related[0].project.id, project.id); assert.equal(related[0].project.name, 'Tracking project');
 
@@ -110,15 +117,21 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
       `/api/channeling-relations/${relation.id}/detail?beforeStart=2026-01-02&splitDate=2026-01-02&afterEnd=2026-01-02`,
       '/api/channeling-wells/no',
       '/api/channeling-wells/9007199254740992',
+      '/api/channeling-wells?role=invalid',
+      '/api/channeling-wells?role=injector&role=producer',
       '/api/channeling-tracking-events?subjectType=project&subjectType=well&subjectId=1',
       '/api/channeling-tracking-events?subjectType=bad&subjectId=1',
     ]) assert.equal((await request(url)).status, 400, url);
     for (const url of ['/api/channeling-wells/99999', '/api/channeling-wells/99999/metrics?start=2026-01-01&end=2026-01-03', '/api/channeling-projects/99999/summary?start=2026-01-01&end=2026-01-03', '/api/channeling-relations/99999/detail?beforeStart=2026-01-01&splitDate=2026-01-02&afterEnd=2026-01-03']) assert.equal((await request(url)).status, 404, url);
 
     const eventCountBeforeReserved = (await db.get('SELECT COUNT(*) AS count FROM channeling_tracking_events')).count;
-    const reservedEventResponse = await request('/api/channeling-tracking-events', { method: 'POST', headers: admin, body: JSON.stringify({ eventType: 'corrected', occurredOn: '2026-01-01', content: 'invalid direct correction', owner: 'alice', links: [{ subjectType: 'project', subjectId: project.id }] }) });
-    assert.equal(reservedEventResponse.status, 400);
-    assert.match((await reservedEventResponse.json() as any).message, /reserved for corrections/);
+    for (const eventType of ['evaluated', 'status_changed', 'relation_confirmed', 'relation_released', 'corrected']) {
+      const reservedEventResponse = await request('/api/channeling-tracking-events', { method: 'POST', headers: admin, body: JSON.stringify({ eventType, occurredOn: '2026-01-01', content: 'invalid reserved event', owner: 'alice', links: [{ subjectType: 'project', subjectId: project.id }] }) });
+      assert.equal(reservedEventResponse.status, 400, eventType);
+      assert.match((await reservedEventResponse.json() as any).message, eventType === 'corrected' ? /reserved for corrections/ : /reserved for dedicated tracking flows/);
+    }
+    const snapshotResponse = await request('/api/channeling-tracking-events', { method: 'POST', headers: admin, body: JSON.stringify({ eventType: 'discovered', occurredOn: '2026-01-01', content: 'client snapshot', owner: 'alice', metricsSnapshot: null, links: [{ subjectType: 'project', subjectId: project.id }] }) });
+    assert.equal(snapshotResponse.status, 400); assert.match((await snapshotResponse.json() as any).message, /metricsSnapshot.*reserved/);
     assert.equal((await db.get('SELECT COUNT(*) AS count FROM channeling_tracking_events')).count, eventCountBeforeReserved);
 
     const eventResponse = await request('/api/channeling-tracking-events', { method: 'POST', headers: admin, body: JSON.stringify({ eventType: 'discovered', occurredOn: '2026-01-01', content: 'found', owner: 'alice', createdBy: 'attacker', links: [{ subjectType: 'project', subjectId: project.id }] }) });
@@ -136,6 +149,10 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     assert.equal(evaluation.eventType, 'evaluated'); assert.equal(evaluation.createdBy, 'admin');
     assert.equal(evaluation.metricsSnapshot.comparison.oil.afterAverage, 20);
     assert.deepEqual(evaluation.links, [{ subjectType: 'project', subjectId: project.id }, { subjectType: 'relation', subjectId: relation.id }, { subjectType: 'well', subjectId: injector.id }, { subjectType: 'well', subjectId: producer.id }]);
+    const evaluationCountBeforeFailure = (await db.get("SELECT COUNT(*) AS count FROM channeling_tracking_events WHERE event_type = 'evaluated'")).count;
+    const forcedEvaluation = await request(`/api/channeling-relations/${relation.id}/evaluations`, { method: 'POST', headers: { ...admin, 'x-channeling-force-evaluation-after-event': '1' }, body: JSON.stringify({ occurredOn: '2026-01-04', conclusion: 'must rollback', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) });
+    assert.equal(forcedEvaluation.status, 500);
+    assert.equal((await db.get("SELECT COUNT(*) AS count FROM channeling_tracking_events WHERE event_type = 'evaluated'")).count, evaluationCountBeforeFailure);
 
     const missingRelationResponse = await request(`/api/channeling-projects/${project.id}/relations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...relationBody, injectionWell: 'missing-i', productionWell: 'missing-p' }) });
     const missingRelation = await json(missingRelationResponse);
