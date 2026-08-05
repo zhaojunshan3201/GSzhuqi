@@ -47,6 +47,41 @@ test('creates a profile with defaults and reuses the normalized well number', as
   });
 });
 
+test('reuses one profile when two database connections create the same normalized well concurrently', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'channeling-well-concurrent-'));
+  const filename = path.join(directory, 'test.db');
+  const firstDb = await open({ filename, driver: sqlite3.Database });
+  const secondDb = await open({ filename, driver: sqlite3.Database });
+  try {
+    await initChannelingWellTables(firstDb);
+    let waiting = 0;
+    let release!: () => void;
+    const bothSelected = new Promise<void>((resolve) => { release = resolve; });
+    for (const db of [firstDb, secondDb]) {
+      const get = db.get.bind(db);
+      db.get = async (sql: string, params?: unknown[]) => {
+        const row = await get(sql, params);
+        if (sql.includes('normalized_well_no') && !row) {
+          waiting += 1;
+          if (waiting === 2) release();
+          await bothSelected;
+        }
+        return row;
+      };
+    }
+
+    const [first, second] = await Promise.all([
+      createWellProfile(firstDb, { wellNo: ' gao3-a ' }),
+      createWellProfile(secondDb, { wellNo: 'GAO3-A' }),
+    ]);
+    assert.equal(first.id, second.id);
+  } finally {
+    await firstDb.close();
+    await secondDb.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('lists profiles newest first with well query and exact block filters', async () => {
   await withStore(async (db) => {
     const first = await createWellProfile(db, { wellNo: 'gao3-A', block: 'A区', owner: '李工' });
@@ -60,6 +95,18 @@ test('lists profiles newest first with well query and exact block filters', asyn
     assert.deepEqual((await listWellProfiles(db, { query: ' gAo ' })).map((profile) => profile.id), [second.id, third.id, first.id]);
     assert.deepEqual((await listWellProfiles(db, { query: '4-b' })).map((profile) => profile.id), [second.id]);
     assert.deepEqual((await listWellProfiles(db, { block: 'A区' })).map((profile) => profile.id), [first.id]);
+  });
+});
+
+test('treats percent and underscore as literal well query characters', async () => {
+  await withStore(async (db) => {
+    const percent = await createWellProfile(db, { wellNo: 'G%1' });
+    await createWellProfile(db, { wellNo: 'GAB1' });
+    const underscore = await createWellProfile(db, { wellNo: 'G_2' });
+    await createWellProfile(db, { wellNo: 'GA2' });
+
+    assert.deepEqual((await listWellProfiles(db, { query: '%' })).map((profile) => profile.id), [percent.id]);
+    assert.deepEqual((await listWellProfiles(db, { query: '_' })).map((profile) => profile.id), [underscore.id]);
   });
 });
 
@@ -81,6 +128,23 @@ test('updates block and owner using optimistic concurrency', async () => {
     assert.equal(updated.block, 'B区');
     assert.equal(updated.owner, '王工');
     assert.notEqual(updated.updatedAt, expectedUpdatedAt);
+  });
+});
+
+test('detects a successful guarded update without relying on run changes', async () => {
+  await withStore(async (db) => {
+    const created = await createWellProfile(db, { wellNo: 'G1', block: 'A区', owner: '李工' });
+    const expectedUpdatedAt = '2026-08-04T00:00:00.000Z';
+    await db.run('UPDATE channeling_well_profiles SET updated_at = ? WHERE id = ?', [expectedUpdatedAt, created.id]);
+    const run = db.run.bind(db);
+    db.run = async (sql: string, params?: unknown[]) => {
+      const result = await run(sql, params);
+      return { lastID: result.lastID };
+    };
+
+    const updated = await updateWellProfile(db, created.id, { block: 'B区', owner: '王工', updatedAt: expectedUpdatedAt });
+    assert.equal(updated.block, 'B区');
+    assert.equal(updated.owner, '王工');
   });
 });
 

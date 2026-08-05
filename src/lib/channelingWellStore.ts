@@ -40,17 +40,19 @@ const mapProfile = (row: any): ChannelingWellProfile => ({
   updatedAt: row.updated_at,
 });
 
+const escapeLike = (value: string): string => value.replace(/[\\%_]/g, '\\$&');
+
 export async function ensureWellProfileUnlocked(db: DatabaseLike, input: ChannelingWellProfileInput): Promise<ChannelingWellProfile> {
   const normalizedWellNo = normalizeWellNo(input.wellNo);
   const existing = await db.get('SELECT * FROM channeling_well_profiles WHERE normalized_well_no = ?', [normalizedWellNo]);
   if (existing) return mapProfile(existing);
 
   const now = new Date().toISOString();
-  const result = await db.run(
-    'INSERT INTO channeling_well_profiles (well_no, normalized_well_no, block, owner, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+  await db.run(
+    'INSERT INTO channeling_well_profiles (well_no, normalized_well_no, block, owner, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(normalized_well_no) DO NOTHING',
     [input.wellNo.trim(), normalizedWellNo, input.block?.trim() || '', input.owner?.trim() || '', now, now],
   );
-  return mapProfile(await db.get('SELECT * FROM channeling_well_profiles WHERE id = ?', [result.lastID]));
+  return mapProfile(await db.get('SELECT * FROM channeling_well_profiles WHERE normalized_well_no = ?', [normalizedWellNo]));
 }
 
 export function createWellProfile(db: DatabaseLike, input: ChannelingWellProfileInput): Promise<ChannelingWellProfile> {
@@ -64,8 +66,8 @@ export async function listWellProfiles(
   const clauses: string[] = [];
   const params: unknown[] = [];
   if (filters.query?.trim()) {
-    clauses.push('(normalized_well_no LIKE ? OR well_no LIKE ?)');
-    params.push(`%${normalizeWellNo(filters.query)}%`, `%${filters.query.trim()}%`);
+    clauses.push("(normalized_well_no LIKE ? ESCAPE '\\' OR well_no LIKE ? ESCAPE '\\')");
+    params.push(`%${escapeLike(normalizeWellNo(filters.query))}%`, `%${escapeLike(filters.query.trim())}%`);
   }
   if (filters.block?.trim()) {
     clauses.push('block = ?');
@@ -87,18 +89,22 @@ export function updateWellProfile(
   input: { block: string; owner: string; updatedAt: string },
 ): Promise<ChannelingWellProfile> {
   return withChannelingWriteLock(db, async () => {
+    const current = await db.get('SELECT updated_at FROM channeling_well_profiles WHERE id = ?', [id]);
+    if (!current) throw new Error('Well profile not found');
+    if (current.updated_at !== input.updatedAt) throw new Error('Well profile changed; refresh and retry');
     const wallClock = new Date().getTime();
-    const previousToken = Date.parse(input.updatedAt);
+    const previousToken = Date.parse(current.updated_at);
     const nextToken = Number.isNaN(previousToken) ? wallClock : Math.max(wallClock, previousToken + 1);
     const now = new Date(nextToken).toISOString();
-    const result = await db.run(
+    await db.run(
       'UPDATE channeling_well_profiles SET block = ?, owner = ?, updated_at = ? WHERE id = ? AND updated_at = ?',
       [input.block.trim(), input.owner.trim(), now, id, input.updatedAt],
-    ) as { changes?: number };
-    if (result.changes !== 1) {
+    );
+    const updated = await db.get('SELECT * FROM channeling_well_profiles WHERE id = ? AND updated_at = ?', [id, now]);
+    if (!updated) {
       if (!await db.get('SELECT id FROM channeling_well_profiles WHERE id = ?', [id])) throw new Error('Well profile not found');
       throw new Error('Well profile changed; refresh and retry');
     }
-    return mapProfile(await db.get('SELECT * FROM channeling_well_profiles WHERE id = ?', [id]));
+    return mapProfile(updated);
   });
 }
