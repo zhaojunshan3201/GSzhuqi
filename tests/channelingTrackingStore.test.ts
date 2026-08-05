@@ -149,6 +149,18 @@ test('reserves corrected events and supersedes links for the correction workflow
   });
 });
 
+test('rejects inherited correction metadata without persisting a normal event', async () => {
+  await withStore(async (db) => {
+    const input = Object.assign(Object.create({ supersedesEventId: 999 }), validInput()) as TrackingEventInput;
+
+    await assert.rejects(
+      () => createTrackingEvent(db, input),
+      /supersedesEventId is reserved for corrections/,
+    );
+    assert.equal((await db.get('SELECT COUNT(*) AS count FROM channeling_tracking_events')).count, 0);
+  });
+});
+
 test('normalizes null evidence and rejects non-string evidence before opening a transaction', async () => {
   await withStore(async (db) => {
     const withoutEvidence = await createTrackingEvent(db, { ...validInput(), evidence: null });

@@ -115,7 +115,7 @@ function validateTrackingEvent(input: InternalTrackingEventInput): void {
 
 function validateNormalTrackingEvent(input: InternalTrackingEventInput): void {
   if (input.eventType === 'corrected') throw new Error('eventType corrected is reserved for corrections');
-  if (Object.hasOwn(input, 'supersedesEventId')) throw new Error('supersedesEventId is reserved for corrections');
+  if ('supersedesEventId' in Object(input)) throw new Error('supersedesEventId is reserved for corrections');
   validateTrackingEvent(input);
 }
 
@@ -150,7 +150,17 @@ async function createTrackingEventRecordUnlocked(db: DatabaseLike, input: Intern
 
 export async function createTrackingEventUnlocked(db: DatabaseLike, input: TrackingEventInput): Promise<TrackingEvent> {
   validateNormalTrackingEvent(input as InternalTrackingEventInput);
-  return createTrackingEventRecordUnlocked(db, input);
+  return createTrackingEventRecordUnlocked(db, {
+    eventType: input.eventType,
+    occurredOn: input.occurredOn,
+    content: input.content,
+    evidence: input.evidence,
+    owner: input.owner,
+    createdBy: input.createdBy,
+    links: input.links,
+    metricsSnapshot: input.metricsSnapshot,
+    supersedesEventId: null,
+  });
 }
 
 export async function createTrackingEvent(db: DatabaseLike, input: TrackingEventInput): Promise<TrackingEvent> {
