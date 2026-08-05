@@ -4750,6 +4750,7 @@ app.post("/api/register", async (req, res) => {
     const message = String(error?.message || "");
     if (message.endsWith("not found")) return 404;
     if (message.includes("changed; refresh and retry") || message.includes("already corrected")) return 409;
+    if (message === "eventType corrected is reserved for corrections") return 400;
     if (message.includes(" is invalid") || message.includes(" is required") || message.includes("must be") || message.includes("date range")) return 400;
     return 500;
   };

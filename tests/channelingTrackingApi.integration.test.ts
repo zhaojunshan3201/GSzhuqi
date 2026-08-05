@@ -115,6 +115,12 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     ]) assert.equal((await request(url)).status, 400, url);
     for (const url of ['/api/channeling-wells/99999', '/api/channeling-wells/99999/metrics?start=2026-01-01&end=2026-01-03', '/api/channeling-projects/99999/summary?start=2026-01-01&end=2026-01-03', '/api/channeling-relations/99999/detail?beforeStart=2026-01-01&splitDate=2026-01-02&afterEnd=2026-01-03']) assert.equal((await request(url)).status, 404, url);
 
+    const eventCountBeforeReserved = (await db.get('SELECT COUNT(*) AS count FROM channeling_tracking_events')).count;
+    const reservedEventResponse = await request('/api/channeling-tracking-events', { method: 'POST', headers: admin, body: JSON.stringify({ eventType: 'corrected', occurredOn: '2026-01-01', content: 'invalid direct correction', owner: 'alice', links: [{ subjectType: 'project', subjectId: project.id }] }) });
+    assert.equal(reservedEventResponse.status, 400);
+    assert.match((await reservedEventResponse.json() as any).message, /reserved for corrections/);
+    assert.equal((await db.get('SELECT COUNT(*) AS count FROM channeling_tracking_events')).count, eventCountBeforeReserved);
+
     const eventResponse = await request('/api/channeling-tracking-events', { method: 'POST', headers: admin, body: JSON.stringify({ eventType: 'discovered', occurredOn: '2026-01-01', content: 'found', owner: 'alice', createdBy: 'attacker', links: [{ subjectType: 'project', subjectId: project.id }] }) });
     assert.equal(eventResponse.status, 201);
     const event = await json(eventResponse); assert.equal(event.createdBy, 'admin');
