@@ -60,6 +60,13 @@ export function normalizeMetricWellNo(value: string): string {
   return value.trim().toUpperCase();
 }
 
+export async function initChannelingMetricIndexes(db: DatabaseLike): Promise<void> {
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_production_normalized_well_date ON production(UPPER(TRIM(jh)), rq);
+    CREATE INDEX IF NOT EXISTS idx_injection_stage_normalized_well_date ON injection_stage_rows(UPPER(TRIM(well_no)), start_date, end_date);
+    CREATE INDEX IF NOT EXISTS idx_channeling_relations_injection_normalized_well ON channeling_relations(UPPER(TRIM(injection_well)));
+    CREATE INDEX IF NOT EXISTS idx_channeling_relations_production_normalized_well ON channeling_relations(UPPER(TRIM(production_well)));`);
+}
+
 function average(values: unknown[]): MetricPoint {
   const valid = values.map(finiteNumber).filter((value): value is number => value !== null);
   return { average: valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null, validDays: valid.length };
@@ -138,20 +145,28 @@ export function compareProductionWindows(rows: Array<Partial<ProductionRow> & { 
 
 async function loadProductionRows(db: DatabaseLike, normalizedWellNo: string, start: string, end: string): Promise<ProductionRow[]> {
   return (await db.all(
-    'SELECT rq AS date, oil, liquid, water_cut AS waterCut, block FROM production WHERE UPPER(TRIM(jh)) = ? AND rq BETWEEN ? AND ? ORDER BY rq ASC',
+    `WITH ranked_production AS (
+      SELECT rq AS date, oil, liquid, water_cut AS waterCut, block,
+        ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(jh)), rq ORDER BY rowid DESC) AS rn
+      FROM production WHERE UPPER(TRIM(jh)) = ? AND rq BETWEEN ? AND ?
+    ) SELECT date, oil, liquid, waterCut, block FROM ranked_production WHERE rn = 1 ORDER BY date ASC`,
     [normalizedWellNo, start, end],
   )).map(productionRow);
 }
 
 async function loadProductionHistory(db: DatabaseLike, normalizedWellNo: string, end: string): Promise<{ rows: ProductionRow[]; latest: ProductionLatest | null }> {
-  const row = await db.get(`SELECT
-    MAX(rq) AS date,
-    (SELECT oil FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ? AND typeof(oil) IN ('integer', 'real') ORDER BY rq DESC LIMIT 1) AS oil,
-    (SELECT liquid FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ? AND typeof(liquid) IN ('integer', 'real') ORDER BY rq DESC LIMIT 1) AS liquid,
-    (SELECT water_cut FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ? AND typeof(water_cut) IN ('integer', 'real') ORDER BY rq DESC LIMIT 1) AS waterCut,
-    (SELECT block FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ? AND block IS NOT NULL ORDER BY rq DESC LIMIT 1) AS block
-    FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ?`,
-  [normalizedWellNo, end, normalizedWellNo, end, normalizedWellNo, end, normalizedWellNo, end, normalizedWellNo, end]);
+  const row = await db.get(`WITH ranked_production AS (
+      SELECT rq AS date, oil, liquid, water_cut AS waterCut, block,
+        ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(jh)), rq ORDER BY rowid DESC) AS rn
+      FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ?
+    ), canonical_production AS (
+      SELECT date, oil, liquid, waterCut, block FROM ranked_production WHERE rn = 1
+    ) SELECT MAX(date) AS date,
+      (SELECT oil FROM canonical_production WHERE typeof(oil) IN ('integer', 'real') ORDER BY date DESC LIMIT 1) AS oil,
+      (SELECT liquid FROM canonical_production WHERE typeof(liquid) IN ('integer', 'real') ORDER BY date DESC LIMIT 1) AS liquid,
+      (SELECT waterCut FROM canonical_production WHERE typeof(waterCut) IN ('integer', 'real') ORDER BY date DESC LIMIT 1) AS waterCut,
+      (SELECT block FROM canonical_production WHERE block IS NOT NULL ORDER BY date DESC LIMIT 1) AS block
+    FROM canonical_production`, [normalizedWellNo, end]);
   if (!calendarDate(row?.date)) return { rows: [], latest: null };
   return {
     rows: await loadProductionRows(db, normalizedWellNo, shiftDate(row.date, -29), row.date),
@@ -249,14 +264,53 @@ export type ProjectSummary = {
 async function evaluationSummary(db: DatabaseLike, projectId: number): Promise<{ count: number; conclusion: string | null }> {
   const tables = await db.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('channeling_tracking_events', 'channeling_tracking_event_links')");
   if (tables.length < 2) return { count: 0, conclusion: null };
-  const rows = await db.all(`SELECT DISTINCT e.id, e.occurred_on AS occurredOn, e.content
-    FROM channeling_tracking_events e
-    JOIN channeling_tracking_event_links l ON l.event_id = e.id
-    WHERE e.event_type = ? AND e.voided_at IS NULL AND (
-      (l.subject_type = ? AND l.subject_id = ?)
-      OR (l.subject_type = ? AND l.subject_id IN (SELECT id FROM channeling_relations WHERE project_id = ?))
-    ) ORDER BY e.occurred_on DESC, e.id DESC`, ['evaluated', 'project', projectId, 'relation', projectId]);
-  return { count: rows.length, conclusion: rows.length && typeof rows[0].content === 'string' ? rows[0].content : null };
+  const rows = await db.all(`WITH RECURSIVE evaluation_lineage(root_id, id, occurred_on, content, created_at, voided_at) AS (
+      SELECT e.id, e.id, e.occurred_on, e.content, e.created_at, e.voided_at
+      FROM channeling_tracking_events e
+      WHERE e.event_type = ? AND EXISTS (
+        SELECT 1 FROM channeling_tracking_event_links l WHERE l.event_id = e.id AND (
+          (l.subject_type = ? AND l.subject_id = ?)
+          OR (l.subject_type = ? AND l.subject_id IN (SELECT id FROM channeling_relations WHERE project_id = ?))
+        )
+      )
+      UNION ALL
+      SELECT parent.root_id, child.id, child.occurred_on, child.content, child.created_at, child.voided_at
+      FROM evaluation_lineage parent
+      JOIN channeling_tracking_events child ON child.supersedes_event_id = parent.id
+    ) SELECT root_id, id, occurred_on AS occurredOn, content, created_at AS createdAt
+    FROM evaluation_lineage lineage
+    WHERE voided_at IS NULL AND NOT EXISTS (
+      SELECT 1 FROM channeling_tracking_events child WHERE child.supersedes_event_id = lineage.id AND child.voided_at IS NULL
+    ) ORDER BY occurred_on DESC, created_at DESC, id DESC`, ['evaluated', 'project', projectId, 'relation', projectId]);
+  const roots = new Set(rows.map((row) => row.root_id));
+  return { count: roots.size, conclusion: rows.length && typeof rows[0].content === 'string' ? rows[0].content : null };
+}
+
+async function projectCumulativeSteam(db: DatabaseLike, projectId: number, start: string, end: string): Promise<number | null> {
+  const rows = await db.all(`SELECT steam_volume AS steamVolume FROM injection_stage_rows
+    WHERE UPPER(TRIM(well_no)) IN (
+      SELECT DISTINCT UPPER(TRIM(injection_well)) FROM channeling_relations WHERE project_id = ?
+    ) AND start_date <= ? AND COALESCE(end_date, start_date) >= ?`, [projectId, end, start]);
+  const values = rows.map((row) => finiteNumber(row.steamVolume)).filter((value): value is number => value !== null);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+}
+
+async function projectLatestTotalOil(db: DatabaseLike, projectId: number, end: string): Promise<number | null> {
+  const rows = await db.all(`WITH ranked_dates AS (
+      SELECT UPPER(TRIM(jh)) AS normalizedWellNo, rq AS date, oil,
+        ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(jh)), rq ORDER BY rowid DESC) AS date_rank
+      FROM production WHERE UPPER(TRIM(jh)) IN (
+        SELECT DISTINCT UPPER(TRIM(production_well)) FROM channeling_relations WHERE project_id = ?
+      ) AND rq <= ?
+    ), canonical_production AS (
+      SELECT normalizedWellNo, date, oil FROM ranked_dates WHERE date_rank = 1
+    ), ranked_oil AS (
+      SELECT normalizedWellNo, oil,
+        ROW_NUMBER() OVER (PARTITION BY normalizedWellNo ORDER BY date DESC) AS oil_rank
+      FROM canonical_production WHERE typeof(oil) IN ('integer', 'real')
+    ) SELECT oil FROM ranked_oil WHERE oil_rank = 1`, [projectId, end]);
+  const values = rows.map((row) => finiteNumber(row.oil)).filter((value): value is number => value !== null);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
 }
 
 export async function getProjectSummary(db: DatabaseLike, projectId: number, start: string, end: string): Promise<ProjectSummary> {
@@ -265,13 +319,11 @@ export async function getProjectSummary(db: DatabaseLike, projectId: number, sta
   const relations = await db.all('SELECT * FROM channeling_relations WHERE project_id = ? ORDER BY id ASC', [projectId]);
   const injectors = [...new Map(relations.map((row) => [normalizeMetricWellNo(row.injection_well), row.injection_well] as const)).values()];
   const producers = [...new Map(relations.map((row) => [normalizeMetricWellNo(row.production_well), row.production_well] as const)).values()];
-  const [injectorMetrics, producerMetrics, evaluations] = await Promise.all([
-    Promise.all(injectors.map((wellNo) => getWellMetrics(db, wellNo, start, end))),
-    Promise.all(producers.map((wellNo) => getWellMetrics(db, wellNo, start, end))),
+  const [cumulativeSteam, latestTotalOil, evaluations] = await Promise.all([
+    projectCumulativeSteam(db, projectId, start, end),
+    projectLatestTotalOil(db, projectId, end),
     evaluationSummary(db, projectId),
   ]);
-  const steam = injectorMetrics.map((item) => item.injection?.cumulativeSteam ?? null).filter((value): value is number => value !== null);
-  const oil = producerMetrics.map((item) => item.production?.latest.oil ?? null).filter((value): value is number => value !== null);
   const allWells = new Set([...injectors, ...producers].map(normalizeMetricWellNo));
   return {
     projectId,
@@ -285,8 +337,8 @@ export async function getProjectSummary(db: DatabaseLike, projectId: number, sta
     injectorCount: injectors.length,
     producerCount: producers.length,
     uniqueWellCount: allWells.size,
-    cumulativeSteam: steam.length ? steam.reduce((sum, value) => sum + value, 0) : null,
-    latestTotalOil: oil.length ? oil.reduce((sum, value) => sum + value, 0) : null,
+    cumulativeSteam,
+    latestTotalOil,
     evaluatedCount: evaluations.count,
     latestEvaluationConclusion: evaluations.conclusion,
   };

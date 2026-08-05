@@ -11,8 +11,10 @@ import {
   getProjectSummary,
   getRelationMetrics,
   getWellMetrics,
+  initChannelingMetricIndexes,
   normalizeMetricWellNo,
 } from '../src/lib/channelingMetrics.ts';
+import { correctTrackingEvent, createTrackingEvent, initChannelingTrackingTables } from '../src/lib/channelingTrackingStore.ts';
 
 async function withStore(run: (db: any) => Promise<void>) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channeling-metrics-'));
@@ -21,9 +23,8 @@ async function withStore(run: (db: any) => Promise<void>) {
     await db.exec(`CREATE TABLE channeling_projects (id INTEGER PRIMARY KEY, project_name TEXT);
       CREATE TABLE channeling_relations (id INTEGER PRIMARY KEY, project_id INTEGER, injection_well TEXT, production_well TEXT, status TEXT);
       CREATE TABLE production (jh TEXT, rq TEXT, oil REAL, liquid REAL, water_cut REAL, block TEXT);
-      CREATE TABLE injection_stage_rows (well_no TEXT, cycle_no INTEGER, start_date TEXT, end_date TEXT, steam_volume REAL, temperature REAL, pressure REAL, dryness REAL, production_hours REAL);
-      CREATE TABLE channeling_tracking_events (id INTEGER PRIMARY KEY, event_type TEXT, occurred_on TEXT, content TEXT, voided_at TEXT);
-      CREATE TABLE channeling_tracking_event_links (event_id INTEGER, subject_type TEXT, subject_id INTEGER);`);
+      CREATE TABLE injection_stage_rows (well_no TEXT, cycle_no INTEGER, start_date TEXT, end_date TEXT, steam_volume REAL, temperature REAL, pressure REAL, dryness REAL, production_hours REAL);`);
+    await initChannelingTrackingTables(db);
     await run(db);
   } finally {
     await db.close();
@@ -164,10 +165,10 @@ test('summarizes projects with normalized deduplication and nonvoided evaluation
       INSERT INTO injection_stage_rows VALUES ('P-1', 1, '2026-01-01', '2026-01-02', 50, NULL, NULL, NULL, NULL);
       INSERT INTO production VALUES ('P-1', '2026-01-30', 10, NULL, NULL, 'A');
       INSERT INTO production VALUES ('P-2', '2026-01-29', 0, NULL, NULL, 'A');
-      INSERT INTO channeling_tracking_events VALUES (1, 'evaluated', '2026-01-10', 'old', NULL);
-      INSERT INTO channeling_tracking_events VALUES (2, 'evaluated', '2026-01-20', 'voided', '2026-01-21');
-      INSERT INTO channeling_tracking_events VALUES (3, 'evaluated', '2026-01-15', 'recent', NULL);
-      INSERT INTO channeling_tracking_events VALUES (4, 'reviewed', '2026-01-30', 'not evaluation', NULL);
+      INSERT INTO channeling_tracking_events (id, event_type, occurred_on, content, evidence, owner, voided_at, created_by, created_at) VALUES (1, 'evaluated', '2026-01-10', 'old', '', 'o', NULL, 'u', '2026-01-10T00:00:00Z');
+      INSERT INTO channeling_tracking_events (id, event_type, occurred_on, content, evidence, owner, voided_at, created_by, created_at) VALUES (2, 'evaluated', '2026-01-20', 'voided', '', 'o', '2026-01-21', 'u', '2026-01-20T00:00:00Z');
+      INSERT INTO channeling_tracking_events (id, event_type, occurred_on, content, evidence, owner, voided_at, created_by, created_at) VALUES (3, 'evaluated', '2026-01-15', 'recent', '', 'o', NULL, 'u', '2026-01-15T00:00:00Z');
+      INSERT INTO channeling_tracking_events (id, event_type, occurred_on, content, evidence, owner, voided_at, created_by, created_at) VALUES (4, 'reviewed', '2026-01-30', 'not evaluation', '', 'o', NULL, 'u', '2026-01-30T00:00:00Z');
       INSERT INTO channeling_tracking_event_links VALUES (1, 'project', 2);
       INSERT INTO channeling_tracking_event_links VALUES (2, 'project', 2);
       INSERT INTO channeling_tracking_event_links VALUES (3, 'relation', 1);
@@ -184,5 +185,90 @@ test('summarizes projects with normalized deduplication and nonvoided evaluation
     assert.deepEqual([result.start, result.end], ['2026-01-01', '2026-01-31']);
     assert.deepEqual(result.range, { start: '2026-01-01', end: '2026-01-31' });
     assert.match(result.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+test('follows repeated evaluation corrections and counts one effective root evaluation', async () => {
+  await withStore(async (db) => {
+    await db.run("INSERT INTO channeling_projects VALUES (1, 'p')");
+    const original = await createTrackingEvent(db, {
+      eventType: 'evaluated', occurredOn: '2026-01-10', content: 'original', owner: 'o', createdBy: 'u',
+      links: [{ subjectType: 'project', subjectId: 1 }],
+    });
+    const first = await correctTrackingEvent(db, original.id, {
+      occurredOn: '2026-01-11', content: 'first correction', owner: 'o', createdBy: 'u', reason: 'fix 1',
+    });
+    await correctTrackingEvent(db, first.id, {
+      occurredOn: '2026-01-12', content: 'effective correction', owner: 'o', createdBy: 'u', reason: 'fix 2',
+    });
+    const summary = await getProjectSummary(db, 1, '2026-01-01', '2026-01-31');
+    assert.equal(summary.evaluatedCount, 1);
+    assert.equal(summary.latestEvaluationConclusion, 'effective correction');
+  });
+});
+
+test('orders effective evaluation conclusions by occurred date, creation time, then id', async () => {
+  await withStore(async (db) => {
+    await db.run("INSERT INTO channeling_projects VALUES (1, 'p')");
+    const first = await createTrackingEvent(db, { eventType: 'evaluated', occurredOn: '2026-01-10', content: 'first id', owner: 'o', createdBy: 'u', links: [{ subjectType: 'project', subjectId: 1 }] });
+    const second = await createTrackingEvent(db, { eventType: 'evaluated', occurredOn: '2026-01-10', content: 'second id', owner: 'o', createdBy: 'u', links: [{ subjectType: 'project', subjectId: 1 }] });
+    await db.run('UPDATE channeling_tracking_events SET created_at = ? WHERE id = ?', ['2026-01-10T02:00:00Z', first.id]);
+    await db.run('UPDATE channeling_tracking_events SET created_at = ? WHERE id = ?', ['2026-01-10T01:00:00Z', second.id]);
+    assert.equal((await getProjectSummary(db, 1, '2026-01-01', '2026-01-31')).latestEvaluationConclusion, 'first id');
+    await db.run('UPDATE channeling_tracking_events SET created_at = ? WHERE id = ?', ['2026-01-10T02:00:00Z', second.id]);
+    assert.equal((await getProjectSummary(db, 1, '2026-01-01', '2026-01-31')).latestEvaluationConclusion, 'second id');
+  });
+});
+
+test('canonicalizes normalized production aliases to the latest inserted row per date everywhere', async () => {
+  await withStore(async (db) => {
+    await db.exec(`INSERT INTO channeling_projects VALUES (1, 'p');
+      INSERT INTO channeling_relations VALUES (1, 1, 'I-1', 'P-1', 'confirmed');
+      INSERT INTO production VALUES ('P-1', '2026-01-01', 10, 20, 30, 'A');
+      INSERT INTO production VALUES (' p-1 ', '2026-01-01', 20, 40, 50, 'A');
+      INSERT INTO production VALUES ('P-1', '2026-01-03', 30, 60, 70, 'A');
+      INSERT INTO production VALUES (' p-1 ', '2026-01-03', 40, 80, 90, 'A');`);
+    const well = await getWellMetrics(db, 'p-1', '2026-01-01', '2026-01-03');
+    assert.deepEqual(well.production?.rows.map((row) => [row.date, row.oil]), [['2026-01-01', 20], ['2026-01-03', 40]]);
+    assert.deepEqual(well.production?.oil, { average: 30, validDays: 2 });
+    assert.deepEqual(well.production?.last7Days.oil, { average: 30, validDays: 2 });
+    const relation = await getRelationMetrics(db, 1, { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' });
+    assert.deepEqual(relation.producerSeries.map((row) => row.oil), [20, 40]);
+    assert.deepEqual(relation.comparison.oil, { beforeAverage: 20, afterAverage: 40, change: 20, changeRate: 1, beforeValidDays: 1, afterValidDays: 1 });
+    assert.equal((await getProjectSummary(db, 1, '2026-01-01', '2026-01-03')).latestTotalOil, 40);
+  });
+});
+
+test('creates normalized source indexes that single-well query plans use', async () => {
+  await withStore(async (db) => {
+    await initChannelingMetricIndexes(db);
+    const names = (await db.all("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%_normalized_well%' ORDER BY name")).map((row: any) => row.name);
+    assert.deepEqual(names, [
+      'idx_channeling_relations_injection_normalized_well',
+      'idx_channeling_relations_production_normalized_well',
+      'idx_injection_stage_normalized_well_date',
+      'idx_production_normalized_well_date',
+    ]);
+    const productionPlan = await db.all('EXPLAIN QUERY PLAN SELECT rq FROM production WHERE UPPER(TRIM(jh)) = ? AND rq BETWEEN ? AND ?', ['P-1', '2026-01-01', '2026-01-31']);
+    const stagePlan = await db.all('EXPLAIN QUERY PLAN SELECT start_date FROM injection_stage_rows WHERE UPPER(TRIM(well_no)) = ? AND start_date <= ?', ['I-1', '2026-01-31']);
+    assert.match(productionPlan.map((row: any) => row.detail).join(' '), /idx_production_normalized_well_date/);
+    assert.match(stagePlan.map((row: any) => row.detail).join(' '), /idx_injection_stage_normalized_well_date/);
+  });
+});
+
+test('keeps project summary source-query count constant as project wells grow', async () => {
+  await withStore(async (db) => {
+    await db.run("INSERT INTO channeling_projects VALUES (1, 'p')");
+    for (let index = 1; index <= 20; index += 1) {
+      await db.run('INSERT INTO channeling_relations VALUES (?, 1, ?, ?, ?)', [index, `I-${index}`, `P-${index}`, 'confirmed']);
+      await db.run('INSERT INTO injection_stage_rows VALUES (?, 1, ?, ?, ?, NULL, NULL, NULL, NULL)', [`I-${index}`, '2026-01-01', '2026-01-02', index]);
+      await db.run('INSERT INTO production VALUES (?, ?, ?, NULL, NULL, ?)', [`P-${index}`, '2026-01-31', index, 'A']);
+    }
+    const all = db.all.bind(db);
+    let calls = 0;
+    db.all = async (sql: string, params?: unknown[]) => { calls += 1; return all(sql, params); };
+    const summary = await getProjectSummary(db, 1, '2026-01-01', '2026-01-31');
+    assert.deepEqual([summary.injectorCount, summary.producerCount, summary.cumulativeSteam, summary.latestTotalOil], [20, 20, 210, 210]);
+    assert.ok(calls <= 5, `expected at most 5 set-based all() calls, received ${calls}`);
   });
 });
