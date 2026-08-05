@@ -87,16 +87,18 @@ export function updateWellProfile(
   input: { block: string; owner: string; updatedAt: string },
 ): Promise<ChannelingWellProfile> {
   return withChannelingWriteLock(db, async () => {
-    const now = new Date().toISOString();
-    await db.run(
+    const wallClock = new Date().getTime();
+    const previousToken = Date.parse(input.updatedAt);
+    const nextToken = Number.isNaN(previousToken) ? wallClock : Math.max(wallClock, previousToken + 1);
+    const now = new Date(nextToken).toISOString();
+    const result = await db.run(
       'UPDATE channeling_well_profiles SET block = ?, owner = ?, updated_at = ? WHERE id = ? AND updated_at = ?',
       [input.block.trim(), input.owner.trim(), now, id, input.updatedAt],
-    );
-    const updated = await db.get('SELECT * FROM channeling_well_profiles WHERE id = ? AND updated_at = ?', [id, now]);
-    if (!updated) {
+    ) as { changes?: number };
+    if (result.changes !== 1) {
       if (!await db.get('SELECT id FROM channeling_well_profiles WHERE id = ?', [id])) throw new Error('Well profile not found');
       throw new Error('Well profile changed; refresh and retry');
     }
-    return mapProfile(updated);
+    return mapProfile(await db.get('SELECT * FROM channeling_well_profiles WHERE id = ?', [id]));
   });
 }

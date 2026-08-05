@@ -84,6 +84,29 @@ test('updates block and owner using optimistic concurrency', async () => {
   });
 });
 
+test('advances the update token when the wall clock has not advanced', async () => {
+  await withStore(async (db) => {
+    const created = await createWellProfile(db, { wellNo: 'G1', block: 'A区', owner: '李工' });
+    const originalToken = '2026-08-05T00:00:00.000Z';
+    await db.run('UPDATE channeling_well_profiles SET updated_at = ? WHERE id = ?', [originalToken, created.id]);
+
+    const RealDate = globalThis.Date;
+    globalThis.Date = class extends RealDate {
+      constructor(value?: string | number) { super(value ?? originalToken); }
+    } as DateConstructor;
+    try {
+      const updated = await updateWellProfile(db, created.id, { block: 'B区', owner: '王工', updatedAt: originalToken });
+      assert.equal(updated.updatedAt, '2026-08-05T00:00:00.001Z');
+      await assert.rejects(
+        () => updateWellProfile(db, created.id, { block: 'C区', owner: '赵工', updatedAt: originalToken }),
+        /Well profile changed; refresh and retry/,
+      );
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  });
+});
+
 test('rejects stale updates without changing the profile', async () => {
   await withStore(async (db) => {
     const created = await createWellProfile(db, { wellNo: 'G1', block: 'A区', owner: '李工' });
