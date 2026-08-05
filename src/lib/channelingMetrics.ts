@@ -5,10 +5,11 @@ export type MetricRange = { start: string; end: string };
 export type ComparisonRange = { beforeStart: string; splitDate: string; afterEnd: string };
 export type MetricPoint = { average: number | null; validDays: number };
 export type ProductionRow = { date: string; oil: number | null; liquid: number | null; waterCut: number | null; block: string | null };
+type ProductionLatest = { date: string; oil: number | null; liquid: number | null; waterCut: number | null; block: string | null };
 export type InjectionStage = { cycleNo: number | null; startDate: string; endDate: string | null; steamVolume: number | null; temperature: number | null; pressure: number | null; dryness: number | null; productionHours: number | null };
 export type ProductionSummary = {
   rows: ProductionRow[];
-  latest: { date: string; oil: number | null; liquid: number | null; waterCut: number | null; block: string | null };
+  latest: ProductionLatest;
   oil: MetricPoint;
   liquid: MetricPoint;
   waterCut: MetricPoint;
@@ -78,23 +79,14 @@ function metricSet(rows: ProductionRow[]): { oil: MetricPoint; liquid: MetricPoi
   };
 }
 
-function latestValue(rows: ProductionRow[], field: 'oil' | 'liquid' | 'waterCut'): number | null {
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const value = finiteNumber(rows[index][field]);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
-function summarizeProduction(rows: ProductionRow[]): ProductionSummary {
-  const latestDate = rows[rows.length - 1].date;
-  const latestBlock = [...rows].reverse().find((row) => typeof row.block === 'string')?.block ?? null;
+function summarizeProduction(rows: ProductionRow[], history: ProductionRow[], latest: ProductionLatest): ProductionSummary {
+  const latestDate = latest.date;
   return {
     rows,
-    latest: { date: latestDate, oil: latestValue(rows, 'oil'), liquid: latestValue(rows, 'liquid'), waterCut: latestValue(rows, 'waterCut'), block: latestBlock },
+    latest,
     ...metricSet(rows),
-    last7Days: metricSet(rows.filter((row) => row.date >= shiftDate(latestDate, -6) && row.date <= latestDate)),
-    last30Days: metricSet(rows.filter((row) => row.date >= shiftDate(latestDate, -29) && row.date <= latestDate)),
+    last7Days: metricSet(history.filter((row) => row.date >= shiftDate(latestDate, -6))),
+    last30Days: metricSet(history),
   };
 }
 
@@ -151,11 +143,34 @@ async function loadProductionRows(db: DatabaseLike, normalizedWellNo: string, st
   )).map(productionRow);
 }
 
+async function loadProductionHistory(db: DatabaseLike, normalizedWellNo: string, end: string): Promise<{ rows: ProductionRow[]; latest: ProductionLatest | null }> {
+  const row = await db.get(`SELECT
+    MAX(rq) AS date,
+    (SELECT oil FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ? AND typeof(oil) IN ('integer', 'real') ORDER BY rq DESC LIMIT 1) AS oil,
+    (SELECT liquid FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ? AND typeof(liquid) IN ('integer', 'real') ORDER BY rq DESC LIMIT 1) AS liquid,
+    (SELECT water_cut FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ? AND typeof(water_cut) IN ('integer', 'real') ORDER BY rq DESC LIMIT 1) AS waterCut,
+    (SELECT block FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ? AND block IS NOT NULL ORDER BY rq DESC LIMIT 1) AS block
+    FROM production WHERE UPPER(TRIM(jh)) = ? AND rq <= ?`,
+  [normalizedWellNo, end, normalizedWellNo, end, normalizedWellNo, end, normalizedWellNo, end, normalizedWellNo, end]);
+  if (!calendarDate(row?.date)) return { rows: [], latest: null };
+  return {
+    rows: await loadProductionRows(db, normalizedWellNo, shiftDate(row.date, -29), row.date),
+    latest: {
+      date: row.date,
+      oil: finiteNumber(row.oil),
+      liquid: finiteNumber(row.liquid),
+      waterCut: finiteNumber(row.waterCut),
+      block: typeof row.block === 'string' ? row.block : null,
+    },
+  };
+}
+
 export async function getWellMetrics(db: DatabaseLike, wellNo: string, start: string, end: string): Promise<WellMetrics> {
   validateMetricRange(start, end);
   const normalizedWellNo = normalizeMetricWellNo(wellNo);
-  const [productionRows, stageRows, roleRow] = await Promise.all([
+  const [productionRows, productionHistory, stageRows, roleRow] = await Promise.all([
     loadProductionRows(db, normalizedWellNo, start, end),
+    loadProductionHistory(db, normalizedWellNo, end),
     db.all(
       'SELECT cycle_no AS cycleNo, start_date AS startDate, end_date AS endDate, steam_volume AS steamVolume, temperature, pressure, dryness, production_hours AS productionHours FROM injection_stage_rows WHERE UPPER(TRIM(well_no)) = ? AND start_date <= ? AND COALESCE(end_date, start_date) >= ? ORDER BY start_date ASC, cycle_no ASC',
       [normalizedWellNo, end, start],
@@ -177,7 +192,7 @@ export async function getWellMetrics(db: DatabaseLike, wellNo: string, start: st
     roles,
     queriedAt: new Date().toISOString(),
     range: { start, end },
-    production: productionRows.length ? summarizeProduction(productionRows) : null,
+    production: productionHistory.latest ? summarizeProduction(productionRows, productionHistory.rows, productionHistory.latest) : null,
     injection: stages.length ? summarizeInjection(stages) : null,
   };
 }

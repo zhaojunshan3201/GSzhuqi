@@ -96,6 +96,34 @@ test('preserves production rows, latest nonmissing values, and sparse selected, 
   });
 });
 
+test('uses production history through range end when the selected range has no rows', async () => {
+  await withStore(async (db) => {
+    await db.exec(`INSERT INTO production VALUES ('P-HISTORY', '2026-07-01', 5, 10, 20, 'A');
+      INSERT INTO production VALUES ('P-HISTORY', '2026-07-26', 10, NULL, NULL, 'A');
+      INSERT INTO production VALUES ('P-HISTORY', '2026-07-31', 20, NULL, NULL, 'A');`);
+    const result = await getWellMetrics(db, 'p-history', '2026-08-01', '2026-08-31');
+    assert.deepEqual(result.roles, ['producer']);
+    assert.deepEqual(result.production?.rows, []);
+    assert.deepEqual(result.production?.oil, { average: null, validDays: 0 });
+    assert.deepEqual(result.production?.latest, { date: '2026-07-31', oil: 20, liquid: 10, waterCut: 20, block: 'A' });
+    assert.deepEqual(result.production?.last7Days.oil, { average: 15, validDays: 2 });
+    assert.deepEqual(result.production?.last30Days.oil, { average: 15, validDays: 2 });
+  });
+});
+
+test('ends rolling production windows at the latest observed date rather than the selected range end', async () => {
+  await withStore(async (db) => {
+    await db.exec(`INSERT INTO production VALUES ('P-GAP', '2026-07-20', 40, NULL, NULL, 'A');
+      INSERT INTO production VALUES ('P-GAP', '2026-08-10', 10, NULL, NULL, 'A');
+      INSERT INTO production VALUES ('P-GAP', '2026-08-15', 20, NULL, NULL, 'A');`);
+    const production = (await getWellMetrics(db, 'P-GAP', '2026-08-01', '2026-08-31')).production!;
+    assert.deepEqual(production.oil, { average: 15, validDays: 2 });
+    assert.equal(production.latest.date, '2026-08-15');
+    assert.deepEqual(production.last7Days.oil, { average: 15, validDays: 2 });
+    assert.deepEqual(production.last30Days.oil, { average: 70 / 3, validDays: 3 });
+  });
+});
+
 test('compares valid observations, missing values, and a real zero baseline', () => {
   const result = compareProductionWindows([
     { date: '2026-01-01', oil: 10, liquid: null, waterCut: 0 },
