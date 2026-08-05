@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -20,14 +20,16 @@ async function stopServer(child: ReturnType<typeof spawn>): Promise<void> {
 test('channeling tracking, well, and metric APIs enforce their HTTP contracts', { timeout: 30000 }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'channeling-tracking-api-'));
   const databaseFile = path.join(directory, 'test.db');
+  const evaluationPauseFile = path.join(directory, 'evaluation.pause');
   const secret = 'channeling-tracking-integration-secret';
   const port = 39000 + Math.floor(Math.random() * 1000);
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: databaseFile, AUTH_TOKEN_SECRET: secret, CHANNELING_TEST_FORCE_ERROR: '1' },
+    env: { ...process.env, PORT: String(port), LOCAL_ONLY: 'true', NODE_ENV: 'production', LOCAL_DB_FILE: databaseFile, AUTH_TOKEN_SECRET: secret, CHANNELING_TEST_FORCE_ERROR: '1', CHANNELING_TEST_EVALUATION_PAUSE_FILE: evaluationPauseFile },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let db: Awaited<ReturnType<typeof open>> | undefined;
+  let concurrencyDb: Awaited<ReturnType<typeof open>> | undefined;
   try {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('server did not start')), 15000);
@@ -150,15 +152,38 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     assert.equal(evaluation.metricsSnapshot.comparison.oil.afterAverage, 20);
     assert.deepEqual(evaluation.links, [{ subjectType: 'project', subjectId: project.id }, { subjectType: 'relation', subjectId: relation.id }, { subjectType: 'well', subjectId: injector.id }, { subjectType: 'well', subjectId: producer.id }]);
     const evaluationCountBeforeFailure = (await db.get("SELECT COUNT(*) AS count FROM channeling_tracking_events WHERE event_type = 'evaluated'")).count;
-    const forcedEvaluation = await request(`/api/channeling-relations/${relation.id}/evaluations`, { method: 'POST', headers: { ...admin, 'x-channeling-force-evaluation-after-event': '1' }, body: JSON.stringify({ occurredOn: '2026-01-04', conclusion: 'must rollback', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) });
+    await writeFile(evaluationPauseFile, 'pause');
+    const forcedEvaluationRequest = request(`/api/channeling-relations/${relation.id}/evaluations`, { method: 'POST', headers: { ...admin, 'x-channeling-pause-evaluation': '1', 'x-channeling-force-evaluation-after-event': '1' }, body: JSON.stringify({ occurredOn: '2026-01-04', conclusion: 'must rollback', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) });
+    const unrelatedDb = concurrencyDb = await open({ filename: databaseFile, driver: sqlite3.Database });
+    await unrelatedDb.exec('PRAGMA busy_timeout = 20');
+    let evaluationLockedDatabase = false;
+    for (let attempt = 0; attempt < 100 && !evaluationLockedDatabase; attempt += 1) {
+      try {
+        await unrelatedDb.exec('BEGIN IMMEDIATE');
+        await unrelatedDb.exec('ROLLBACK');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      } catch (error: any) {
+        if (error?.code !== 'SQLITE_BUSY') throw error;
+        evaluationLockedDatabase = true;
+      }
+    }
+    assert.equal(evaluationLockedDatabase, true);
+    await unrelatedDb.exec('PRAGMA busy_timeout = 3000');
+    const unrelatedWrite = unrelatedDb.run("INSERT INTO users (username, password, name, role) VALUES ('evaluation-concurrent-user', 'password', 'Concurrent', 'user')");
+    await rm(evaluationPauseFile, { force: true });
+    const [forcedEvaluation] = await Promise.all([forcedEvaluationRequest, unrelatedWrite]);
     assert.equal(forcedEvaluation.status, 500);
+    assert.equal((await forcedEvaluation.json() as any).message, '服务器内部错误');
     assert.equal((await db.get("SELECT COUNT(*) AS count FROM channeling_tracking_events WHERE event_type = 'evaluated'")).count, evaluationCountBeforeFailure);
+    assert.equal((await db.get("SELECT COUNT(*) AS count FROM users WHERE username = 'evaluation-concurrent-user'")).count, 1);
+    await unrelatedDb.close(); concurrencyDb = undefined;
 
     const missingRelationResponse = await request(`/api/channeling-projects/${project.id}/relations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...relationBody, injectionWell: 'missing-i', productionWell: 'missing-p' }) });
     const missingRelation = await json(missingRelationResponse);
     assert.equal((await request(`/api/channeling-relations/${missingRelation.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: 'x', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) })).status, 404);
     assert.equal((await request(`/api/channeling-relations/${relation.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: '', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) })).status, 400);
   } finally {
+    await concurrencyDb?.close();
     await db?.close();
     await stopServer(child);
     await rm(directory, { recursive: true, force: true });

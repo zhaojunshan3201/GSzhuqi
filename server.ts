@@ -64,7 +64,6 @@ import { confirmChannelingRelationImport, createChannelingRelationPreview, getCh
 import { createWellProfile, getWellProfile, initChannelingWellTables, listWellProfiles, updateWellProfile } from "./src/lib/channelingWellStore.ts";
 import { correctTrackingEvent, createTrackingEvent, createTrackingEventUnlocked, initChannelingTrackingTables, listTrackingEvents, type TrackingSubjectType } from "./src/lib/channelingTrackingStore.ts";
 import { getProjectSummary, getRelationMetrics, getWellMetrics, initChannelingMetricIndexes, validateComparisonRange, validateMetricRange } from "./src/lib/channelingMetrics.ts";
-import { withChannelingWriteLock } from "./src/lib/channelingWriteQueue.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -4755,6 +4754,14 @@ app.post("/api/register", async (req, res) => {
     if (message.includes(" is invalid") || message.includes(" is required") || message.includes("must be") || message.includes("date range")) return 400;
     return 500;
   };
+  const sendChannelingTrackingError = (res: express.Response, error: any) => {
+    const status = channelingTrackingErrorStatus(error);
+    if (status === 500) {
+      console.error("Channeling tracking API error:", error);
+      return res.status(500).json({ success: false, message: "服务器内部错误" });
+    }
+    return res.status(status).json({ success: false, message: error.message });
+  };
   const positiveChannelingId = (value: unknown): number => {
     const id = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
     if (!Number.isSafeInteger(id) || id <= 0) throw new Error("id is invalid");
@@ -4792,6 +4799,43 @@ app.post("/api/register", async (req, res) => {
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) throw new Error("body is invalid");
     return value as Record<string, any>;
   };
+  const createRelationEvaluationWithDedicatedConnection = async (req: express.Request, relationId: number, body: Record<string, any>, range: { beforeStart: string; splitDate: string; afterEnd: string }, createdBy: string) => {
+    const channelingDb = await open({ filename: DB_FILE, driver: sqlite3.Database });
+    let transactionStarted = false;
+    try {
+      await channelingDb.exec("BEGIN IMMEDIATE");
+      transactionStarted = true;
+      const pauseFile = process.env.CHANNELING_TEST_EVALUATION_PAUSE_FILE;
+      if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-pause-evaluation") === "1" && pauseFile) {
+        const deadline = Date.now() + 5000;
+        while (fs.existsSync(pauseFile)) {
+          if (Date.now() >= deadline) throw new Error("forced evaluation pause timed out");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      const relation = await channelingDb.get("SELECT * FROM channeling_relations WHERE id = ?", [relationId]);
+      if (!relation) throw new Error("Relation not found");
+      const profiles = await channelingDb.all("SELECT id, normalized_well_no FROM channeling_well_profiles WHERE normalized_well_no IN (UPPER(TRIM(?)), UPPER(TRIM(?)))", [relation.injection_well, relation.production_well]);
+      const injectionProfile = profiles.find((profile: any) => profile.normalized_well_no === String(relation.injection_well).trim().toUpperCase());
+      const productionProfile = profiles.find((profile: any) => profile.normalized_well_no === String(relation.production_well).trim().toUpperCase());
+      if (!injectionProfile || !productionProfile) throw new Error("Well profile not found");
+      const metricsSnapshot = await getRelationMetrics(channelingDb, relationId, range);
+      const event = await createTrackingEventUnlocked(channelingDb, {
+        eventType: "evaluated", occurredOn: body.occurredOn, content: body.conclusion, evidence: body.evidence,
+        owner: body.owner, createdBy, metricsSnapshot,
+        links: [{ subjectType: "project", subjectId: relation.project_id }, { subjectType: "relation", subjectId: relationId }, { subjectType: "well", subjectId: injectionProfile.id }, { subjectType: "well", subjectId: productionProfile.id }],
+      });
+      if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-evaluation-after-event") === "1") throw new Error("forced evaluation transaction error");
+      await channelingDb.exec("COMMIT");
+      transactionStarted = false;
+      return event;
+    } catch (error) {
+      if (transactionStarted) await channelingDb.exec("ROLLBACK");
+      throw error;
+    } finally {
+      await channelingDb.close();
+    }
+  };
   type ChannelingWellAssociation = { roles: Array<"injector" | "producer">; relationCount: number; projectCount: number };
   const loadChannelingWellAssociations = async (id?: number): Promise<Map<number, ChannelingWellAssociation>> => {
     const rows = await localDb.all(`SELECT w.id,
@@ -4822,7 +4866,7 @@ app.post("/api/register", async (req, res) => {
       const data = profiles.map((profile) => ({ ...profile, roles: associations.get(profile.id)?.roles ?? [] }))
         .filter((profile) => requestedRole === undefined || profile.roles.includes(requestedRole));
       res.json({ success: true, data });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.post("/api/channeling-wells", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
@@ -4832,7 +4876,7 @@ app.post("/api/register", async (req, res) => {
         || (body.block !== undefined && typeof body.block !== "string")
         || (body.owner !== undefined && typeof body.owner !== "string")) throw new Error("well profile is invalid");
       res.status(201).json({ success: true, data: await createWellProfile(localDb, body as any) });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.get("/api/channeling-wells/:id", async (req, res) => {
     try {
@@ -4841,7 +4885,7 @@ app.post("/api/register", async (req, res) => {
       const associations = await loadChannelingWellAssociations(id);
       res.json({ success: true, data: { ...profile, ...associations.get(id) } });
     }
-    catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.patch("/api/channeling-wells/:id", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
@@ -4852,14 +4896,14 @@ app.post("/api/register", async (req, res) => {
       if (keys.length !== 3 || !keys.every((key) => key === "block" || key === "owner" || key === "updatedAt")) throw new Error("well patch is invalid");
       if (typeof body.block !== "string" || typeof body.owner !== "string" || typeof body.updatedAt !== "string" || !body.updatedAt) throw new Error("well patch is invalid");
       res.json({ success: true, data: await updateWellProfile(localDb, id, { block: body.block, owner: body.owner, updatedAt: body.updatedAt }) });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.get("/api/channeling-wells/:id/metrics", async (req, res) => {
     try {
       const profile = await getWellProfile(localDb, positiveChannelingId(req.params.id));
       const range = channelingMetricRange(req);
       res.json({ success: true, data: await getWellMetrics(localDb, profile.wellNo, range.start, range.end) });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.get("/api/channeling-wells/:id/relations", async (req, res) => {
     try {
@@ -4876,22 +4920,22 @@ app.post("/api/register", async (req, res) => {
         createdAt: row.created_at, updatedAt: row.updated_at,
         project: { id: row.project_id, name: row.project_name, block: row.project_block },
       })) });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.get("/api/channeling-projects/:id/summary", async (req, res) => {
     try {
       const id = positiveChannelingId(req.params.id);
       const range = channelingMetricRange(req);
       res.json({ success: true, data: await getProjectSummary(localDb, id, range.start, range.end) });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.get("/api/channeling-relations/:id/detail", async (req, res) => {
     try { res.json({ success: true, data: await getRelationMetrics(localDb, positiveChannelingId(req.params.id), channelingComparisonRange(req.query as any)) }); }
-    catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.get("/api/channeling-tracking-events", async (req, res) => {
     try { res.json({ success: true, data: await listTrackingEvents(localDb, channelingSubject(req)) }); }
-    catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.post("/api/channeling-tracking-events", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
@@ -4905,7 +4949,7 @@ app.post("/api/register", async (req, res) => {
       if (Object.hasOwn(body, "metricsSnapshot")) throw new Error("metricsSnapshot is reserved for server-generated events");
       const createdBy = authenticatedUser(req)!.username;
       res.status(201).json({ success: true, data: await createTrackingEvent(localDb, { eventType: body.eventType, occurredOn: body.occurredOn, content: body.content, evidence: body.evidence, owner: body.owner, links: body.links, createdBy }) });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.post("/api/channeling-tracking-events/:id/corrections", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
@@ -4914,7 +4958,7 @@ app.post("/api/register", async (req, res) => {
       const body = plainChannelingBody(req.body);
       const createdBy = authenticatedUser(req)!.username;
       res.status(201).json({ success: true, data: await correctTrackingEvent(localDb, id, { reason: body.reason, occurredOn: body.occurredOn, content: body.content, evidence: body.evidence, owner: body.owner, createdBy }) });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.post("/api/channeling-relations/:id/evaluations", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
@@ -4927,31 +4971,9 @@ app.post("/api/register", async (req, res) => {
       const rangeBody = plainChannelingBody(body.range);
       const range = channelingComparisonRange(rangeBody);
       const createdBy = authenticatedUser(req)!.username;
-      const data = await withChannelingWriteLock(localDb, async () => {
-        await localDb.exec("BEGIN IMMEDIATE");
-        try {
-          const relation = await localDb.get("SELECT * FROM channeling_relations WHERE id = ?", [relationId]);
-          if (!relation) throw new Error("Relation not found");
-          const profiles = await localDb.all("SELECT id, normalized_well_no FROM channeling_well_profiles WHERE normalized_well_no IN (UPPER(TRIM(?)), UPPER(TRIM(?)))", [relation.injection_well, relation.production_well]);
-          const injectionProfile = profiles.find((profile: any) => profile.normalized_well_no === String(relation.injection_well).trim().toUpperCase());
-          const productionProfile = profiles.find((profile: any) => profile.normalized_well_no === String(relation.production_well).trim().toUpperCase());
-          if (!injectionProfile || !productionProfile) throw new Error("Well profile not found");
-          const metricsSnapshot = await getRelationMetrics(localDb, relationId, range);
-          const event = await createTrackingEventUnlocked(localDb, {
-            eventType: "evaluated", occurredOn: body.occurredOn, content: body.conclusion, evidence: body.evidence,
-            owner: body.owner, createdBy, metricsSnapshot,
-            links: [{ subjectType: "project", subjectId: relation.project_id }, { subjectType: "relation", subjectId: relationId }, { subjectType: "well", subjectId: injectionProfile.id }, { subjectType: "well", subjectId: productionProfile.id }],
-          });
-          if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-evaluation-after-event") === "1") throw new Error("forced evaluation transaction error");
-          await localDb.exec("COMMIT");
-          return event;
-        } catch (error) {
-          await localDb.exec("ROLLBACK");
-          throw error;
-        }
-      });
+      const data = await createRelationEvaluationWithDedicatedConnection(req, relationId, body, range, createdBy);
       res.status(201).json({ success: true, data });
-    } catch (error: any) { res.status(channelingTrackingErrorStatus(error)).json({ success: false, message: error.message }); }
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   async function confirmChannelingRelationImportWithDedicatedConnection(importId: number, projectId: number) {
     const channelingDb = await open({ filename: DB_FILE, driver: sqlite3.Database });
