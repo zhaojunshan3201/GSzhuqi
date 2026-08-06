@@ -268,15 +268,16 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     try {
       await request(`/api/channeling-relation-imports/${batchId}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId }) });
     } catch (error: any) {
-      setMessage(`确认失败：${error.message}`);
+      if (viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType) setMessage(`确认失败：${error.message}`);
       confirmingImportIdRef.current = null;
       setConfirming(false);
       return;
     }
+    const viewIsUnchanged = () => viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType;
+    if (!viewIsUnchanged()) { if (confirmingImportIdRef.current === batchId) confirmingImportIdRef.current = null; setConfirming(false); return; }
     setPreview((current) => current?.id === batchId ? null : current);
     setValidRowsExpanded(false);
-    const viewIsUnchanged = () => viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType;
-    if (viewIsUnchanged()) selectProject(projectId);
+    selectProject(projectId);
     setMessage('关系导入已确认并写入所选项目。', 'success');
     try {
       await load();
@@ -296,11 +297,12 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     try {
       await request(`/api/channeling-relation-imports/${id}/confirm`, { method: 'POST' });
     } catch (error: any) {
-      setMessage(`确认失败：${error.message}`);
+      if (viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType) setMessage(`确认失败：${error.message}`);
       confirmingImportIdRef.current = null;
       setConfirming(false);
       return;
     }
+    if (viewSelectionRef.current.selectedId !== viewSelection.selectedId || viewSelectionRef.current.channelingType !== viewSelection.channelingType) { if (confirmingImportIdRef.current === id) confirmingImportIdRef.current = null; setConfirming(false); return; }
     setImports((current) => current.map((item) => item.id === id ? { ...item, status: 'confirmed' } : item));
     setPreview((current) => current?.id === id ? null : current);
     setMessage('关系导入已确认。', 'success');
@@ -328,9 +330,11 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     const projectId = selected.id;
     try {
       await request(`/api/channeling-projects/${projectId}`, { method: 'DELETE' });
+      if (viewSelectionRef.current.selectedId !== projectId) return;
       setProtectedProjectIds((current) => { const next = new Set(current); next.delete(projectId); return next; });
       selectProject(null); await load();
     } catch (error: unknown) {
+      if (viewSelectionRef.current.selectedId !== projectId) return;
       if (isTrackingHistoryConflict(error)) {
         setProtectedProjectIds((current) => new Set(current).add(projectId));
         setMessage('项目已有关系或跟踪历史，应保留历史记录。', 'warning');

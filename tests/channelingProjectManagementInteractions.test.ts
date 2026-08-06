@@ -373,3 +373,37 @@ test('server-derived delete capabilities disable hard deletes before any probing
   await act(async () => { deleteProjectButton.click(); deleteRelations[0].click(); }); assert.equal(deletes, 0);
   await act(async () => root.unmount()); dom.window.close();
 });
+
+test('a delayed import confirmation error does not pollute the project selected meanwhile', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const pending = deferred<Response>();
+  const secondProject = { ...project, id: 8, projectName: '当前项目' };
+  globalThis.fetch = (async (input) => {
+    const url = String(input); if (url === '/api/channeling-projects') return payload([project, secondProject]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url === '/api/channeling-relation-imports/preview') return payload(preview);
+    if (url === `/api/channeling-relation-imports/${preview.id}/confirm`) return pending.promise;
+    if (url === '/api/channeling-projects/8/relations') return payload([{ ...relation('当前井', 'nitrogen'), id: 82, projectId: 8 }]);
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]); throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' }))); await uploadPreview(host);
+  const confirm = [...host.querySelectorAll('button')].find((button) => button.textContent === '确认导入') as HTMLButtonElement; await act(async () => confirm.click());
+  const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('当前项目')) as HTMLButtonElement; await act(async () => second.click()); await openRelations(host);
+  await act(async () => { pending.resolve(new Response(JSON.stringify({ success: false, message: '旧项目确认失败' }), { status: 500 })); await pending.promise; });
+  assert.match(host.textContent || '', /当前井/); assert.doesNotMatch(host.textContent || '', /旧项目确认失败|确认失败：/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a delayed project delete cannot clear or reload the project selected meanwhile', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const pending = deferred<Response>(); let projectLoads = 0;
+  Object.defineProperty(window, 'confirm', { configurable: true, value: () => true }); const secondProject = { ...project, id: 8, projectName: '当前项目' };
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (url === '/api/channeling-projects' && !init?.method) { projectLoads++; return payload([project, secondProject]); }
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url === '/api/channeling-projects/7' && init?.method === 'DELETE') return pending.promise;
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]); throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const remove = [...host.querySelectorAll('button')].find((button) => button.textContent === '删除项目') as HTMLButtonElement; await act(async () => remove.click());
+  const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('当前项目')) as HTMLButtonElement; await act(async () => second.click());
+  await act(async () => { pending.resolve(await payload(undefined)); await pending.promise; });
+  assert.ok(second.className.includes('bg-red-50')); assert.equal(projectLoads, 1); assert.match(host.textContent || '', /当前项目/);
+  await act(async () => root.unmount()); dom.window.close();
+});
