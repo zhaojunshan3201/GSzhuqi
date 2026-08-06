@@ -19,8 +19,8 @@ const expectedNavigation: Array<{
   {
     key: 'injection',
     label: '注汽管理',
-    tabs: ['measureWellSelection', 'injectionPlan', 'injectionConstruction', 'injectionSoakTransfer', 'measures', 'measureAnalysis', 'injectionOptimization', 'injectionOperationReports', 'channelingProjectManagement'],
-    labels: ['选井决策', '方案与计划', '施工监控', '焖井转抽', '生产响应', '效果评价', '注汽优化预测', '运行报告', '注窜项目台账'],
+    tabs: ['measureWellSelection', 'injectionPlan', 'injectionConstruction', 'injectionSoakTransfer', 'measures', 'measureAnalysis', 'injectionOptimization', 'injectionOperationReports', 'channelingProjectManagement', 'channelingWellTracking'],
+    labels: ['选井决策', '方案与计划', '施工监控', '焖井转抽', '生产响应', '效果评价', '注汽优化预测', '运行报告', '注窜项目台账', '单井跟踪台账'],
   },
   {
     key: 'analysis',
@@ -61,6 +61,13 @@ test('uses GitBranch for the channeling project management icon', () => {
   );
 
   assert.equal(channelingProjectManagement?.icon, 'GitBranch');
+});
+
+test('places the independent well ledger immediately after the channeling project ledger', () => {
+  const items = sidebarNavigationGroups.find((group) => group.key === 'injection')!.items;
+  const projectIndex = items.findIndex((item) => item.tab === 'channelingProjectManagement');
+  assert.equal(items[projectIndex + 1]?.tab, 'channelingWellTracking');
+  assert.equal(items[projectIndex + 1]?.label, '单井跟踪台账');
 });
 
 test('assigns every visible injection workflow tab to its sidebar group', () => {
