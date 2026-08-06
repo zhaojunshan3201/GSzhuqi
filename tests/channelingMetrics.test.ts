@@ -194,12 +194,14 @@ test('project oil totals use each deduplicated producer earliest and latest fini
       INSERT INTO channeling_relations VALUES (1, 1, 'I-1', ' P-1 ', 'confirmed');
       INSERT INTO channeling_relations VALUES (2, 1, 'I-2', 'p-1', 'confirmed');
       INSERT INTO channeling_relations VALUES (3, 1, 'I-3', 'P-2', 'confirmed');
+      INSERT INTO channeling_relations VALUES (4, 1, 'I-4', 'P-3', 'confirmed');
       INSERT INTO production VALUES ('P-1', '2025-12-31', 99, NULL, NULL, 'A');
       INSERT INTO production VALUES ('P-1', '2026-01-01', 10, NULL, NULL, 'A');
       INSERT INTO production VALUES (' p-1 ', '2026-01-01', 12, NULL, NULL, 'A');
       INSERT INTO production VALUES ('P-1', '2026-01-03', 20, NULL, NULL, 'A');
       INSERT INTO production VALUES ('P-2', '2026-01-02', NULL, NULL, NULL, 'A');
       INSERT INTO production VALUES ('P-2', '2026-01-03', 5, NULL, NULL, 'A');`);
+    await db.run("INSERT INTO production VALUES ('P-3', '2026-01-02', ?, NULL, NULL, 'A')", [Number.POSITIVE_INFINITY]);
     const result = await getProjectSummary(db, 1, '2026-01-01', '2026-01-03');
     assert.deepEqual([result.initialTotalOil, result.latestTotalOil, result.totalOilChange], [17, 25, 8]);
   });
@@ -211,14 +213,37 @@ test('project summary defaults to the latest associated data date and falls back
       INSERT INTO channeling_relations VALUES (1, 1, 'I-1', 'P-1', 'confirmed');
       INSERT INTO production VALUES ('P-1', '2026-03-04', 10, NULL, NULL, 'A');
       INSERT INTO injection_stage_rows VALUES ('I-1', 1, '2026-02-01', '2026-03-06', 10, NULL, NULL, NULL, NULL);
-      INSERT INTO injection_stage_rows VALUES ('I-1', 2, '2026-03-07', 'not-a-date', 10, NULL, NULL, NULL, NULL);`);
+      INSERT INTO injection_stage_rows VALUES ('I-1', 2, '2026-03-07', 'not-a-date', 10, NULL, NULL, NULL, NULL);
+      INSERT INTO injection_stage_rows VALUES ('I-1', 3, '2026-03-10', '2026-03-08', 10, NULL, NULL, NULL, NULL);`);
     const anchored = await getProjectSummary(db, 1, undefined, undefined, new Date('2026-08-01T00:00:00Z'));
-    assert.equal(anchored.latestAvailableDate, '2026-03-07');
-    assert.deepEqual(anchored.range, { start: '2026-02-06', end: '2026-03-07' });
+    assert.equal(anchored.latestAvailableDate, '2026-03-10');
+    assert.deepEqual(anchored.range, { start: '2026-02-09', end: '2026-03-10' });
     const fallback = await getProjectSummary(db, 2, undefined, undefined, new Date('2026-01-01T16:30:00Z'));
     assert.equal(fallback.latestAvailableDate, null);
     assert.deepEqual(fallback.range, { start: '2025-12-04', end: '2026-01-02' });
     await assert.rejects(() => getProjectSummary(db, 1, '2026-01-01', undefined), /date range is invalid/);
+  });
+});
+
+test('project oil totals are aggregated in SQLite instead of returning every daily observation to JavaScript', async () => {
+  await withStore(async (db) => {
+    await db.exec(`INSERT INTO channeling_projects VALUES (1, 'p');
+      INSERT INTO channeling_relations VALUES (1, 1, 'I-1', 'P-1', 'confirmed');`);
+    for (let day = 1; day <= 20; day += 1) await db.run('INSERT INTO production VALUES (?, ?, ?, NULL, NULL, ?)', ['P-1', `2026-01-${String(day).padStart(2, '0')}`, day, 'A']);
+    const all = db.all.bind(db);
+    db.all = async (sql: string, params?: unknown[]) => {
+      assert.doesNotMatch(sql, /canonical_production/, 'daily canonical production rows must not be returned through all()');
+      return all(sql, params);
+    };
+    const get = db.get.bind(db);
+    let aggregateSql = '';
+    db.get = async (sql: string, params?: unknown[]) => {
+      if (/ranked_dates/.test(sql)) aggregateSql = sql;
+      return get(sql, params);
+    };
+    const result = await getProjectSummary(db, 1, '2026-01-01', '2026-01-20');
+    assert.deepEqual([result.initialTotalOil, result.latestTotalOil, result.totalOilChange], [1, 20, 19]);
+    assert.match(aggregateSql, /SUM\s*\(\s*CASE/i);
   });
 });
 

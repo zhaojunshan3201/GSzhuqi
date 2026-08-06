@@ -299,7 +299,7 @@ async function projectCumulativeSteam(db: DatabaseLike, projectId: number, start
 }
 
 async function projectOilTotals(db: DatabaseLike, projectId: number, start: string, end: string): Promise<{ initial: number | null; latest: number | null; change: number | null }> {
-  const rows = await db.all(`WITH ranked_dates AS (
+  const row = await db.get(`WITH ranked_dates AS (
       SELECT UPPER(TRIM(jh)) AS normalizedWellNo, rq AS date, oil,
         ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(jh)), rq ORDER BY rowid DESC) AS date_rank
       FROM production WHERE UPPER(TRIM(jh)) IN (
@@ -307,19 +307,19 @@ async function projectOilTotals(db: DatabaseLike, projectId: number, start: stri
       ) AND rq BETWEEN ? AND ?
     ), canonical_production AS (
       SELECT normalizedWellNo, date, oil FROM ranked_dates WHERE date_rank = 1
-    ) SELECT normalizedWellNo, date, oil FROM canonical_production
-      WHERE typeof(oil) IN ('integer', 'real') ORDER BY normalizedWellNo, date`, [projectId, start, end]);
-  const byWell = new Map<string, number[]>();
-  for (const row of rows) {
-    const value = finiteNumber(row.oil);
-    if (value === null) continue;
-    const values = byWell.get(row.normalizedWellNo) ?? [];
-    values.push(value);
-    byWell.set(row.normalizedWellNo, values);
-  }
-  if (!byWell.size) return { initial: null, latest: null, change: null };
-  const initial = [...byWell.values()].reduce((sum, values) => sum + values[0], 0);
-  const latest = [...byWell.values()].reduce((sum, values) => sum + values[values.length - 1], 0);
+    ), ranked_oil AS (
+      SELECT normalizedWellNo, oil,
+        ROW_NUMBER() OVER (PARTITION BY normalizedWellNo ORDER BY date ASC) AS first_rank,
+        ROW_NUMBER() OVER (PARTITION BY normalizedWellNo ORDER BY date DESC) AS last_rank
+      FROM canonical_production
+      WHERE typeof(oil) IN ('integer', 'real') AND oil BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308
+    ) SELECT
+      SUM(CASE WHEN first_rank = 1 THEN oil END) AS initialTotalOil,
+      SUM(CASE WHEN last_rank = 1 THEN oil END) AS latestTotalOil
+    FROM ranked_oil`, [projectId, start, end]);
+  const initial = finiteNumber(row?.initialTotalOil);
+  const latest = finiteNumber(row?.latestTotalOil);
+  if (initial === null || latest === null) return { initial: null, latest: null, change: null };
   return { initial, latest, change: latest - initial };
 }
 
@@ -330,12 +330,17 @@ async function projectLatestAvailableDate(db: DatabaseLike, projectId: number): 
       )
       UNION ALL
       SELECT MAX(CASE
-        WHEN end_date GLOB '????-??-??' AND date(end_date) = end_date THEN end_date
         WHEN start_date GLOB '????-??-??' AND date(start_date) = start_date THEN start_date
       END) AS date FROM injection_stage_rows WHERE UPPER(TRIM(well_no)) IN (
         SELECT DISTINCT UPPER(TRIM(injection_well)) FROM channeling_relations WHERE project_id = ?
       )
-    )`, [projectId, projectId]);
+      UNION ALL
+      SELECT MAX(CASE
+        WHEN end_date GLOB '????-??-??' AND date(end_date) = end_date THEN end_date
+      END) AS date FROM injection_stage_rows WHERE UPPER(TRIM(well_no)) IN (
+        SELECT DISTINCT UPPER(TRIM(injection_well)) FROM channeling_relations WHERE project_id = ?
+      )
+    )`, [projectId, projectId, projectId]);
   return calendarDate(row?.latestAvailableDate) ? row.latestAvailableDate : null;
 }
 

@@ -14,7 +14,7 @@ const response = (data: unknown, ok = true, message = '') => {
 
 const setup = () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://localhost' });
-  Object.defineProperties(globalThis, { window: { configurable: true, value: dom.window }, document: { configurable: true, value: dom.window.document }, navigator: { configurable: true, value: dom.window.navigator }, HTMLElement: { configurable: true, value: dom.window.HTMLElement }, HTMLInputElement: { configurable: true, value: dom.window.HTMLInputElement }, Event: { configurable: true, value: dom.window.Event }, InputEvent: { configurable: true, value: dom.window.InputEvent }, localStorage: { configurable: true, value: dom.window.localStorage }, IS_REACT_ACT_ENVIRONMENT: { configurable: true, value: true } });
+  Object.defineProperties(globalThis, { window: { configurable: true, value: dom.window }, document: { configurable: true, value: dom.window.document }, navigator: { configurable: true, value: dom.window.navigator }, HTMLElement: { configurable: true, value: dom.window.HTMLElement }, HTMLInputElement: { configurable: true, value: dom.window.HTMLInputElement }, Event: { configurable: true, value: dom.window.Event }, InputEvent: { configurable: true, value: dom.window.InputEvent }, KeyboardEvent: { configurable: true, value: dom.window.KeyboardEvent }, localStorage: { configurable: true, value: dom.window.localStorage }, IS_REACT_ACT_ENVIRONMENT: { configurable: true, value: true } });
   return dom;
 };
 const changeInput = (input: HTMLInputElement, value: string) => {
@@ -57,7 +57,7 @@ test('selected project exposes overview, relations and project timeline tabs', a
   await act(async () => root.unmount()); dom.window.close();
 });
 
-test('overview validates its date range and reloads a valid Shanghai business range', async () => {
+test('overview drafts dates without requests and applies one valid final range', async () => {
   const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); const urls: string[] = [];
   globalThis.fetch = (async (input) => { const url = String(input); urls.push(url); return commonFetch()(input); }) as typeof fetch;
   await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest' })));
@@ -68,9 +68,15 @@ test('overview validates its date range and reloads a valid Shanghai business ra
   assert.ok(urls.includes('/api/channeling-projects/7/summary'), 'initial range comes from the backend default summary');
   assert.equal(urls.filter((url) => /\/summary(?:\?|$)/.test(url)).length, 1, 'backend defaults do not trigger a second explicit-range load');
   await act(async () => changeInput(start, '9999-12-31'));
+  assert.doesNotMatch(host.textContent || '', /开始日期不能晚于结束日期/);
+  assert.equal(urls.filter((url) => url.includes('/summary?')).length, 0);
+  const apply = [...host.querySelectorAll('button')].find((button) => button.textContent === '应用统计范围') as HTMLButtonElement;
+  await act(async () => apply.click());
   assert.match(host.textContent || '', /开始日期不能晚于结束日期/);
   assert.equal(urls.filter((url) => url.includes('/summary?')).length, 0);
   await act(async () => changeInput(start, '2026-08-01'));
+  assert.equal(urls.filter((url) => url.includes('/summary?')).length, 0);
+  await act(async () => apply.click());
   assert.ok(urls.some((url) => url.includes('/summary?start=2026-08-01&end=2026-08-06')));
   await act(async () => root.unmount()); dom.window.close();
 });
@@ -98,22 +104,56 @@ test('summary error is isolated, retry works and malformed values render as miss
   await act(async () => root.unmount()); dom.window.close();
 });
 
-test('making a range invalid aborts the pending reload and clears its spinner', async () => {
-  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); let pendingSignal: AbortSignal | undefined;
+test('a newly applied range aborts the prior pending applied request', async () => {
+  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); const pendingSignals: AbortSignal[] = []; let explicitCalls = 0;
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
     if (url.endsWith('/summary')) return response(summary(7));
-    if (url.includes('/summary?')) { pendingSignal = init?.signal ?? undefined; return new Promise<Response>(() => {}); }
+    if (url.includes('/summary?')) { explicitCalls++; if (init?.signal) pendingSignals.push(init.signal); return new Promise<Response>(() => {}); }
     return commonFetch()(input);
   }) as typeof fetch;
   await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest' })));
   const start = host.querySelector('input[aria-label="汇总开始日期"]') as HTMLInputElement;
   await act(async () => changeInput(start, '2026-08-01'));
+  assert.equal(explicitCalls, 0, 'editing a draft does not fetch');
+  const apply = [...host.querySelectorAll('button')].find((button) => button.textContent === '应用统计范围') as HTMLButtonElement;
+  await act(async () => apply.click());
   assert.match(host.textContent || '', /正在加载项目汇总/);
-  await act(async () => changeInput(start, ''));
-  assert.match(host.textContent || '', /请选择完整日期范围/);
-  assert.doesNotMatch(host.textContent || '', /正在加载项目汇总/);
-  assert.equal(pendingSignal?.aborted, true);
+  await act(async () => changeInput(start, '2026-07-01'));
+  assert.equal(explicitCalls, 1);
+  await act(async () => apply.click());
+  assert.equal(explicitCalls, 2);
+  assert.equal(pendingSignals[0]?.aborted, true);
+  assert.equal(pendingSignals[1]?.aborted, false);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('project detail tabs support roving keyboard navigation', async () => {
+  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); globalThis.fetch = commonFetch();
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest' })));
+  const tabs = [...host.querySelectorAll('[role="tab"]')] as HTMLButtonElement[];
+  assert.deepEqual(tabs.map((tab) => tab.tabIndex), [0, -1, -1]);
+  tabs[0].focus();
+  await act(async () => tabs[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+  assert.equal(tabs[1].getAttribute('aria-selected'), 'true'); assert.equal(document.activeElement, tabs[1]);
+  await act(async () => tabs[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })));
+  assert.equal(tabs[2].getAttribute('aria-selected'), 'true'); assert.equal(document.activeElement, tabs[2]);
+  await act(async () => tabs[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
+  assert.equal(tabs[0].getAttribute('aria-selected'), 'true'); assert.equal(document.activeElement, tabs[0]);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('switching projects from an active timeline resets synchronously without fetching the new project timeline', async () => {
+  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); const fetched: string[] = [];
+  globalThis.fetch = (async (input) => { const url = String(input); fetched.push(url); return commonFetch([project(7, '旧项目'), project(8, '新项目')])(input); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest' })));
+  const timeline = [...host.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent === '跟踪时间线') as HTMLButtonElement;
+  await act(async () => timeline.click());
+  assert.ok(fetched.some((url) => url.includes('subjectId=7')));
+  const next = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('新项目')) as HTMLButtonElement;
+  await act(async () => next.click());
+  assert.equal([...host.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent === '项目概览')?.getAttribute('aria-selected'), 'true');
+  assert.ok(fetched.every((url) => !url.includes('subjectId=8')));
   await act(async () => root.unmount()); dom.window.close();
 });
 

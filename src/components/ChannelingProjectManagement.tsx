@@ -13,31 +13,51 @@ type Props = { role: string; onOpenRelation?: (relationId: number) => void };
 type MessageTone = 'info' | 'success' | 'warning' | 'error';
 const messageClasses: Record<MessageTone, string> = { info: 'status-banner-info', success: 'status-banner-success border-emerald-200 bg-emerald-50 text-emerald-700', warning: 'status-banner-warning border-amber-200 bg-amber-50 text-amber-700', error: 'status-banner-error border-red-200 bg-red-50 text-red-700' };
 type ProjectTab = 'overview' | 'relations' | 'timeline';
+const projectTabs: [ProjectTab, string][] = [['overview', '项目概览'], ['relations', '关系清单'], ['timeline', '跟踪时间线']];
 
 const displayNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? String(value) : '暂无数据';
 
 function ProjectSummaryPanel({ projectId }: { projectId: number }) {
-  const [range, setRange] = useState({ start: '', end: '' });
+  const [draftRange, setDraftRange] = useState({ start: '', end: '' });
+  const [appliedRange, setAppliedRange] = useState({ start: '', end: '' });
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [validationError, setValidationError] = useState('');
   const [retryKey, setRetryKey] = useState(0);
-  const [editVersion, setEditVersion] = useState(0);
-  const rangeError = editVersion > 0 && (!range.start || !range.end) ? '请选择完整日期范围' : range.start && range.end && range.start > range.end ? '开始日期不能晚于结束日期' : '';
+  const [requestVersion, setRequestVersion] = useState(0);
+  const explicitRange = useRef(false);
+  const activeController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setSummary(null);
     setError('');
-    if (editVersion > 0 && (!range.start || !range.end || range.start > range.end)) { setLoading(false); return; }
     const controller = new AbortController();
+    activeController.current = controller;
     setLoading(true);
-    const url = editVersion === 0 ? `/api/channeling-projects/${projectId}/summary` : `/api/channeling-projects/${projectId}/summary?${new URLSearchParams(range)}`;
+    const url = explicitRange.current ? `/api/channeling-projects/${projectId}/summary?${new URLSearchParams(appliedRange)}` : `/api/channeling-projects/${projectId}/summary`;
     void channelingRequest<ProjectSummary>(url, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) { setSummary(data); if (editVersion === 0) setRange(data.range); } })
+      .then((data) => { if (!controller.signal.aborted) { setSummary(data); if (!explicitRange.current) { setDraftRange(data.range); setAppliedRange(data.range); } } })
       .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '项目汇总加载失败'); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [projectId, editVersion, retryKey]);
+      .finally(() => { if (!controller.signal.aborted) { setLoading(false); if (activeController.current === controller) activeController.current = null; } });
+    return () => { controller.abort(); if (activeController.current === controller) activeController.current = null; };
+  }, [projectId, requestVersion, retryKey]);
+
+  const applyRange = () => {
+    const message = !draftRange.start || !draftRange.end ? '请选择完整日期范围' : draftRange.start > draftRange.end ? '开始日期不能晚于结束日期' : '';
+    if (message) {
+      activeController.current?.abort();
+      activeController.current = null;
+      setLoading(false);
+      setValidationError(message);
+      return;
+    }
+    activeController.current?.abort();
+    setValidationError('');
+    explicitRange.current = true;
+    setAppliedRange({ ...draftRange });
+    setRequestVersion((version) => version + 1);
+  };
 
   const cards: [string, unknown][] = summary ? [
     ['关系数量', summary.relationCount], ['有效关系数量', summary.activeRelationCount], ['已解除关系数量', summary.releasedRelationCount],
@@ -45,12 +65,12 @@ function ProjectSummaryPanel({ projectId }: { projectId: number }) {
     ['累计注汽量', summary.cumulativeSteam], ['期初日产油合计', summary.initialTotalOil], ['最新日产油合计', summary.latestTotalOil], ['日产油合计变化', summary.totalOilChange], ['已评价次数', summary.evaluatedCount],
   ] : [];
   return <section id="project-panel-overview" role="tabpanel" aria-labelledby="project-tab-overview" className="mt-4">
-    <div className="grid gap-2 sm:grid-cols-2"><label>汇总开始日期<input aria-label="汇总开始日期" className="field-control" type="date" value={range.start} onInput={(event) => { const value = event.currentTarget.value; setRange((current) => ({ ...current, start: value })); setEditVersion((version) => version + 1); }}/></label><label>汇总结束日期<input aria-label="汇总结束日期" className="field-control" type="date" value={range.end} onInput={(event) => { const value = event.currentTarget.value; setRange((current) => ({ ...current, end: value })); setEditVersion((version) => version + 1); }}/></label></div>
-    {rangeError && <p role="alert" className="mt-2 text-sm text-red-700">{rangeError}</p>}
+    <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]"><label>汇总开始日期<input aria-label="汇总开始日期" className="field-control" type="date" value={draftRange.start} onInput={(event) => { const value = event.currentTarget.value; setDraftRange((current) => ({ ...current, start: value })); setValidationError(''); }}/></label><label>汇总结束日期<input aria-label="汇总结束日期" className="field-control" type="date" value={draftRange.end} onInput={(event) => { const value = event.currentTarget.value; setDraftRange((current) => ({ ...current, end: value })); setValidationError(''); }}/></label><button type="button" className="action-button" onClick={applyRange}>应用统计范围</button></div>
+    {validationError && <p role="alert" className="mt-2 text-sm text-red-700">{validationError}</p>}
     {loading && <p className="mt-3 text-sm text-slate-500">正在加载项目汇总…</p>}
     {error && <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p>{error}</p><button type="button" className="mt-2" onClick={() => setRetryKey((value) => value + 1)}>重试</button></div>}
-    {!loading && !error && summary && <><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} className="rounded border border-slate-200 p-3"><span className="text-sm text-slate-500">{label}</span><b className="mt-1 block">{displayNumber(value)}</b></div>)}</div><div className="mt-3 rounded border border-slate-200 p-3 text-sm"><span className="text-slate-500">最新评价结论</span><p className="mt-1">{typeof summary.latestEvaluationConclusion === 'string' && summary.latestEvaluationConclusion.trim() ? summary.latestEvaluationConclusion : '暂无数据'}</p></div><p className="mt-3 text-sm text-slate-500">统计范围：{summary.range?.start || summary.start || range.start} 至 {summary.range?.end || summary.end || range.end} · 最新可用数据日期：{summary.latestAvailableDate || '暂无数据'} · 查询时间：{summary.generatedAt || '暂无数据'}</p></>}
-    {!loading && !error && !summary && !rangeError && <p className="mt-3 text-sm text-slate-500">暂无汇总数据</p>}
+    {!loading && !error && summary && <><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} className="rounded border border-slate-200 p-3"><span className="text-sm text-slate-500">{label}</span><b className="mt-1 block">{displayNumber(value)}</b></div>)}</div><div className="mt-3 rounded border border-slate-200 p-3 text-sm"><span className="text-slate-500">最新评价结论</span><p className="mt-1">{typeof summary.latestEvaluationConclusion === 'string' && summary.latestEvaluationConclusion.trim() ? summary.latestEvaluationConclusion : '暂无数据'}</p></div><p className="mt-3 text-sm text-slate-500">统计范围：{summary.range?.start || summary.start || appliedRange.start} 至 {summary.range?.end || summary.end || appliedRange.end} · 最新可用数据日期：{summary.latestAvailableDate || '暂无数据'} · 查询时间：{summary.generatedAt || '暂无数据'}</p></>}
+    {!loading && !error && !summary && !validationError && <p className="mt-3 text-sm text-slate-500">暂无汇总数据</p>}
   </section>;
 }
 
@@ -86,6 +106,20 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const token = localStorage.getItem('token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   const setMessage = (text: string, tone: MessageTone = 'error') => setMessageState({ text, tone });
+  const selectProject = (id: number | null) => { setProjectTab('overview'); setSelectedId(id); };
+  const selectProjectTab = (tab: ProjectTab, focus = false) => {
+    setProjectTab(tab);
+    if (focus) document.getElementById(`project-tab-${tab}`)?.focus();
+  };
+  const navigateProjectTabs = (event: React.KeyboardEvent<HTMLButtonElement>, current: ProjectTab) => {
+    const index = projectTabs.findIndex(([tab]) => tab === current);
+    let next: ProjectTab | null = null;
+    if (event.key === 'ArrowRight') next = projectTabs[(index + 1) % projectTabs.length][0];
+    if (event.key === 'ArrowLeft') next = projectTabs[(index - 1 + projectTabs.length) % projectTabs.length][0];
+    if (event.key === 'Home') next = projectTabs[0][0];
+    if (event.key === 'End') next = projectTabs[projectTabs.length - 1][0];
+    if (next) { event.preventDefault(); selectProjectTab(next, true); }
+  };
 
   const load = async () => {
     const [projectResponse, todoResponse] = await Promise.all([fetch('/api/channeling-projects'), fetch(`/api/channeling-projects/pending?date=${today()}`)]);
@@ -146,7 +180,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   };
 
   const save = async (changes: Record<string, unknown>) => { if (!selected) return; try { await request(`/api/channeling-projects/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) }); await load(); setMessage('治理台账已保存。', 'success'); } catch (error: any) { setMessage(error.message); } };
-  const create = async (event: React.FormEvent) => { event.preventDefault(); try { const created = await request('/api/channeling-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProject) }); setNewProject({ projectName: '', block: '', owner: '' }); await load(); setSelectedId(created.id); setPreviewProjectId((id) => id ?? created.id); } catch (error: any) { setMessage(error.message); } };
+  const create = async (event: React.FormEvent) => { event.preventDefault(); try { const created = await request('/api/channeling-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProject) }); setNewProject({ projectName: '', block: '', owner: '' }); await load(); selectProject(created.id); setPreviewProjectId((id) => id ?? created.id); } catch (error: any) { setMessage(error.message); } };
   const createRelation = async (event: React.FormEvent) => { event.preventDefault(); if (!selected) return; try { await request(`/api/channeling-projects/${selected.id}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(relationDraft) }); setRelationDraft(blankRelation()); await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
   const uploadRelations = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -189,7 +223,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     setPreview((current) => current?.id === batchId ? null : current);
     setValidRowsExpanded(false);
     const viewIsUnchanged = () => viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType;
-    if (viewIsUnchanged()) setSelectedId(projectId);
+    if (viewIsUnchanged()) selectProject(projectId);
     setMessage('关系导入已确认并写入所选项目。', 'success');
     try {
       await load();
@@ -228,7 +262,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   };
   const confirmSuspected = async (id: number) => { try { await request(`/api/channeling-relations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'confirmed' }) }); if (selected) await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
   const releaseRelation = async (id: number) => { try { await request(`/api/channeling-relations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'released' }) }); if (selected) await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
-  const deleteProject = async () => { if (!selected || !window.confirm('删除后无法恢复，是否继续？')) return; try { await request(`/api/channeling-projects/${selected.id}`, { method: 'DELETE' }); setSelectedId(null); await load(); } catch (error: any) { setMessage(error.message); } };
+  const deleteProject = async () => { if (!selected || !window.confirm('删除后无法恢复，是否继续？')) return; try { await request(`/api/channeling-projects/${selected.id}`, { method: 'DELETE' }); selectProject(null); await load(); } catch (error: any) { setMessage(error.message); } };
   const deleteRelation = async (id: number) => { if (!window.confirm('删除关系后无法恢复，是否继续？')) return; try { await request(`/api/channeling-relations/${id}`, { method: 'DELETE' }); if (selected) await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
 
   const previewRelationRow = (row: ChannelingRelationImportRow, status: string, index: number) => <tr key={`${status}-${row.rowNumber}-${row.injectorWellNo}-${row.producerWellNo}-${index}`}><td className="px-2 py-2">{row.rowNumber}</td><td className="px-2 py-2">{status}</td><td className="px-2 py-2">{channelingTypeLabels[row.channelingType]}</td><td className="px-2 py-2">{row.injectorWellNo}</td><td className="px-2 py-2">{row.producerWellNo}</td></tr>;
@@ -245,10 +279,10 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
         {isAdmin && <div className="mt-4 flex flex-wrap items-end gap-3"><label className="min-w-64 flex-1 text-sm">确认到项目<select className="field-control mt-1" value={previewProjectId ?? ''} disabled={confirming} onChange={(e) => setPreviewProjectId(e.target.value ? Number(e.target.value) : null)}><option value="">请选择项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.projectName} · {project.block}</option>)}</select></label><button className="action-button action-primary" disabled={!previewProjectId || !projects.some((project) => project.id === previewProjectId) || uploading || confirming} onClick={() => void confirmPreview()}>{confirming ? '正在确认…' : '确认导入'}</button></div>}{isAdmin && !projects.length && <p className="mt-2 text-sm text-amber-700">没有项目可确认，请先通过上方表单新建项目；创建后可直接继续确认当前预览。</p>}</div>}
     </section>
 
-    <section className="grid gap-4 lg:grid-cols-[320px_1fr]"><aside className="app-card p-4"><h4 className="font-bold">完整项目清单</h4><div className="mt-3 grid gap-2"><input className="field-control" placeholder="按区块筛选" value={projectFilters.block} onChange={(e) => setProjectFilters({ ...projectFilters, block: e.target.value })}/><select className="field-control" aria-label="项目状态筛选" value={projectFilters.status} onChange={(e) => setProjectFilters({ ...projectFilters, status: e.target.value })}><option value="">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><div className="mt-3 space-y-2">{visibleProjects.map((item) => <button key={item.id} onClick={() => setSelectedId(item.id)} className={`w-full rounded border p-3 text-left text-sm ${item.id === selectedId ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}><b>{item.projectName}</b><span className="mt-1 block text-slate-500">{item.block} · {statusLabels[item.status]} · {item.owner}</span></button>)}{!visibleProjects.length && <p className="text-sm text-slate-500">没有符合条件的项目{canOperate ? '，可在上方新建项目。' : '。'}</p>}</div><h4 className="mt-6 font-bold">治理待办</h4><div className="mt-2 space-y-2">{todos.map((item) => <button key={item.id} onClick={() => setSelectedId(item.id)} className="w-full text-left text-sm text-slate-600">{item.projectName}{item.overdue ? ' · 已超期' : ''}</button>)}{!todos.length && <p className="text-sm text-slate-500">暂无待办，但可通过上方清单查看全部台账。</p>}</div></aside>
+    <section className="grid gap-4 lg:grid-cols-[320px_1fr]"><aside className="app-card p-4"><h4 className="font-bold">完整项目清单</h4><div className="mt-3 grid gap-2"><input className="field-control" placeholder="按区块筛选" value={projectFilters.block} onChange={(e) => setProjectFilters({ ...projectFilters, block: e.target.value })}/><select className="field-control" aria-label="项目状态筛选" value={projectFilters.status} onChange={(e) => setProjectFilters({ ...projectFilters, status: e.target.value })}><option value="">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><div className="mt-3 space-y-2">{visibleProjects.map((item) => <button key={item.id} onClick={() => selectProject(item.id)} className={`w-full rounded border p-3 text-left text-sm ${item.id === selectedId ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}><b>{item.projectName}</b><span className="mt-1 block text-slate-500">{item.block} · {statusLabels[item.status]} · {item.owner}</span></button>)}{!visibleProjects.length && <p className="text-sm text-slate-500">没有符合条件的项目{canOperate ? '，可在上方新建项目。' : '。'}</p>}</div><h4 className="mt-6 font-bold">治理待办</h4><div className="mt-2 space-y-2">{todos.map((item) => <button key={item.id} onClick={() => selectProject(item.id)} className="w-full text-left text-sm text-slate-600">{item.projectName}{item.overdue ? ' · 已超期' : ''}</button>)}{!todos.length && <p className="text-sm text-slate-500">暂无待办，但可通过上方清单查看全部台账。</p>}</div></aside>
       {selected ? <section className="app-card p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold">{selected.projectName}</h3><p className="text-sm text-slate-500">{selected.block} · {selected.owner}</p></div><div className="flex gap-2"><span className="rounded bg-slate-100 px-2 py-1 text-sm">{statusLabels[selected.status]}</span>{isAdmin && <button className="action-button" onClick={() => void deleteProject()}>删除项目</button>}</div></div>
         {canOperate && <form key={selected.id} className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); const data = new FormData(e.currentTarget); void save({ owner: data.get('owner'), governanceMeasure: data.get('governanceMeasure'), plannedDate: data.get('plannedDate') || null, riskLevel: data.get('riskLevel'), ...(isAdmin ? { status: data.get('status'), closureEvidence: data.get('closureEvidence') } : {}) }); }}><label>项目状态<select name="status" className="field-control" defaultValue={selected.status} disabled={!isAdmin}>{Object.entries(statusLabels).filter(([value]) => isAdmin || value !== 'closed').map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>责任人<input name="owner" className="field-control" defaultValue={selected.owner}/></label><label className="md:col-span-2">治理措施<input name="governanceMeasure" className="field-control" defaultValue={selected.governanceMeasure}/></label><label>计划日期<input name="plannedDate" type="date" className="field-control" defaultValue={selected.plannedDate ?? ''}/></label><label>风险等级<select name="riskLevel" className="field-control" defaultValue={selected.riskLevel}><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label>{isAdmin && <label className="md:col-span-2">关闭依据<input name="closureEvidence" className="field-control" defaultValue={selected.closureEvidence}/></label>}<button className="action-button action-primary md:col-span-2">保存治理信息</button></form>}
-        <div role="tablist" aria-label="项目详情模块" className="mt-6 flex gap-2 border-t pt-4">{([['overview', '项目概览'], ['relations', '关系清单'], ['timeline', '跟踪时间线']] as [ProjectTab, string][]).map(([value, label]) => <button key={value} id={`project-tab-${value}`} aria-controls={`project-panel-${value}`} type="button" role="tab" aria-selected={projectTab === value} className={`action-button ${projectTab === value ? 'action-primary' : ''}`} onClick={() => setProjectTab(value)}>{label}</button>)}</div>
+        <div role="tablist" aria-label="项目详情模块" className="mt-6 flex gap-2 border-t pt-4">{projectTabs.map(([value, label]) => <button key={value} id={`project-tab-${value}`} aria-controls={`project-panel-${value}`} type="button" role="tab" aria-selected={projectTab === value} tabIndex={projectTab === value ? 0 : -1} className={`action-button ${projectTab === value ? 'action-primary' : ''}`} onClick={() => selectProjectTab(value)} onKeyDown={(event) => navigateProjectTabs(event, value)}>{label}</button>)}</div>
         {projectTab === 'overview' && <ProjectSummaryPanel key={`summary-${selected.id}`} projectId={selected.id}/>}
         {projectTab === 'relations' && <section id="project-panel-relations" role="tabpanel" aria-labelledby="project-tab-relations" className="mt-4"><h4 className="sr-only">关系清单</h4><div className="mt-3 grid gap-2 md:grid-cols-3"><select className="field-control" aria-label="注窜类型筛选" value={relationFilters.channelingType} onChange={(e) => setRelationFilters({ ...relationFilters, channelingType: e.target.value })}><option value="">全部注窜类型</option><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><select className="field-control" aria-label="关系状态筛选" value={relationFilters.status} onChange={(e) => setRelationFilters({ ...relationFilters, status: e.target.value })}><option value="">全部关系状态</option>{Object.entries(relationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select className="field-control" aria-label="关系来源筛选" value={relationFilters.source} onChange={(e) => setRelationFilters({ ...relationFilters, source: e.target.value })}><option value="">全部来源</option><option value="manual">手工</option><option value="import">导入</option><option value="suspected">疑似识别</option></select></div>
           {canOperate && <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={createRelation}><select className="field-control" aria-label="手工关系注窜类型" value={relationDraft.channelingType} onChange={(e) => setRelationDraft({ ...relationDraft, channelingType: e.target.value as ChannelingType })}><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><input className="field-control" required placeholder="注井" value={relationDraft.injectionWell} onChange={(e) => setRelationDraft({ ...relationDraft, injectionWell: e.target.value })}/><input className="field-control" required placeholder="采油井" value={relationDraft.productionWell} onChange={(e) => setRelationDraft({ ...relationDraft, productionWell: e.target.value })}/><input className="field-control" required placeholder="层系" value={relationDraft.reservoirLayer} onChange={(e) => setRelationDraft({ ...relationDraft, reservoirLayer: e.target.value })}/><input className="field-control" required placeholder="证据" value={relationDraft.evidence} onChange={(e) => setRelationDraft({ ...relationDraft, evidence: e.target.value })}/><input className="field-control" required placeholder="责任人" value={relationDraft.owner} onChange={(e) => setRelationDraft({ ...relationDraft, owner: e.target.value })}/><button className="action-button action-primary md:col-span-3">手工新增关系</button></form>}
