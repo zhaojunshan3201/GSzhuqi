@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChannelingGovernanceStatus, ChannelingProject, ChannelingRelation, ChannelingRelationInput, ChannelingType } from '../lib/channelingProjectStore';
 import type { ChannelingRelationImport, ChannelingRelationImportRow } from '../lib/channelingRelationImport';
 import { ChannelingTimeline } from './ChannelingTimeline.tsx';
-import { channelingRequest, type ProjectSummary } from '../lib/channelingTrackingApi.ts';
+import { ChannelingApiError, channelingRequest, type ProjectSummary } from '../lib/channelingTrackingApi.ts';
 
 const statusLabels: Record<ChannelingGovernanceStatus, string> = { identified: '识别/导入', confirmed: '确认', risk_assessed: '风险分级', planned: '治理方案', governing: '执行跟踪', verifying: '效果验证', closed: '关闭', recurred: '复发回流' };
 const relationLabels = { confirmed: '已确认', suspected: '疑似', released: '已解除' } as const;
@@ -14,6 +14,7 @@ type MessageTone = 'info' | 'success' | 'warning' | 'error';
 const messageClasses: Record<MessageTone, string> = { info: 'status-banner-info', success: 'status-banner-success border-emerald-200 bg-emerald-50 text-emerald-700', warning: 'status-banner-warning border-amber-200 bg-amber-50 text-amber-700', error: 'status-banner-error border-red-200 bg-red-50 text-red-700' };
 type ProjectTab = 'overview' | 'relations' | 'timeline';
 const projectTabs: [ProjectTab, string][] = [['overview', '项目概览'], ['relations', '关系清单'], ['timeline', '跟踪时间线']];
+const isTrackingHistoryConflict = (error: unknown) => error instanceof ChannelingApiError && error.status === 409 && /tracking history/i.test(error.message);
 
 const displayNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? String(value) : '暂无数据';
 
@@ -95,6 +96,8 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const [confirming, setConfirming] = useState(false);
   const [projectTab, setProjectTab] = useState<ProjectTab>('overview');
   const [validRowsExpanded, setValidRowsExpanded] = useState(false);
+  const [protectedProjectIds, setProtectedProjectIds] = useState<Set<number>>(() => new Set());
+  const [protectedRelationKeys, setProtectedRelationKeys] = useState<Set<string>>(() => new Set());
   const confirmingImportIdRef = useRef<number | null>(null);
   const relationRequestRef = useRef<AbortController | null>(null);
   const relationProjectIdRef = useRef<number | null>(null);
@@ -107,7 +110,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const token = localStorage.getItem('token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   const setMessage = (text: string, tone: MessageTone = 'error') => setMessageState({ text, tone });
-  const selectProject = (id: number | null) => { setProjectTab('overview'); setSelectedId(id); };
+  const selectProject = (id: number | null) => { setMessageState(null); setProjectTab('overview'); setSelectedId(id); };
   const selectProjectTab = (tab: ProjectTab, focus = false) => {
     setProjectTab(tab);
     if (focus) document.getElementById(`project-tab-${tab}`)?.focus();
@@ -128,6 +131,9 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     if (!projectPayload.success) throw new Error(projectPayload.message || '项目加载失败');
     if (!todoPayload.success) throw new Error(todoPayload.message || '待办加载失败');
     setProjects(projectPayload.data);
+    const loadedProjectIds = new Set<number>(projectPayload.data.map((item: ChannelingProject) => item.id));
+    setProtectedProjectIds((current) => new Set([...current].filter((id) => loadedProjectIds.has(id))));
+    setProtectedRelationKeys((current) => new Set([...current].filter((key) => loadedProjectIds.has(Number(key.split(':', 1)[0])))));
     setSelectedId((id) => id ?? projectPayload.data[0]?.id ?? null);
     setTodos(todoPayload.data);
   };
@@ -176,7 +182,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
       throw new Error('Authentication expired. Please sign in again.');
     }
     const payload = await response.json();
-    if (!response.ok || !payload.success) throw new Error(payload.message || 'Operation failed');
+    if (!response.ok || !payload.success) throw new ChannelingApiError(payload.message || 'Operation failed', response.status);
     return payload.data;
   };
 
@@ -263,8 +269,35 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   };
   const confirmSuspected = async (id: number) => { try { await request(`/api/channeling-relations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'confirmed' }) }); if (selected) await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
   const releaseRelation = async (id: number) => { try { await request(`/api/channeling-relations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'released' }) }); if (selected) await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
-  const deleteProject = async () => { if (!selected || !window.confirm('删除后无法恢复，是否继续？')) return; try { await request(`/api/channeling-projects/${selected.id}`, { method: 'DELETE' }); selectProject(null); await load(); } catch (error: any) { setMessage(error.message); } };
-  const deleteRelation = async (id: number) => { if (!window.confirm('删除关系后无法恢复，是否继续？')) return; try { await request(`/api/channeling-relations/${id}`, { method: 'DELETE' }); if (selected) await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
+  const deleteProject = async () => {
+    if (!selected || protectedProjectIds.has(selected.id) || !window.confirm('删除后无法恢复，是否继续？')) return;
+    const projectId = selected.id;
+    try {
+      await request(`/api/channeling-projects/${projectId}`, { method: 'DELETE' });
+      setProtectedProjectIds((current) => { const next = new Set(current); next.delete(projectId); return next; });
+      selectProject(null); await load();
+    } catch (error: unknown) {
+      if (isTrackingHistoryConflict(error)) {
+        setProtectedProjectIds((current) => new Set(current).add(projectId));
+        setMessage('项目已有关系或跟踪历史，应保留历史记录。', 'warning');
+      } else setMessage(error instanceof Error ? error.message : '删除项目失败');
+    }
+  };
+  const deleteRelation = async (id: number) => {
+    if (!selected) return;
+    const projectId = selected.id; const key = `${projectId}:${id}`;
+    if (protectedRelationKeys.has(key) || !window.confirm('删除关系后无法恢复，是否继续？')) return;
+    try {
+      await request(`/api/channeling-relations/${id}`, { method: 'DELETE' });
+      setProtectedRelationKeys((current) => { const next = new Set(current); next.delete(key); return next; });
+      if (viewSelectionRef.current.selectedId === projectId) await loadRelations(projectId);
+    } catch (error: unknown) {
+      if (isTrackingHistoryConflict(error)) {
+        setProtectedRelationKeys((current) => new Set(current).add(key));
+        setMessage('关系已有跟踪历史，请解除关系并保留历史。', 'warning');
+      } else setMessage(error instanceof Error ? error.message : '删除关系失败');
+    }
+  };
 
   const previewRelationRow = (row: ChannelingRelationImportRow, status: string, index: number) => <tr key={`${status}-${row.rowNumber}-${row.injectorWellNo}-${row.producerWellNo}-${index}`}><td className="px-2 py-2">{row.rowNumber}</td><td className="px-2 py-2">{status}</td><td className="px-2 py-2">{channelingTypeLabels[row.channelingType]}</td><td className="px-2 py-2">{row.injectorWellNo}</td><td className="px-2 py-2">{row.producerWellNo}</td></tr>;
 
@@ -281,13 +314,14 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     </section>
 
     <section className="grid gap-4 lg:grid-cols-[320px_1fr]"><aside className="app-card p-4"><h4 className="font-bold">完整项目清单</h4><div className="mt-3 grid gap-2"><input className="field-control" placeholder="按区块筛选" value={projectFilters.block} onChange={(e) => setProjectFilters({ ...projectFilters, block: e.target.value })}/><select className="field-control" aria-label="项目状态筛选" value={projectFilters.status} onChange={(e) => setProjectFilters({ ...projectFilters, status: e.target.value })}><option value="">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><div className="mt-3 space-y-2">{visibleProjects.map((item) => <button key={item.id} onClick={() => selectProject(item.id)} className={`w-full rounded border p-3 text-left text-sm ${item.id === selectedId ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}><b>{item.projectName}</b><span className="mt-1 block text-slate-500">{item.block} · {statusLabels[item.status]} · {item.owner}</span></button>)}{!visibleProjects.length && <p className="text-sm text-slate-500">没有符合条件的项目{canOperate ? '，可在上方新建项目。' : '。'}</p>}</div><h4 className="mt-6 font-bold">治理待办</h4><div className="mt-2 space-y-2">{todos.map((item) => <button key={item.id} onClick={() => selectProject(item.id)} className="w-full text-left text-sm text-slate-600">{item.projectName}{item.overdue ? ' · 已超期' : ''}</button>)}{!todos.length && <p className="text-sm text-slate-500">暂无待办，但可通过上方清单查看全部台账。</p>}</div></aside>
-      {selected ? <section className="app-card p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold">{selected.projectName}</h3><p className="text-sm text-slate-500">{selected.block} · {selected.owner}</p></div><div className="flex gap-2"><span className="rounded bg-slate-100 px-2 py-1 text-sm">{statusLabels[selected.status]}</span>{isAdmin && <button className="action-button" onClick={() => void deleteProject()}>删除项目</button>}</div></div>
+      {selected ? <section className="app-card p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold">{selected.projectName}</h3><p className="text-sm text-slate-500">{selected.block} · {selected.owner}</p></div><div className="flex gap-2"><span className="rounded bg-slate-100 px-2 py-1 text-sm">{statusLabels[selected.status]}</span>{isAdmin && <button className="action-button" disabled={protectedProjectIds.has(selected.id)} onClick={() => void deleteProject()}>删除项目</button>}</div></div>
+        {protectedProjectIds.has(selected.id) && <p className="mt-2 text-sm text-amber-700">项目已有关系或跟踪历史，应保留历史记录。</p>}
         {canOperate && <form key={selected.id} className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); const data = new FormData(e.currentTarget); void save({ owner: data.get('owner'), governanceMeasure: data.get('governanceMeasure'), plannedDate: data.get('plannedDate') || null, riskLevel: data.get('riskLevel'), ...(isAdmin ? { status: data.get('status'), closureEvidence: data.get('closureEvidence') } : {}) }); }}><label>项目状态<select name="status" className="field-control" defaultValue={selected.status} disabled={!isAdmin}>{Object.entries(statusLabels).filter(([value]) => isAdmin || value !== 'closed').map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>责任人<input name="owner" className="field-control" defaultValue={selected.owner}/></label><label className="md:col-span-2">治理措施<input name="governanceMeasure" className="field-control" defaultValue={selected.governanceMeasure}/></label><label>计划日期<input name="plannedDate" type="date" className="field-control" defaultValue={selected.plannedDate ?? ''}/></label><label>风险等级<select name="riskLevel" className="field-control" defaultValue={selected.riskLevel}><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label>{isAdmin && <label className="md:col-span-2">关闭依据<input name="closureEvidence" className="field-control" defaultValue={selected.closureEvidence}/></label>}<button className="action-button action-primary md:col-span-2">保存治理信息</button></form>}
         <div role="tablist" aria-label="项目详情模块" className="mt-6 flex gap-2 border-t pt-4">{projectTabs.map(([value, label]) => <button key={value} id={`project-tab-${value}`} aria-controls={`project-panel-${value}`} type="button" role="tab" aria-selected={projectTab === value} tabIndex={projectTab === value ? 0 : -1} className={`action-button ${projectTab === value ? 'action-primary' : ''}`} onClick={() => selectProjectTab(value)} onKeyDown={(event) => navigateProjectTabs(event, value)}>{label}</button>)}</div>
         {projectTab === 'overview' && <ProjectSummaryPanel key={`summary-${selected.id}`} projectId={selected.id}/>}
         {projectTab === 'relations' && <section id="project-panel-relations" role="tabpanel" aria-labelledby="project-tab-relations" className="mt-4"><h4 className="sr-only">关系清单</h4><div className="mt-3 grid gap-2 md:grid-cols-3"><select className="field-control" aria-label="注窜类型筛选" value={relationFilters.channelingType} onChange={(e) => setRelationFilters({ ...relationFilters, channelingType: e.target.value })}><option value="">全部注窜类型</option><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><select className="field-control" aria-label="关系状态筛选" value={relationFilters.status} onChange={(e) => setRelationFilters({ ...relationFilters, status: e.target.value })}><option value="">全部关系状态</option>{Object.entries(relationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select className="field-control" aria-label="关系来源筛选" value={relationFilters.source} onChange={(e) => setRelationFilters({ ...relationFilters, source: e.target.value })}><option value="">全部来源</option><option value="manual">手工</option><option value="import">导入</option><option value="suspected">疑似识别</option></select></div>
           {canOperate && <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={createRelation}><select className="field-control" aria-label="手工关系注窜类型" value={relationDraft.channelingType} onChange={(e) => setRelationDraft({ ...relationDraft, channelingType: e.target.value as ChannelingType })}><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><input className="field-control" required placeholder="注井" value={relationDraft.injectionWell} onChange={(e) => setRelationDraft({ ...relationDraft, injectionWell: e.target.value })}/><input className="field-control" required placeholder="采油井" value={relationDraft.productionWell} onChange={(e) => setRelationDraft({ ...relationDraft, productionWell: e.target.value })}/><input className="field-control" required placeholder="层系" value={relationDraft.reservoirLayer} onChange={(e) => setRelationDraft({ ...relationDraft, reservoirLayer: e.target.value })}/><input className="field-control" required placeholder="证据" value={relationDraft.evidence} onChange={(e) => setRelationDraft({ ...relationDraft, evidence: e.target.value })}/><input className="field-control" required placeholder="责任人" value={relationDraft.owner} onChange={(e) => setRelationDraft({ ...relationDraft, owner: e.target.value })}/><button className="action-button action-primary md:col-span-3">手工新增关系</button></form>}
-          <div className="mt-3 space-y-2">{visibleRelations.map((row) => <div key={row.id} className="flex flex-wrap items-center gap-3 text-sm"><span className="rounded bg-slate-100 px-2 py-1">{channelingTypeLabels[row.channelingType]}</span><span>{row.injectionWell} → {row.productionWell} · {row.reservoirLayer} · {relationLabels[row.status]}</span><button type="button" onClick={() => onOpenRelation(row.id)}>查看详情/跟踪记录</button>{canOperate && row.status === 'suspected' && <button onClick={() => void confirmSuspected(row.id)}>提交疑似确认</button>}{isAdmin && row.status !== 'released' && <button onClick={() => void releaseRelation(row.id)}>解除关系</button>}{isAdmin && <button onClick={() => void deleteRelation(row.id)}>删除关系</button>}</div>)}{!visibleRelations.length && <p className="text-sm text-slate-500">暂无符合条件的关系{canOperate ? '，可手工新增或通过上方识别卡导入 Excel 关系。' : '。'}</p>}</div><div className="mt-3 space-y-1">{imports.map((item) => <div key={item.id} className="flex flex-wrap gap-3 text-sm"><span>{item.fileName} · {channelingTypeLabels[item.channelingType]}：有效 {item.validCount}，重复 {item.duplicateCount}，自身 {item.selfRelationCount}，无效 {item.invalidCount}</span>{canOperate && item.status === 'preview' && <button disabled={confirming} onClick={() => void confirmImport(item.id)}>{confirmingImportIdRef.current === item.id ? '正在确认…' : '确认导入'}</button>}</div>)}</div></section>}
+          <div className="mt-3 space-y-2">{visibleRelations.map((row) => { const protectedKey = `${selected.id}:${row.id}`; const historyProtected = protectedRelationKeys.has(protectedKey); return <div key={row.id} className="flex flex-wrap items-center gap-3 text-sm"><span className="rounded bg-slate-100 px-2 py-1">{channelingTypeLabels[row.channelingType]}</span><span>{row.injectionWell} → {row.productionWell} · {row.reservoirLayer} · {relationLabels[row.status]}</span><button type="button" onClick={() => onOpenRelation(row.id)}>查看详情/跟踪记录</button>{canOperate && row.status === 'suspected' && <button onClick={() => void confirmSuspected(row.id)}>提交疑似确认</button>}{isAdmin && row.status !== 'released' && <button onClick={() => void releaseRelation(row.id)}>解除关系</button>}{isAdmin && <button disabled={historyProtected} onClick={() => void deleteRelation(row.id)}>删除关系</button>}{historyProtected && <span className="text-amber-700">已有跟踪历史，请解除关系并保留历史。</span>}</div>; })}{!visibleRelations.length && <p className="text-sm text-slate-500">暂无符合条件的关系{canOperate ? '，可手工新增或通过上方识别卡导入 Excel 关系。' : '。'}</p>}</div><div className="mt-3 space-y-1">{imports.map((item) => <div key={item.id} className="flex flex-wrap gap-3 text-sm"><span>{item.fileName} · {channelingTypeLabels[item.channelingType]}：有效 {item.validCount}，重复 {item.duplicateCount}，自身 {item.selfRelationCount}，无效 {item.invalidCount}</span>{canOperate && item.status === 'preview' && <button disabled={confirming} onClick={() => void confirmImport(item.id)}>{confirmingImportIdRef.current === item.id ? '正在确认…' : '确认导入'}</button>}</div>)}</div></section>}
         {projectTab === 'timeline' && <div id="project-panel-timeline" role="tabpanel" aria-labelledby="project-tab-timeline" className="mt-4"><ChannelingTimeline role={isAdmin ? 'admin' : 'guest'} subject={{ subjectType: 'project', subjectId: selected.id }}/></div>}
       </section> : <section className="app-card p-5 text-sm text-slate-500">暂无项目详情。{canOperate ? '请新建项目；关系文件仍可先在上方识别预览。' : '可使用左侧筛选查看完整台账。'}</section>}
     </section>

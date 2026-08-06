@@ -108,6 +108,15 @@ export type ProjectSummary = {
 
 type ApiEnvelope<T> = { success: boolean; data?: T; message?: string };
 
+export class ChannelingApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 export async function channelingRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const token = typeof localStorage === 'undefined' ? null : localStorage.getItem('token');
@@ -120,14 +129,14 @@ export async function channelingRequest<T>(url: string, options: RequestInit = {
   try {
     parsed = JSON.parse(text) as unknown;
   } catch {
-    throw new Error('服务响应格式异常，请刷新页面或重试');
+    throw new ChannelingApiError('服务响应格式异常，请刷新页面或重试', response.status);
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)
     || typeof (parsed as { success?: unknown }).success !== 'boolean') {
-    throw new Error('服务响应格式异常，请刷新页面或重试');
+    throw new ChannelingApiError('服务响应格式异常，请刷新页面或重试', response.status);
   }
   const payload = parsed as ApiEnvelope<T>;
-  if (!response.ok || !payload.success) throw new Error(payload.message || '请求失败');
-  if (payload.data === undefined) throw new Error('服务响应数据缺失');
+  if (!response.ok || !payload.success) throw new ChannelingApiError(payload.message || '请求失败', response.status);
+  if (payload.data === undefined) throw new ChannelingApiError('服务响应数据缺失', response.status);
   return payload.data;
 }

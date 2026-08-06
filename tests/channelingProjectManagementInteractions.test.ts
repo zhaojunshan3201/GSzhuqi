@@ -224,3 +224,75 @@ test('a delayed confirmation cannot restore the project or type filter active wh
   await act(async () => { root.unmount(); });
   dom.window.close();
 });
+
+test('history-protected relation deletion becomes non-executable while release and unrelated relations remain available', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  Object.defineProperty(window, 'confirm', { configurable: true, value: () => true });
+  const first = relation('受保护注入井', 'steam');
+  const other = relation('普通注入井', 'nitrogen');
+  let deleteCalls = 0; let releaseCalls = 0; let unrelatedDeleteCalls = 0;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7/relations') return payload([first, other]);
+    if (url === '/api/channeling-projects/7/relation-imports') return payload([]);
+    if (url === '/api/channeling-relations/1' && init?.method === 'DELETE') { deleteCalls++; return new Response(JSON.stringify({ success: false, message: 'Relation has tracking history' }), { status: 409 }); }
+    if (url === '/api/channeling-relations/1' && init?.method === 'PATCH') { releaseCalls++; return new Response(JSON.stringify({ success: true, data: { ...first, status: 'released' } }), { status: 200 }); }
+    if (url === '/api/channeling-relations/2' && init?.method === 'DELETE') { unrelatedDeleteCalls++; return new Response(JSON.stringify({ success: false, message: 'Concurrent update conflict' }), { status: 409 }); }
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  await openRelations(host);
+  const deleteButtons = [...host.querySelectorAll('button')].filter((button) => button.textContent === '删除关系') as HTMLButtonElement[];
+  assert.equal(deleteButtons.length, 2);
+  const protectedDelete = deleteButtons[0]; const protectedRow = protectedDelete.parentElement!;
+  await act(async () => protectedDelete.click());
+  assert.equal(deleteCalls, 1);
+  assert.equal(protectedDelete.disabled, true);
+  assert.match(protectedRow.textContent || '', /已有跟踪历史，请解除关系并保留历史/);
+  await act(async () => protectedDelete.click());
+  assert.equal(deleteCalls, 1);
+  const release = [...protectedRow.querySelectorAll('button')].find((button) => button.textContent === '解除关系') as HTMLButtonElement;
+  assert.equal(release.disabled, false);
+  await act(async () => release.click());
+  assert.equal(releaseCalls, 1);
+  const currentDeletes = [...host.querySelectorAll('button')].filter((button) => button.textContent === '删除关系') as HTMLButtonElement[];
+  assert.equal(currentDeletes[1].disabled, false);
+  await act(async () => currentDeletes[1].click());
+  assert.equal(unrelatedDeleteCalls, 1);
+  assert.equal(currentDeletes[1].disabled, false);
+  assert.doesNotMatch(currentDeletes[1].parentElement?.textContent || '', /已有跟踪历史/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('history-protected project deletion disables only that project hard delete', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  Object.defineProperty(window, 'confirm', { configurable: true, value: () => true });
+  const otherProject = { ...project, id: 8, projectName: '普通项目' };
+  let protectedDeletes = 0;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project, otherProject]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url.endsWith('/relations') || url.endsWith('/relation-imports')) return payload([]);
+    if (url === '/api/channeling-projects/7' && init?.method === 'DELETE') { protectedDeletes++; return new Response(JSON.stringify({ success: false, message: 'Project has relations or tracking history' }), { status: 409 }); }
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const protectedDelete = [...host.querySelectorAll('button')].find((button) => button.textContent === '删除项目') as HTMLButtonElement;
+  await act(async () => protectedDelete.click());
+  assert.equal(protectedDeletes, 1);
+  assert.equal(protectedDelete.disabled, true);
+  assert.match(host.textContent || '', /项目已有关系或跟踪历史，应保留历史记录/);
+  await act(async () => protectedDelete.click());
+  assert.equal(protectedDeletes, 1);
+  const otherButton = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('普通项目')) as HTMLButtonElement;
+  await act(async () => otherButton.click());
+  const otherDelete = [...host.querySelectorAll('button')].find((button) => button.textContent === '删除项目') as HTMLButtonElement;
+  assert.equal(otherDelete.disabled, false);
+  assert.doesNotMatch(host.textContent || '', /项目已有关系或跟踪历史，应保留历史记录/);
+  await act(async () => root.unmount()); dom.window.close();
+});

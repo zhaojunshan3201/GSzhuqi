@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
-import { channelingRequest } from '../src/lib/channelingTrackingApi.ts';
+import { ChannelingApiError, channelingRequest } from '../src/lib/channelingTrackingApi.ts';
 
 test('channelingRequest unwraps successful data and preserves caller headers with the existing auth token', async () => {
   const dom = new JSDOM('', { url: 'http://localhost' });
@@ -33,7 +33,12 @@ test('channelingRequest surfaces a server message even for an error status', asy
     status: 409,
     headers: { 'content-type': 'application/json' },
   })) as typeof fetch;
-  await assert.rejects(() => channelingRequest('/api/example'), /跟踪记录已被更正/);
+  await assert.rejects(() => channelingRequest('/api/example'), (error: unknown) => {
+    assert.ok(error instanceof ChannelingApiError);
+    assert.equal(error.status, 409);
+    assert.match(error.message, /跟踪记录已被更正/);
+    return true;
+  });
 });
 
 test('channelingRequest reports non-JSON and malformed success envelopes', async (t) => {
