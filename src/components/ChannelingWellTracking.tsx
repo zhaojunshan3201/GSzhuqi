@@ -126,6 +126,8 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
       const created = await channelingRequest<ChannelingWellProfile>('/api/channeling-wells', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(createDraft) });
       if (!mounted.current || createMutationToken.current !== mutationToken) return;
       listGeneration.current++;
+      setListLoading(false);
+      setListError('');
       setProfiles((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setSelectedId(created.id); setCreateDraft({ wellNo: '', block: '', owner: '' });
     } catch (error) {

@@ -93,8 +93,10 @@ test('an older list response cannot remove a newly created profile', async () =>
   await act(async () => { change(form.elements.namedItem('wellNo') as HTMLInputElement, '新建井'); });
   await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
   assert.equal(host.querySelectorAll('[data-well-id="12"]').length, 1);
+  assert.doesNotMatch(host.textContent || '', /正在加载单井档案/);
   await act(async () => { oldList.resolve(await response([])); await oldList.promise; });
   assert.equal(host.querySelectorAll('[data-well-id="12"]').length, 1);
+  assert.doesNotMatch(host.textContent || '', /正在加载单井档案/);
   await cleanup(root, dom);
 });
 
