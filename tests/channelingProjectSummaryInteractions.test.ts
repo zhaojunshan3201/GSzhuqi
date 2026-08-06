@@ -128,6 +128,35 @@ test('a newly applied range aborts the prior pending applied request', async () 
   await act(async () => root.unmount()); dom.window.close();
 });
 
+test('a delayed default response preserves a user-edited draft field and hydrates the untouched field', async () => {
+  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); let resolveDefault!: (value: Response) => void; const fetched: string[] = [];
+  const pendingDefault = new Promise<Response>((resolve) => { resolveDefault = resolve; });
+  globalThis.fetch = (async (input) => { const url = String(input); fetched.push(url); return url.endsWith('/summary') ? pendingDefault : commonFetch()(input); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest' })));
+  const start = host.querySelector('input[aria-label="汇总开始日期"]') as HTMLInputElement;
+  const end = host.querySelector('input[aria-label="汇总结束日期"]') as HTMLInputElement;
+  await act(async () => changeInput(start, '2026-08-01'));
+  await act(async () => { resolveDefault(await response(summary(7))); await pendingDefault; });
+  assert.equal(start.value, '2026-08-01');
+  assert.equal(end.value, '2026-08-06');
+  assert.equal(fetched.filter((url) => /\/summary(?:\?|$)/.test(url)).length, 1);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a delayed default response preserves both user-edited draft fields without another request', async () => {
+  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); let resolveDefault!: (value: Response) => void; const fetched: string[] = [];
+  const pendingDefault = new Promise<Response>((resolve) => { resolveDefault = resolve; });
+  globalThis.fetch = (async (input) => { const url = String(input); fetched.push(url); return url.endsWith('/summary') ? pendingDefault : commonFetch()(input); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest' })));
+  const start = host.querySelector('input[aria-label="汇总开始日期"]') as HTMLInputElement;
+  const end = host.querySelector('input[aria-label="汇总结束日期"]') as HTMLInputElement;
+  await act(async () => { changeInput(start, '2026-07-01'); changeInput(end, '2026-07-31'); });
+  await act(async () => { resolveDefault(await response(summary(7))); await pendingDefault; });
+  assert.deepEqual([start.value, end.value], ['2026-07-01', '2026-07-31']);
+  assert.equal(fetched.filter((url) => /\/summary(?:\?|$)/.test(url)).length, 1);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
 test('project detail tabs support roving keyboard navigation', async () => {
   const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); globalThis.fetch = commonFetch();
   await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest' })));

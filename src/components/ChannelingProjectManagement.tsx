@@ -27,6 +27,7 @@ function ProjectSummaryPanel({ projectId }: { projectId: number }) {
   const [retryKey, setRetryKey] = useState(0);
   const [requestVersion, setRequestVersion] = useState(0);
   const explicitRange = useRef(false);
+  const dirtyDraft = useRef({ start: false, end: false });
   const activeController = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -37,7 +38,7 @@ function ProjectSummaryPanel({ projectId }: { projectId: number }) {
     setLoading(true);
     const url = explicitRange.current ? `/api/channeling-projects/${projectId}/summary?${new URLSearchParams(appliedRange)}` : `/api/channeling-projects/${projectId}/summary`;
     void channelingRequest<ProjectSummary>(url, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) { setSummary(data); if (!explicitRange.current) { setDraftRange(data.range); setAppliedRange(data.range); } } })
+      .then((data) => { if (!controller.signal.aborted) { setSummary(data); if (!explicitRange.current) { setDraftRange((current) => ({ start: dirtyDraft.current.start ? current.start : data.range.start, end: dirtyDraft.current.end ? current.end : data.range.end })); setAppliedRange(data.range); } } })
       .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '项目汇总加载失败'); })
       .finally(() => { if (!controller.signal.aborted) { setLoading(false); if (activeController.current === controller) activeController.current = null; } });
     return () => { controller.abort(); if (activeController.current === controller) activeController.current = null; };
@@ -65,7 +66,7 @@ function ProjectSummaryPanel({ projectId }: { projectId: number }) {
     ['累计注汽量', summary.cumulativeSteam], ['期初日产油合计', summary.initialTotalOil], ['最新日产油合计', summary.latestTotalOil], ['日产油合计变化', summary.totalOilChange], ['已评价次数', summary.evaluatedCount],
   ] : [];
   return <section id="project-panel-overview" role="tabpanel" aria-labelledby="project-tab-overview" className="mt-4">
-    <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]"><label>汇总开始日期<input aria-label="汇总开始日期" className="field-control" type="date" value={draftRange.start} onInput={(event) => { const value = event.currentTarget.value; setDraftRange((current) => ({ ...current, start: value })); setValidationError(''); }}/></label><label>汇总结束日期<input aria-label="汇总结束日期" className="field-control" type="date" value={draftRange.end} onInput={(event) => { const value = event.currentTarget.value; setDraftRange((current) => ({ ...current, end: value })); setValidationError(''); }}/></label><button type="button" className="action-button" onClick={applyRange}>应用统计范围</button></div>
+    <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]"><label>汇总开始日期<input aria-label="汇总开始日期" className="field-control" type="date" value={draftRange.start} onInput={(event) => { const value = event.currentTarget.value; dirtyDraft.current.start = true; setDraftRange((current) => ({ ...current, start: value })); setValidationError(''); }}/></label><label>汇总结束日期<input aria-label="汇总结束日期" className="field-control" type="date" value={draftRange.end} onInput={(event) => { const value = event.currentTarget.value; dirtyDraft.current.end = true; setDraftRange((current) => ({ ...current, end: value })); setValidationError(''); }}/></label><button type="button" className="action-button" onClick={applyRange}>应用统计范围</button></div>
     {validationError && <p role="alert" className="mt-2 text-sm text-red-700">{validationError}</p>}
     {loading && <p className="mt-3 text-sm text-slate-500">正在加载项目汇总…</p>}
     {error && <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p>{error}</p><button type="button" className="mt-2" onClick={() => setRetryKey((value) => value + 1)}>重试</button></div>}
