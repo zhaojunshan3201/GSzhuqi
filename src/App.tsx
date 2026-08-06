@@ -39,7 +39,7 @@ import { OilWellMap } from './components/OilWellMap';
 import { ExternalTransferTracking } from './components/ExternalTransferTracking';
 import { InjectionProductionCockpit } from './components/InjectionProductionCockpit';
 import { InjectionProjectManagement } from './components/InjectionProjectManagement';
-import { ChannelingProjectManagement } from './components/ChannelingProjectManagement';
+import { ChannelingWorkspace } from './components/ChannelingWorkspace';
 import { InjectionOptimization } from './components/InjectionOptimization';
 import { InjectionOperationReports } from './components/InjectionOperationReports';
 import { applyCockpitMeasureFilters, cockpitAlertLabels, filterMeasuresByCockpitWellNos, shouldApplyCockpitMeasureFilters, shouldCloseMobileDrawer, type CockpitMeasureFilters } from './lib/injectionProductionCockpitDrilldown';
@@ -6181,7 +6181,8 @@ export default function App() {
         <main className="app-content">
               {activeTab === 'injectionOptimization' && <InjectionOptimization />}
               {activeTab === 'measureWellSelection' && <MeasureWellSelection />}
-               {activeTab === 'channelingProjectManagement' && <ChannelingProjectManagement role={user?.role || 'guest'} />}
+               {activeTab === 'channelingProjectManagement' && <ChannelingWorkspace key="channeling-projects" role={user?.role || 'guest'} initialView="projects" />}
+               {activeTab === 'channelingWellTracking' && <ChannelingWorkspace key="channeling-wells" role={user?.role || 'guest'} initialView="wells" />}
                 {activeTab === 'injectionOperationReports' && <InjectionOperationReports />}
               {(activeTab === 'injectionProjectManagement' || activeTab === 'injectionPlan' || activeTab === 'injectionConstruction' || activeTab === 'injectionSoakTransfer') && <InjectionProjectManagement view={injectionProjectView} initialProjectId={injectionPlanProjectId?.toString()} onClearProjectLocation={() => setInjectionPlanProjectId((current) => nextProjectLocationId(current, { type: 'clear' }))} initialWellNo={prioritySoakingWellNo} />}
               {activeTab === 'injectionProductionCockpit' && <InjectionProductionCockpit onNavigate={(tab, filters = {}) => {

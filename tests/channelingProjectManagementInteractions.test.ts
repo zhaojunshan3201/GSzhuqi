@@ -68,6 +68,15 @@ test('preview selects the current project when projects finish loading after upl
   dom.window.close();
 });
 
+test('every visible relation row exposes the detail and tracking callback', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); let opened = 0;
+  globalThis.fetch = (async (input) => { const url = String(input); if (url === '/api/channeling-projects') return payload([project]); if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url.includes('/relations')) return payload([relation('注1', 'steam'), relation('注2', 'nitrogen')]); if (url.includes('/relation-imports')) return payload([]); throw new Error(url); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest', onOpenRelation: (id: number) => { opened = id; } })));
+  const buttons = [...host.querySelectorAll('button')].filter((item) => item.textContent === '查看详情/跟踪记录'); assert.equal(buttons.length, 2);
+  await act(async () => buttons[1].click()); assert.equal(opened, 2);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
 test('confirmation submits once and keeps success semantics when refresh fails', async () => {
   const dom = setupDom();
   const host = document.getElementById('root')!;
