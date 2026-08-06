@@ -125,6 +125,7 @@ test('admin add form only offers manual types, blocks duplicate submission, and 
   const subject: TrackingSubject = { subjectType: 'relation', subjectId: 3 };
   await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject })); });
   const form = host.querySelector('form[data-event-form]') as HTMLFormElement;
+  assert.equal(form.getAttribute('aria-label'), '新增跟踪记录');
   const select = form.elements.namedItem('eventType') as HTMLSelectElement;
   assert.deepEqual([...select.options].map((option) => option.value), ['discovered', 'measure_planned', 'executed', 'reviewed', 'closed', 'recurred']);
   await act(async () => {
@@ -183,6 +184,7 @@ test('admin correction requires all fields, keeps the original visible, and refr
   await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'project', subjectId: 7 } })); });
   await act(async () => { (host.querySelector('button[aria-label="更正记录 4"]') as HTMLButtonElement).click(); });
   const form = host.querySelector('form[data-correction-for="4"]') as HTMLFormElement;
+  assert.equal(form.getAttribute('aria-label'), '更正跟踪记录 4');
   await act(async () => {
     for (const [name, value] of [['reason', '文字错误'], ['occurredOn', '2026-08-06'], ['content', '更正后的内容'], ['evidence', '复核记录'], ['owner', '王工']] as const) change(form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement, value);
   });
@@ -284,5 +286,81 @@ test('a delayed correction from the previous subject cannot close or reload the 
     '/api/channeling-tracking-events?subjectType=well&subjectId=1',
     '/api/channeling-tracking-events?subjectType=well&subjectId=2',
   ]);
+  await cleanup(root, dom);
+});
+
+test('unmount invalidates a delayed add without starting a follow-up load', async () => {
+  const { dom, host, root } = setup();
+  const oldPost = deferred<Response>();
+  const getUrls: string[] = [];
+  globalThis.fetch = (async (input, init) => {
+    if (init?.method === 'POST') return oldPost.promise;
+    getUrls.push(String(input));
+    return response([]);
+  }) as typeof fetch;
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 1 } })); });
+  const form = host.querySelector('form[data-event-form]') as HTMLFormElement;
+  await act(async () => {
+    change(form.elements.namedItem('occurredOn') as HTMLInputElement, '2026-08-06');
+    change(form.elements.namedItem('content') as HTMLTextAreaElement, '卸载前新增');
+    change(form.elements.namedItem('owner') as HTMLInputElement, '甲');
+  });
+  await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  await act(async () => { root.unmount(); });
+  await act(async () => { oldPost.resolve(await response(event(51))); await oldPost.promise; });
+  assert.deepEqual(getUrls, ['/api/channeling-tracking-events?subjectType=well&subjectId=1']);
+  dom.window.close();
+});
+
+test('unmount invalidates a delayed correction without starting a follow-up load', async () => {
+  const { dom, host, root } = setup();
+  const oldPost = deferred<Response>();
+  const getUrls: string[] = [];
+  globalThis.fetch = (async (input, init) => {
+    if (init?.method === 'POST') return oldPost.promise;
+    getUrls.push(String(input));
+    return response([event(52, 'reviewed')]);
+  }) as typeof fetch;
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 1 } })); });
+  await act(async () => { (host.querySelector('button[aria-label="更正记录 52"]') as HTMLButtonElement).click(); });
+  const form = host.querySelector('form[data-correction-for="52"]') as HTMLFormElement;
+  await act(async () => {
+    change(form.elements.namedItem('reason') as HTMLInputElement, '卸载前更正');
+    change(form.elements.namedItem('evidence') as HTMLInputElement, '复核证据');
+  });
+  await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  await act(async () => { root.unmount(); });
+  await act(async () => { oldPost.resolve(await response(event(53, 'corrected', { supersedesEventId: 52 }))); await oldPost.promise; });
+  assert.deepEqual(getUrls, ['/api/channeling-tracking-events?subjectType=well&subjectId=1']);
+  dom.window.close();
+});
+
+test('starting another correction on the same subject isolates it from the pending correction', async () => {
+  const { dom, host, root } = setup();
+  const oldPost = deferred<Response>();
+  let loads = 0;
+  globalThis.fetch = (async (_input, init) => {
+    if (init?.method === 'POST') return oldPost.promise;
+    loads++;
+    return response([event(61, 'reviewed'), event(62, 'reviewed')]);
+  }) as typeof fetch;
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'project', subjectId: 7 } })); });
+  await act(async () => { (host.querySelector('button[aria-label="更正记录 61"]') as HTMLButtonElement).click(); });
+  const first = host.querySelector('form[data-correction-for="61"]') as HTMLFormElement;
+  await act(async () => {
+    change(first.elements.namedItem('reason') as HTMLInputElement, '第一条更正');
+    change(first.elements.namedItem('evidence') as HTMLInputElement, '第一条证据');
+  });
+  await act(async () => { first.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+
+  await act(async () => { (host.querySelector('button[aria-label="更正记录 62"]') as HTMLButtonElement).click(); });
+  const second = host.querySelector('form[data-correction-for="62"]') as HTMLFormElement;
+  await act(async () => { change(second.elements.namedItem('reason') as HTMLInputElement, '第二条正在填写'); });
+  await act(async () => { oldPost.resolve(await response(event(63, 'corrected', { supersedesEventId: 61 }))); await oldPost.promise; });
+
+  const preserved = host.querySelector('form[data-correction-for="62"]') as HTMLFormElement;
+  assert.ok(preserved);
+  assert.equal((preserved.elements.namedItem('reason') as HTMLInputElement).value, '第二条正在填写');
+  assert.equal(loads, 1, 'the obsolete correction does not refresh the timeline');
   await cleanup(root, dom);
 });

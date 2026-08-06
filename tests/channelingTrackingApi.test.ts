@@ -46,3 +46,17 @@ test('channelingRequest reports non-JSON and malformed success envelopes', async
     await assert.rejects(() => channelingRequest('/api/example'), /服务响应数据缺失/);
   });
 });
+
+test('channelingRequest consistently rejects malformed JSON envelopes', async (t) => {
+  for (const [name, payload] of [
+    ['null', null],
+    ['array', []],
+    ['missing success', { data: 1 }],
+    ['non-boolean success', { success: 'true', data: 1 }],
+  ] as const) {
+    await t.test(name, async () => {
+      globalThis.fetch = (async () => new Response(JSON.stringify(payload), { status: 200 })) as typeof fetch;
+      await assert.rejects(() => channelingRequest('/api/example'), /^Error: 服务响应格式异常，请刷新页面或重试$/);
+    });
+  }
+});

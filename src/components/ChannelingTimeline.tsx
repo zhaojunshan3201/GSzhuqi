@@ -90,6 +90,10 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
     void loadEvents();
     return () => {
       requestGeneration.current++;
+      addMutationToken.current++;
+      correctionMutationToken.current++;
+      submittingRef.current = false;
+      correctionSubmittingRef.current = false;
       activeController.current?.abort();
     };
   }, [loadEvents]);
@@ -131,6 +135,9 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
   };
 
   const startCorrection = (item: TrackingEvent) => {
+    correctionMutationToken.current++;
+    correctionSubmittingRef.current = false;
+    setCorrectionSubmitting(false);
     setCorrectingId(item.id);
     setCorrection({ reason: '', occurredOn: item.occurredOn, content: item.content, evidence: item.evidence, owner: item.owner });
     setCorrectionError('');
@@ -177,7 +184,7 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
   };
 
   return <section className="space-y-4" aria-label="跟踪记录时间线">
-    {role === 'admin' && <form data-event-form onSubmit={submitEvent} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-2">
+    {role === 'admin' && <form data-event-form aria-label="新增跟踪记录" onSubmit={submitEvent} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-2">
       <h3 className="font-semibold text-slate-800 md:col-span-2">新增跟踪记录</h3>
       <label className="text-sm text-slate-700">记录类型
         <select name="eventType" value={draft.eventType} onChange={(e) => setDraft((current) => ({ ...current, eventType: e.target.value as ManualTrackingEventType }))} className="mt-1 block w-full rounded border p-2">
@@ -217,7 +224,7 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
         </dl>
         {item.supersedesEventId !== null && <p className="mt-2 text-sm text-amber-700">更正自记录 #{item.supersedesEventId}</p>}
         {item.voidedAt && <p className="mt-2 text-sm text-red-700">已作废：{item.voidReason || '已更正'}</p>}
-        {correctingId === item.id && <form data-correction-for={item.id} onSubmit={(e) => void submitCorrection(e, item.id)} className="mt-4 grid gap-2 rounded bg-amber-50 p-3 md:grid-cols-2">
+        {correctingId === item.id && <form data-correction-for={item.id} aria-label={`更正跟踪记录 ${item.id}`} onSubmit={(e) => void submitCorrection(e, item.id)} className="mt-4 grid gap-2 rounded bg-amber-50 p-3 md:grid-cols-2">
           <label className="text-sm">更正原因<input name="reason" required value={correction.reason} onInput={(e) => { const value = e.currentTarget.value; setCorrection((current) => ({ ...current, reason: value })); }} className="mt-1 block w-full rounded border p-2" /></label>
           <label className="text-sm">发生日期<input name="occurredOn" type="date" required value={correction.occurredOn} onInput={(e) => { const value = e.currentTarget.value; setCorrection((current) => ({ ...current, occurredOn: value })); }} className="mt-1 block w-full rounded border p-2" /></label>
           <label className="text-sm md:col-span-2">更正内容<textarea name="content" required value={correction.content} onInput={(e) => { const value = e.currentTarget.value; setCorrection((current) => ({ ...current, content: value })); }} className="mt-1 block w-full rounded border p-2" /></label>

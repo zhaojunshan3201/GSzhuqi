@@ -113,12 +113,17 @@ export async function channelingRequest<T>(url: string, options: RequestInit = {
   if (response.status === 204) return undefined as T;
 
   const text = await response.text();
-  let payload: ApiEnvelope<T>;
+  let parsed: unknown;
   try {
-    payload = JSON.parse(text) as ApiEnvelope<T>;
+    parsed = JSON.parse(text) as unknown;
   } catch {
     throw new Error('服务响应格式异常，请刷新页面或重试');
   }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)
+    || typeof (parsed as { success?: unknown }).success !== 'boolean') {
+    throw new Error('服务响应格式异常，请刷新页面或重试');
+  }
+  const payload = parsed as ApiEnvelope<T>;
   if (!response.ok || !payload.success) throw new Error(payload.message || '请求失败');
   if (payload.data === undefined) throw new Error('服务响应数据缺失');
   return payload.data;
