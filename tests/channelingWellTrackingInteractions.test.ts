@@ -306,3 +306,91 @@ test('stale selected-well responses cannot overwrite the current selection', asy
   assert.match(host.textContent || '', /当前井/); assert.doesNotMatch(host.textContent || '', /旧井/);
   await cleanup(root, dom);
 });
+
+test('admin updates only block and owner with the optimistic token and duplicate submission is blocked', async () => {
+  const { dom, host, root } = setup(); const pending = deferred<Response>(); let patches = 0; let body: any;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (init?.method === 'PATCH') { patches++; body = JSON.parse(String(init.body)); return pending.promise; }
+    if (url.startsWith('/api/channeling-wells?')) return response([profile(1, '维护井')]);
+    if (url.includes('/metrics?')) return response(metrics([]));
+    if (url.endsWith('/relations')) return response([]);
+    return response(profile(1, '维护井'));
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 1 })));
+  const form = host.querySelector('form[aria-label="维护单井档案"]') as HTMLFormElement;
+  assert.ok(form); await act(async () => { change(form.elements.namedItem('block') as HTMLInputElement, '新区块'); change(form.elements.namedItem('owner') as HTMLInputElement, '新负责人'); });
+  await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  assert.equal(patches, 1); assert.deepEqual(body, { block: '新区块', owner: '新负责人', updatedAt: '2026-08-01T00:00:00Z' });
+  const updated = { ...profile(1, '维护井'), block: '新区块', owner: '新负责人', updatedAt: '2026-08-02T00:00:00Z' };
+  await act(async () => { pending.resolve(await response(updated)); await pending.promise; });
+  assert.match(host.textContent || '', /档案已更新/); assert.equal(host.querySelectorAll('[data-well-id="1"]').length, 1); assert.match(host.querySelector('[data-well-id="1"]')?.textContent || '', /新区块 · 新负责人/);
+  assert.equal((form.elements.namedItem('block') as HTMLInputElement).value, '新区块');
+  await cleanup(root, dom);
+});
+
+test('guest cannot edit a profile and failed admin updates preserve draft values', async () => {
+  const first = setup();
+  globalThis.fetch = (async (input) => String(input).includes('/metrics?') ? response(metrics([])) : String(input).endsWith('/relations') ? response([]) : String(input).startsWith('/api/channeling-wells?') ? response([profile(1, '只读井')]) : response(profile(1, '只读井'))) as typeof fetch;
+  await act(async () => first.root.render(createElement(ChannelingWellTracking, { role: 'guest', selectedWellId: 1 })));
+  assert.equal(first.host.querySelector('form[aria-label="维护单井档案"]'), null); await cleanup(first.root, first.dom);
+
+  const second = setup();
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (init?.method === 'PATCH') return response(undefined, { status: 409, success: false, message: '档案已被他人更新' });
+    if (url.includes('/metrics?')) return response(metrics([])); if (url.endsWith('/relations')) return response([]);
+    if (url.startsWith('/api/channeling-wells?')) return response([profile(1, '冲突井')]); return response(profile(1, '冲突井'));
+  }) as typeof fetch;
+  await act(async () => second.root.render(createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 1 })));
+  const form = second.host.querySelector('form[aria-label="维护单井档案"]') as HTMLFormElement;
+  await act(async () => { change(form.elements.namedItem('block') as HTMLInputElement, '保留区块'); change(form.elements.namedItem('owner') as HTMLInputElement, '保留负责人'); });
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  assert.match(second.host.textContent || '', /档案已被他人更新/); assert.equal((form.elements.namedItem('block') as HTMLInputElement).value, '保留区块'); assert.equal((form.elements.namedItem('owner') as HTMLInputElement).value, '保留负责人');
+  await cleanup(second.root, second.dom);
+});
+
+test('a delayed profile update cannot affect a newly selected well', async () => {
+  const { dom, host, root } = setup(); const pending = deferred<Response>();
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (init?.method === 'PATCH') return pending.promise;
+    if (url.startsWith('/api/channeling-wells?')) return response([profile(1, '旧井'), profile(2, '当前井')]);
+    if (url.includes('/metrics?')) return response(metrics([])); if (url.endsWith('/relations')) return response([]);
+    return response(url.endsWith('/2') ? profile(2, '当前井') : profile(1, '旧井'));
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 1 })));
+  const form = host.querySelector('form[aria-label="维护单井档案"]') as HTMLFormElement; await act(async () => change(form.elements.namedItem('block') as HTMLInputElement, '旧草稿'));
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await act(async () => root.render(createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 2 })));
+  await act(async () => { pending.resolve(await response({ ...profile(1, '旧井'), block: '旧草稿' })); await pending.promise; });
+  assert.match(host.textContent || '', /当前井/); assert.doesNotMatch(host.textContent || '', /档案已更新/); assert.equal((host.querySelector('form[aria-label="维护单井档案"] input[name="block"]') as HTMLInputElement).value, '高3');
+  await cleanup(root, dom);
+});
+
+test('profile maintenance validates required ownership fields without losing the draft', async () => {
+  const { dom, host, root } = setup(); let patches = 0;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (init?.method === 'PATCH') { patches++; return response(profile(1, '校验井')); }
+    if (url.startsWith('/api/channeling-wells?')) return response([profile(1, '校验井')]);
+    if (url.includes('/metrics?')) return response(metrics([])); if (url.endsWith('/relations')) return response([]); return response(profile(1, '校验井'));
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 1 })));
+  const form = host.querySelector('form[aria-label="维护单井档案"]') as HTMLFormElement;
+  await act(async () => { change(form.elements.namedItem('block') as HTMLInputElement, '待保留区块'); change(form.elements.namedItem('owner') as HTMLInputElement, '   '); });
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  assert.equal(patches, 0); assert.match(host.textContent || '', /请填写区块和负责人/); assert.equal((form.elements.namedItem('block') as HTMLInputElement).value, '待保留区块');
+  await cleanup(root, dom);
+});
+
+test('unmount invalidates a delayed profile maintenance request', async () => {
+  const { dom, host, root } = setup(); const pending = deferred<Response>();
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (init?.method === 'PATCH') return pending.promise;
+    if (url.startsWith('/api/channeling-wells?')) return response([profile(1, '卸载井')]); if (url.includes('/metrics?')) return response(metrics([])); if (url.endsWith('/relations')) return response([]); return response(profile(1, '卸载井'));
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(StrictMode, null, createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 1 }))));
+  const form = host.querySelector('form[aria-label="维护单井档案"]') as HTMLFormElement;
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await cleanup(root, dom);
+  await act(async () => { pending.resolve(await response({ ...profile(1, '卸载井'), block: '迟到区块' })); await pending.promise; });
+  assert.equal(host.textContent, '');
+});

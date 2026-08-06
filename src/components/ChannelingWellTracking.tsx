@@ -42,8 +42,14 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
   const [createDraft, setCreateDraft] = useState({ wellNo: '', block: '', owner: '' });
   const [createError, setCreateError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [editDraft, setEditDraft] = useState({ block: '', owner: '' });
+  const [updateError, setUpdateError] = useState('');
+  const [updateSuccess, setUpdateSuccess] = useState('');
+  const [updating, setUpdating] = useState(false);
   const creatingRef = useRef(false);
+  const updatingRef = useRef(false);
   const createMutationToken = useRef(0);
+  const updateMutationToken = useRef(0);
   const mounted = useRef(true);
   const mutationSelection = useRef<number | undefined>(selectedWellId);
   const listGeneration = useRef(0);
@@ -54,15 +60,22 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
     if (mutationSelection.current === selectedId) return;
     mutationSelection.current = selectedId;
     createMutationToken.current++;
+    updateMutationToken.current++;
     creatingRef.current = false;
+    updatingRef.current = false;
     setCreating(false);
+    setUpdating(false);
+    setUpdateError('');
+    setUpdateSuccess('');
   }, [selectedId]);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       createMutationToken.current++;
+      updateMutationToken.current++;
       creatingRef.current = false;
+      updatingRef.current = false;
     };
   }, []);
 
@@ -117,6 +130,13 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
     return () => { controller.abort(); detailGeneration.current++; };
   }, [loadDetailPart, selectedId]);
 
+  useEffect(() => {
+    if (!detail || detail.id !== selectedId) return;
+    setEditDraft({ block: detail.block, owner: detail.owner });
+    setUpdateError('');
+    setUpdateSuccess('');
+  }, [detail?.id, selectedId]);
+
   const search = (event: FormEvent) => { event.preventDefault(); void loadProfiles(query); };
   const createProfile = async (event: FormEvent) => {
     event.preventDefault(); if (creatingRef.current) return;
@@ -134,6 +154,33 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
       if (mounted.current && createMutationToken.current === mutationToken) setCreateError(errorText(error, '单井档案保存失败'));
     } finally {
       if (mounted.current && createMutationToken.current === mutationToken) { creatingRef.current = false; setCreating(false); }
+    }
+  };
+
+  const updateProfile = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!detail || detail.id !== selectedId || updatingRef.current) return;
+    if (!editDraft.block.trim() || !editDraft.owner.trim()) { setUpdateError('请填写区块和负责人'); setUpdateSuccess(''); return; }
+    const wellId = detail.id;
+    const mutationToken = ++updateMutationToken.current;
+    updatingRef.current = true; setUpdating(true); setUpdateError(''); setUpdateSuccess('');
+    try {
+      const updated = await channelingRequest<ChannelingWellProfile>(`/api/channeling-wells/${wellId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ block: editDraft.block, owner: editDraft.owner, updatedAt: detail.updatedAt }),
+      });
+      if (!mounted.current || updateMutationToken.current !== mutationToken || selectedId !== wellId) return;
+      setDetail(updated);
+      setProfiles((current) => {
+        const existing = current.some((item) => item.id === updated.id);
+        return existing ? current.map((item) => item.id === updated.id ? { ...item, ...updated } : item) : [updated, ...current];
+      });
+      setEditDraft({ block: updated.block, owner: updated.owner });
+      setUpdateSuccess('档案已更新');
+    } catch (error) {
+      if (mounted.current && updateMutationToken.current === mutationToken && selectedId === wellId) setUpdateError(errorText(error, '单井档案更新失败'));
+    } finally {
+      if (mounted.current && updateMutationToken.current === mutationToken && selectedId === wellId) { updatingRef.current = false; setUpdating(false); }
     }
   };
 
@@ -168,7 +215,7 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
       {selectedId && <>
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">{detail?.wellNo || `单井 #${selectedId}`}</h2><p className="text-sm text-slate-500">{roles.length ? roles.map((item) => item === 'injector' ? '注汽井' : '采油井').join(' / ') : '暂未识别井角色'}</p></div></div>
         <nav aria-label="单井详情标签" role="tablist" className="my-4 flex flex-wrap gap-2">{([['overview', '概览'], ['metrics', '生产指标'], ['relations', '关联关系'], ['timeline', '跟踪记录']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)} className={`rounded px-3 py-2 ${tab === key ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>{label}</button>)}</nav>
-        {tab === 'overview' && <div className="space-y-4">{detailLoading && <p role="status">正在加载单井详情…</p>}{detailError && <p role="alert">{detailError} <button type="button" onClick={() => retryPart('detail')}>重试详情</button></p>}{detail && <dl className="grid gap-3 sm:grid-cols-2"><div><dt>井号</dt><dd>{detail.wellNo}</dd></div><div><dt>区块</dt><dd>{valueText(detail.block)}</dd></div><div><dt>负责人</dt><dd>{valueText(detail.owner)}</dd></div><div><dt>关联关系数</dt><dd>{valueText(detail.relationCount)}</dd></div></dl>}{metrics && <section aria-label="最新指标摘要" className="rounded border bg-slate-50 p-4"><h3 className="font-semibold">最新指标摘要</h3>{roles.includes('injector') && <p>{hasInjectionData ? `累计注汽量 ${valueText(metrics.injection?.cumulativeSteam)} · 最新周期 ${valueText(latestStage?.cycleNo)}` : '未找到注汽数据'}</p>}{roles.includes('producer') && <p>{hasProductionData ? `最新日产油 ${valueText(production?.latest?.oil)} · 最新日产液 ${valueText(production?.latest?.liquid)} · 最新含水 ${valueText(production?.latest?.waterCut)}` : '未找到生产数据'}</p>}</section>}</div>}
+        {tab === 'overview' && <div className="space-y-4">{detailLoading && <p role="status">正在加载单井详情…</p>}{detailError && <p role="alert">{detailError} <button type="button" onClick={() => retryPart('detail')}>重试详情</button></p>}{detail && <><dl className="grid gap-3 sm:grid-cols-2"><div><dt>井号</dt><dd>{detail.wellNo}</dd></div><div><dt>区块</dt><dd>{valueText(detail.block)}</dd></div><div><dt>负责人</dt><dd>{valueText(detail.owner)}</dd></div><div><dt>关联关系数</dt><dd>{valueText(detail.relationCount)}</dd></div></dl>{role === 'admin' && <form aria-label="维护单井档案" onSubmit={updateProfile} className="grid gap-3 rounded border p-4 sm:grid-cols-2"><label>区块<input name="block" aria-label="维护区块" className="field-control" value={editDraft.block} onInput={(event) => { const block = event.currentTarget.value; setEditDraft((current) => ({ ...current, block })); setUpdateError(''); setUpdateSuccess(''); }}/></label><label>负责人<input name="owner" aria-label="维护负责人" className="field-control" value={editDraft.owner} onInput={(event) => { const owner = event.currentTarget.value; setEditDraft((current) => ({ ...current, owner })); setUpdateError(''); setUpdateSuccess(''); }}/></label>{updateError && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{updateError}</p>}{updateSuccess && <p role="status" className="text-sm text-emerald-700 sm:col-span-2">{updateSuccess}</p>}<button type="submit" disabled={updating} className="action-button action-primary sm:col-span-2">{updating ? '保存中…' : '保存档案信息'}</button></form>}</>}{metrics && <section aria-label="最新指标摘要" className="rounded border bg-slate-50 p-4"><h3 className="font-semibold">最新指标摘要</h3>{roles.includes('injector') && <p>{hasInjectionData ? `累计注汽量 ${valueText(metrics.injection?.cumulativeSteam)} · 最新周期 ${valueText(latestStage?.cycleNo)}` : '未找到注汽数据'}</p>}{roles.includes('producer') && <p>{hasProductionData ? `最新日产油 ${valueText(production?.latest?.oil)} · 最新日产液 ${valueText(production?.latest?.liquid)} · 最新含水 ${valueText(production?.latest?.waterCut)}` : '未找到生产数据'}</p>}</section>}</div>}
         {tab === 'metrics' && <div className="space-y-4">{metricsLoading && <p role="status">正在加载生产指标…</p>}{metricsError && <p role="alert">{metricsError} <button type="button" onClick={() => retryPart('metrics')}>重试指标</button></p>}{metrics && <>
           <p className="text-xs text-slate-500">查询时间 {metrics.queriedAt} · {metrics.range.start} 至 {metrics.range.end}</p>
           {roles.includes('injector') && <section aria-label="注汽指标" className="rounded border p-4"><h3 className="font-semibold">注汽指标</h3>{hasInjectionData ? <><p>周期数 {valueText(metrics.injection?.cycleCount)} · 最新周期 {valueText(latestStage?.cycleNo)} · 累计注汽量 {valueText(metrics.injection?.cumulativeSteam)}</p><p>开始日期 {valueText(latestStage?.startDate)} · 结束日期 {valueText(latestStage?.endDate)}</p><p>蒸汽量 {valueText(latestStage?.steamVolume)} · 温度 {valueText(latestStage?.temperature)} · 压力 {valueText(latestStage?.pressure)} · 干度 {valueText(latestStage?.dryness)} · 生产时数 {valueText(latestStage?.productionHours)}</p></> : <p>未找到注汽数据</p>}</section>}

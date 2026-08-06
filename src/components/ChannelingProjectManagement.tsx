@@ -188,7 +188,16 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
 
   const save = async (changes: Record<string, unknown>) => { if (!selected) return; try { await request(`/api/channeling-projects/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) }); await load(); setMessage('治理台账已保存。', 'success'); } catch (error: any) { setMessage(error.message); } };
   const create = async (event: React.FormEvent) => { event.preventDefault(); try { const created = await request('/api/channeling-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProject) }); setNewProject({ projectName: '', block: '', owner: '' }); await load(); selectProject(created.id); setPreviewProjectId((id) => id ?? created.id); } catch (error: any) { setMessage(error.message); } };
-  const createRelation = async (event: React.FormEvent) => { event.preventDefault(); if (!selected) return; try { await request(`/api/channeling-projects/${selected.id}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(relationDraft) }); setRelationDraft(blankRelation()); await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
+  const createRelation = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!selected) return;
+    const projectId = selected.id;
+    try {
+      await request(`/api/channeling-projects/${projectId}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(relationDraft) });
+      if (viewSelectionRef.current.selectedId !== projectId) return;
+      setRelationDraft(blankRelation());
+      await loadRelations(projectId);
+    } catch (error: any) { if (viewSelectionRef.current.selectedId === projectId) setMessage(error.message); }
+  };
   const uploadRelations = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -267,8 +276,16 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
       setConfirming(false);
     }
   };
-  const confirmSuspected = async (id: number) => { try { await request(`/api/channeling-relations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'confirmed' }) }); if (selected) await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
-  const releaseRelation = async (id: number) => { try { await request(`/api/channeling-relations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'released' }) }); if (selected) await loadRelations(selected.id); } catch (error: any) { setMessage(error.message); } };
+  const mutateRelationStatus = async (id: number, status: 'confirmed' | 'released') => {
+    if (!selected) return;
+    const projectId = selected.id;
+    try {
+      await request(`/api/channeling-relations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      if (viewSelectionRef.current.selectedId === projectId) await loadRelations(projectId);
+    } catch (error: any) { if (viewSelectionRef.current.selectedId === projectId) setMessage(error.message); }
+  };
+  const confirmSuspected = (id: number) => mutateRelationStatus(id, 'confirmed');
+  const releaseRelation = (id: number) => mutateRelationStatus(id, 'released');
   const deleteProject = async () => {
     if (!selected || protectedProjectIds.has(selected.id) || !window.confirm('删除后无法恢复，是否继续？')) return;
     const projectId = selected.id;
@@ -289,9 +306,11 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     if (protectedRelationKeys.has(key) || !window.confirm('删除关系后无法恢复，是否继续？')) return;
     try {
       await request(`/api/channeling-relations/${id}`, { method: 'DELETE' });
+      if (viewSelectionRef.current.selectedId !== projectId) return;
       setProtectedRelationKeys((current) => { const next = new Set(current); next.delete(key); return next; });
       if (viewSelectionRef.current.selectedId === projectId) await loadRelations(projectId);
     } catch (error: unknown) {
+      if (viewSelectionRef.current.selectedId !== projectId) return;
       if (isTrackingHistoryConflict(error)) {
         setProtectedRelationKeys((current) => new Set(current).add(key));
         setMessage('关系已有跟踪历史，请解除关系并保留历史。', 'warning');

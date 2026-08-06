@@ -296,3 +296,56 @@ test('history-protected project deletion disables only that project hard delete'
   assert.doesNotMatch(host.textContent || '', /项目已有关系或跟踪历史，应保留历史记录/);
   await act(async () => root.unmount()); dom.window.close();
 });
+
+test('a delayed manual relation create cannot reload or pollute a newly selected project', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  const secondProject = { ...project, id: 8, projectName: '当前项目' };
+  const pending = deferred<Response>(); let oldRelationLoads = 0;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project, secondProject]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7/relations' && !init?.method) { oldRelationLoads++; return payload([relation('旧井', 'steam')]); }
+    if (url === '/api/channeling-projects/7/relations' && init?.method === 'POST') return pending.promise;
+    if (url === '/api/channeling-projects/8/relations') return payload([{ ...relation('当前井', 'nitrogen'), id: 82, projectId: 8 }]);
+    if (url.endsWith('/relation-imports')) return payload([]);
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  await openRelations(host);
+  const form = [...host.querySelectorAll('form')].find((item) => item.textContent?.includes('手工新增关系'))!;
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const second = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes('当前项目')) as HTMLButtonElement;
+  await act(async () => second.click()); await openRelations(host);
+  assert.match(host.textContent || '', /当前井/);
+  await act(async () => { pending.resolve(await payload(relation('新增井', 'steam'))); await pending.promise; });
+  assert.equal(oldRelationLoads, 1); assert.match(host.textContent || '', /当前井/); assert.doesNotMatch(host.textContent || '', /新增井/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+for (const operation of ['提交疑似确认', '解除关系'] as const) test(`a delayed ${operation} cannot reload or pollute a newly selected project`, async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  const secondProject = { ...project, id: 8, projectName: '当前项目' };
+  const old = { ...relation('旧井', 'steam'), status: operation === '提交疑似确认' ? 'suspected' : 'confirmed' };
+  const pending = deferred<Response>(); let oldRelationLoads = 0;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project, secondProject]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7/relations') { oldRelationLoads++; return payload([old]); }
+    if (url === `/api/channeling-relations/${old.id}` && init?.method === 'PATCH') return pending.promise;
+    if (url === '/api/channeling-projects/8/relations') return payload([{ ...relation('当前井', 'nitrogen'), id: 82, projectId: 8 }]);
+    if (url.endsWith('/relation-imports')) return payload([]);
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  await openRelations(host);
+  const action = [...host.querySelectorAll('button')].find((item) => item.textContent === operation) as HTMLButtonElement;
+  await act(async () => action.click());
+  const second = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes('当前项目')) as HTMLButtonElement;
+  await act(async () => second.click()); await openRelations(host);
+  assert.match(host.textContent || '', /当前井/);
+  await act(async () => { pending.resolve(await payload({ ...old, status: operation === '提交疑似确认' ? 'confirmed' : 'released' })); await pending.promise; });
+  assert.equal(oldRelationLoads, 1); assert.match(host.textContent || '', /当前井/); assert.doesNotMatch(host.textContent || '', /旧井/);
+  await act(async () => root.unmount()); dom.window.close();
+});
