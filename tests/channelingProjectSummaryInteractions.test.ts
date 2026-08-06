@@ -22,6 +22,12 @@ const changeInput = (input: HTMLInputElement, value: string) => {
   input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 };
+const changeText = (input: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+  const prototype = input instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+};
 
 const commonFetch = (projects = [project(7)]) => (async (input: RequestInfo | URL) => {
   const url = String(input);
@@ -244,5 +250,60 @@ test('switching projects clears stale summary and timeline subject', async () =>
   assert.ok(fetched.some((url) => url.includes('subjectType=project') && url.includes('subjectId=8')));
   assert.ok(fetched.filter((url) => url.startsWith('/api/channeling-tracking-events?')).every((url) => !url.includes('subjectId=7')));
   assert.equal(host.querySelector('form[aria-label="新增跟踪记录"]'), null, 'guest timeline remains read-only');
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('admin submits one manual project evaluation for the applied range and refreshes the automatic summary', async () => {
+  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host);
+  let summaryCalls = 0; let posts = 0; let posted: any; let resolvePost!: (value: Response) => void;
+  const pendingPost = new Promise<Response>((resolve) => { resolvePost = resolve; });
+  let resolveRefresh!: (value: Response) => void; const pendingRefresh = new Promise<Response>((resolve) => { resolveRefresh = resolve; });
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/evaluations') && init?.method === 'POST') { posts++; posted = JSON.parse(String(init.body)); return pendingPost; }
+    if (/\/summary(?:\?|$)/.test(url)) { summaryCalls++; return summaryCalls === 1 ? response(summary(7)) : pendingRefresh; }
+    return commonFetch()(input);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const form = host.querySelector('form[aria-label="人工项目评价"]') as HTMLFormElement; assert.ok(form);
+  await act(async () => { changeText(form.elements.namedItem('conclusion') as HTMLTextAreaElement, '治理有效'); changeText(form.elements.namedItem('evidence') as HTMLInputElement, '日报附件'); changeText(form.elements.namedItem('owner') as HTMLInputElement, '评价人'); });
+  await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  assert.equal(posts, 1); assert.deepEqual(posted, { occurredOn: '2026-08-06', conclusion: '治理有效', evidence: '日报附件', owner: '评价人', range: { start: '2026-07-08', end: '2026-08-06' } });
+  await act(async () => { resolvePost(await response({ id: 44, eventType: 'evaluated' })); await pendingPost; });
+  assert.equal(summaryCalls, 2); assert.match(host.textContent || '', /项目评价已保存/); assert.match(host.textContent || '', /正在加载项目汇总/);
+  await act(async () => { resolveRefresh(await response({ ...summary(7), evaluatedCount: 2, latestEvaluationConclusion: '治理有效' })); await pendingRefresh; });
+  assert.match(host.textContent || '', /已评价次数\s*2/); assert.match(host.textContent || '', /最新评价结论\s*治理有效/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('manual project evaluation is admin-only and preserves drafts on API failure', async () => {
+  const guest = setup(); const guestHost = document.getElementById('root')!; const guestRoot = createRoot(guestHost); globalThis.fetch = commonFetch();
+  await act(async () => guestRoot.render(createElement(ChannelingProjectManagement, { role: 'guest' })));
+  assert.equal(guestHost.querySelector('form[aria-label="人工项目评价"]'), null); await act(async () => guestRoot.unmount()); guest.window.close();
+
+  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host);
+  globalThis.fetch = (async (input, init) => String(input).endsWith('/evaluations') && init?.method === 'POST' ? response(undefined, false, '评价保存失败') : commonFetch()(input)) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const form = host.querySelector('form[aria-label="人工项目评价"]') as HTMLFormElement;
+  await act(async () => { changeText(form.elements.namedItem('conclusion') as HTMLTextAreaElement, '保留结论'); changeText(form.elements.namedItem('evidence') as HTMLInputElement, '保留证据'); changeText(form.elements.namedItem('owner') as HTMLInputElement, '保留负责人'); });
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  assert.match(host.textContent || '', /评价保存失败/); assert.equal((form.elements.namedItem('conclusion') as HTMLTextAreaElement).value, '保留结论'); assert.equal((form.elements.namedItem('evidence') as HTMLInputElement).value, '保留证据');
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a delayed manual evaluation cannot refresh or acknowledge after switching projects', async () => {
+  const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); let resolvePost!: (value: Response) => void; const pending = new Promise<Response>((resolve) => { resolvePost = resolve; }); const summaryUrls: string[] = [];
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (url.endsWith('/evaluations') && init?.method === 'POST') return pending;
+    if (url.includes('/summary')) { summaryUrls.push(url); return response(summary(Number(url.match(/projects\/(\d+)/)?.[1]))); }
+    return commonFetch([project(7, '旧项目'), project(8, '新项目')])(input);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(StrictMode, null, createElement(ChannelingProjectManagement, { role: 'admin' }))));
+  const form = host.querySelector('form[aria-label="人工项目评价"]') as HTMLFormElement;
+  await act(async () => { changeText(form.elements.namedItem('conclusion') as HTMLTextAreaElement, '迟到结论'); changeText(form.elements.namedItem('owner') as HTMLInputElement, '评价人'); });
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const next = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('新项目')) as HTMLButtonElement; await act(async () => next.click());
+  await act(async () => { resolvePost(await response({ id: 55, eventType: 'evaluated' })); await pending; });
+  assert.doesNotMatch(host.textContent || '', /项目评价已保存/); assert.match(host.textContent || '', /新项目/); assert.equal(summaryUrls.filter((url) => url.includes('/7/summary')).length, 2, 'StrictMode initial loads only; no mutation refresh');
   await act(async () => root.unmount()); dom.window.close();
 });

@@ -18,7 +18,7 @@ const isTrackingHistoryConflict = (error: unknown) => error instanceof Channelin
 
 const displayNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? String(value) : '暂无数据';
 
-function ProjectSummaryPanel({ projectId }: { projectId: number }) {
+function ProjectSummaryPanel({ projectId, isAdmin }: { projectId: number; isAdmin: boolean }) {
   const [draftRange, setDraftRange] = useState({ start: '', end: '' });
   const [appliedRange, setAppliedRange] = useState({ start: '', end: '' });
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
@@ -30,6 +30,18 @@ function ProjectSummaryPanel({ projectId }: { projectId: number }) {
   const explicitRange = useRef(false);
   const dirtyDraft = useRef({ start: false, end: false });
   const activeController = useRef<AbortController | null>(null);
+  const [evaluationDraft, setEvaluationDraft] = useState({ conclusion: '', evidence: '', owner: '' });
+  const [evaluationError, setEvaluationError] = useState('');
+  const [evaluationSuccess, setEvaluationSuccess] = useState('');
+  const [evaluationSubmitting, setEvaluationSubmitting] = useState(false);
+  const evaluationSubmittingRef = useRef(false);
+  const evaluationMutationToken = useRef(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; evaluationMutationToken.current++; evaluationSubmittingRef.current = false; };
+  }, []);
 
   useEffect(() => {
     setSummary(null);
@@ -61,6 +73,29 @@ function ProjectSummaryPanel({ projectId }: { projectId: number }) {
     setRequestVersion((version) => version + 1);
   };
 
+  const submitEvaluation = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (evaluationSubmittingRef.current || !summary) return;
+    if (!evaluationDraft.conclusion.trim() || !evaluationDraft.owner.trim()) { setEvaluationError('请填写评价结论和负责人'); setEvaluationSuccess(''); return; }
+    const range = summary.range ?? appliedRange;
+    const mutationToken = ++evaluationMutationToken.current;
+    evaluationSubmittingRef.current = true; setEvaluationSubmitting(true); setEvaluationError(''); setEvaluationSuccess('');
+    try {
+      await channelingRequest(`/api/channeling-projects/${projectId}/evaluations`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ occurredOn: range.end, conclusion: evaluationDraft.conclusion.trim(), evidence: evaluationDraft.evidence.trim(), owner: evaluationDraft.owner.trim(), range }),
+      });
+      if (!mounted.current || evaluationMutationToken.current !== mutationToken) return;
+      setEvaluationDraft({ conclusion: '', evidence: '', owner: '' });
+      setEvaluationSuccess('项目评价已保存');
+      setRequestVersion((version) => version + 1);
+    } catch (reason) {
+      if (mounted.current && evaluationMutationToken.current === mutationToken) setEvaluationError(reason instanceof Error ? reason.message : '项目评价保存失败');
+    } finally {
+      if (mounted.current && evaluationMutationToken.current === mutationToken) { evaluationSubmittingRef.current = false; setEvaluationSubmitting(false); }
+    }
+  };
+
   const cards: [string, unknown][] = summary ? [
     ['关系数量', summary.relationCount], ['有效关系数量', summary.activeRelationCount], ['已解除关系数量', summary.releasedRelationCount],
     ['注入井数量', summary.injectorCount], ['生产井数量', summary.producerCount], ['去重井数', summary.uniqueWellCount],
@@ -72,6 +107,8 @@ function ProjectSummaryPanel({ projectId }: { projectId: number }) {
     {loading && <p className="mt-3 text-sm text-slate-500">正在加载项目汇总…</p>}
     {error && <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p>{error}</p><button type="button" className="mt-2" onClick={() => setRetryKey((value) => value + 1)}>重试</button></div>}
     {!loading && !error && summary && <><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} className="rounded border border-slate-200 p-3"><span className="text-sm text-slate-500">{label}</span><b className="mt-1 block">{displayNumber(value)}</b></div>)}</div><div className="mt-3 rounded border border-slate-200 p-3 text-sm"><span className="text-slate-500">最新评价结论</span><p className="mt-1">{typeof summary.latestEvaluationConclusion === 'string' && summary.latestEvaluationConclusion.trim() ? summary.latestEvaluationConclusion : '暂无数据'}</p></div><p className="mt-3 text-sm text-slate-500">统计范围：{summary.range?.start || summary.start || appliedRange.start} 至 {summary.range?.end || summary.end || appliedRange.end} · 最新可用数据日期：{summary.latestAvailableDate || '暂无数据'} · 查询时间：{summary.generatedAt || '暂无数据'}</p></>}
+    {isAdmin && summary && <form aria-label="人工项目评价" onSubmit={submitEvaluation} className="mt-4 grid gap-3 rounded border border-slate-200 bg-slate-50 p-4 md:grid-cols-2"><div className="md:col-span-2"><h4 className="font-semibold">人工项目评价</h4><p className="text-sm text-slate-500">评价范围：{summary.range.start} 至 {summary.range.end}</p></div><label className="md:col-span-2">评价结论<textarea name="conclusion" required className="field-control" value={evaluationDraft.conclusion} onInput={(event) => { const conclusion = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, conclusion })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label><label>评价证据<input name="evidence" className="field-control" value={evaluationDraft.evidence} onInput={(event) => { const evidence = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, evidence })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label><label>负责人<input name="owner" required className="field-control" value={evaluationDraft.owner} onInput={(event) => { const owner = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, owner })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label>{evaluationError && <p role="alert" className="text-sm text-red-700 md:col-span-2">{evaluationError}</p>}<button type="submit" disabled={evaluationSubmitting} className="action-button action-primary md:col-span-2">{evaluationSubmitting ? '评价保存中…' : '保存人工评价'}</button></form>}
+    {evaluationSuccess && <p role="status" className="mt-3 text-sm text-emerald-700">{evaluationSuccess}</p>}
     {!loading && !error && !summary && !validationError && <p className="mt-3 text-sm text-slate-500">暂无汇总数据</p>}
   </section>;
 }
@@ -287,7 +324,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const confirmSuspected = (id: number) => mutateRelationStatus(id, 'confirmed');
   const releaseRelation = (id: number) => mutateRelationStatus(id, 'released');
   const deleteProject = async () => {
-    if (!selected || protectedProjectIds.has(selected.id) || !window.confirm('删除后无法恢复，是否继续？')) return;
+    if (!selected || selected.canDelete === false || protectedProjectIds.has(selected.id) || !window.confirm('删除后无法恢复，是否继续？')) return;
     const projectId = selected.id;
     try {
       await request(`/api/channeling-projects/${projectId}`, { method: 'DELETE' });
@@ -302,6 +339,8 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   };
   const deleteRelation = async (id: number) => {
     if (!selected) return;
+    const relation = relations.find((item) => item.id === id);
+    if (relation?.canDelete === false) return;
     const projectId = selected.id; const key = `${projectId}:${id}`;
     if (protectedRelationKeys.has(key) || !window.confirm('删除关系后无法恢复，是否继续？')) return;
     try {
@@ -333,14 +372,14 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     </section>
 
     <section className="grid gap-4 lg:grid-cols-[320px_1fr]"><aside className="app-card p-4"><h4 className="font-bold">完整项目清单</h4><div className="mt-3 grid gap-2"><input className="field-control" placeholder="按区块筛选" value={projectFilters.block} onChange={(e) => setProjectFilters({ ...projectFilters, block: e.target.value })}/><select className="field-control" aria-label="项目状态筛选" value={projectFilters.status} onChange={(e) => setProjectFilters({ ...projectFilters, status: e.target.value })}><option value="">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><div className="mt-3 space-y-2">{visibleProjects.map((item) => <button key={item.id} onClick={() => selectProject(item.id)} className={`w-full rounded border p-3 text-left text-sm ${item.id === selectedId ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}><b>{item.projectName}</b><span className="mt-1 block text-slate-500">{item.block} · {statusLabels[item.status]} · {item.owner}</span></button>)}{!visibleProjects.length && <p className="text-sm text-slate-500">没有符合条件的项目{canOperate ? '，可在上方新建项目。' : '。'}</p>}</div><h4 className="mt-6 font-bold">治理待办</h4><div className="mt-2 space-y-2">{todos.map((item) => <button key={item.id} onClick={() => selectProject(item.id)} className="w-full text-left text-sm text-slate-600">{item.projectName}{item.overdue ? ' · 已超期' : ''}</button>)}{!todos.length && <p className="text-sm text-slate-500">暂无待办，但可通过上方清单查看全部台账。</p>}</div></aside>
-      {selected ? <section className="app-card p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold">{selected.projectName}</h3><p className="text-sm text-slate-500">{selected.block} · {selected.owner}</p></div><div className="flex gap-2"><span className="rounded bg-slate-100 px-2 py-1 text-sm">{statusLabels[selected.status]}</span>{isAdmin && <button className="action-button" disabled={protectedProjectIds.has(selected.id)} onClick={() => void deleteProject()}>删除项目</button>}</div></div>
-        {protectedProjectIds.has(selected.id) && <p className="mt-2 text-sm text-amber-700">项目已有关系或跟踪历史，应保留历史记录。</p>}
+      {selected ? <section className="app-card p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold">{selected.projectName}</h3><p className="text-sm text-slate-500">{selected.block} · {selected.owner}</p></div><div className="flex gap-2"><span className="rounded bg-slate-100 px-2 py-1 text-sm">{statusLabels[selected.status]}</span>{isAdmin && <button className="action-button" disabled={selected.canDelete === false || protectedProjectIds.has(selected.id)} onClick={() => void deleteProject()}>删除项目</button>}</div></div>
+        {(selected.canDelete === false || protectedProjectIds.has(selected.id)) && <p className="mt-2 text-sm text-amber-700">{typeof selected.relationCount === 'number' && selected.relationCount > 0 ? `项目存在 ${selected.relationCount} 条关系，请保留项目历史。` : '项目已有跟踪历史，应保留历史记录。'}</p>}
         {canOperate && <form key={selected.id} className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); const data = new FormData(e.currentTarget); void save({ owner: data.get('owner'), governanceMeasure: data.get('governanceMeasure'), plannedDate: data.get('plannedDate') || null, riskLevel: data.get('riskLevel'), ...(isAdmin ? { status: data.get('status'), closureEvidence: data.get('closureEvidence') } : {}) }); }}><label>项目状态<select name="status" className="field-control" defaultValue={selected.status} disabled={!isAdmin}>{Object.entries(statusLabels).filter(([value]) => isAdmin || value !== 'closed').map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>责任人<input name="owner" className="field-control" defaultValue={selected.owner}/></label><label className="md:col-span-2">治理措施<input name="governanceMeasure" className="field-control" defaultValue={selected.governanceMeasure}/></label><label>计划日期<input name="plannedDate" type="date" className="field-control" defaultValue={selected.plannedDate ?? ''}/></label><label>风险等级<select name="riskLevel" className="field-control" defaultValue={selected.riskLevel}><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label>{isAdmin && <label className="md:col-span-2">关闭依据<input name="closureEvidence" className="field-control" defaultValue={selected.closureEvidence}/></label>}<button className="action-button action-primary md:col-span-2">保存治理信息</button></form>}
         <div role="tablist" aria-label="项目详情模块" className="mt-6 flex gap-2 border-t pt-4">{projectTabs.map(([value, label]) => <button key={value} id={`project-tab-${value}`} aria-controls={`project-panel-${value}`} type="button" role="tab" aria-selected={projectTab === value} tabIndex={projectTab === value ? 0 : -1} className={`action-button ${projectTab === value ? 'action-primary' : ''}`} onClick={() => selectProjectTab(value)} onKeyDown={(event) => navigateProjectTabs(event, value)}>{label}</button>)}</div>
-        {projectTab === 'overview' && <ProjectSummaryPanel key={`summary-${selected.id}`} projectId={selected.id}/>}
+        {projectTab === 'overview' && <ProjectSummaryPanel key={`summary-${selected.id}`} projectId={selected.id} isAdmin={isAdmin}/>}
         {projectTab === 'relations' && <section id="project-panel-relations" role="tabpanel" aria-labelledby="project-tab-relations" className="mt-4"><h4 className="sr-only">关系清单</h4><div className="mt-3 grid gap-2 md:grid-cols-3"><select className="field-control" aria-label="注窜类型筛选" value={relationFilters.channelingType} onChange={(e) => setRelationFilters({ ...relationFilters, channelingType: e.target.value })}><option value="">全部注窜类型</option><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><select className="field-control" aria-label="关系状态筛选" value={relationFilters.status} onChange={(e) => setRelationFilters({ ...relationFilters, status: e.target.value })}><option value="">全部关系状态</option>{Object.entries(relationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select className="field-control" aria-label="关系来源筛选" value={relationFilters.source} onChange={(e) => setRelationFilters({ ...relationFilters, source: e.target.value })}><option value="">全部来源</option><option value="manual">手工</option><option value="import">导入</option><option value="suspected">疑似识别</option></select></div>
           {canOperate && <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={createRelation}><select className="field-control" aria-label="手工关系注窜类型" value={relationDraft.channelingType} onChange={(e) => setRelationDraft({ ...relationDraft, channelingType: e.target.value as ChannelingType })}><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><input className="field-control" required placeholder="注井" value={relationDraft.injectionWell} onChange={(e) => setRelationDraft({ ...relationDraft, injectionWell: e.target.value })}/><input className="field-control" required placeholder="采油井" value={relationDraft.productionWell} onChange={(e) => setRelationDraft({ ...relationDraft, productionWell: e.target.value })}/><input className="field-control" required placeholder="层系" value={relationDraft.reservoirLayer} onChange={(e) => setRelationDraft({ ...relationDraft, reservoirLayer: e.target.value })}/><input className="field-control" required placeholder="证据" value={relationDraft.evidence} onChange={(e) => setRelationDraft({ ...relationDraft, evidence: e.target.value })}/><input className="field-control" required placeholder="责任人" value={relationDraft.owner} onChange={(e) => setRelationDraft({ ...relationDraft, owner: e.target.value })}/><button className="action-button action-primary md:col-span-3">手工新增关系</button></form>}
-          <div className="mt-3 space-y-2">{visibleRelations.map((row) => { const protectedKey = `${selected.id}:${row.id}`; const historyProtected = protectedRelationKeys.has(protectedKey); return <div key={row.id} className="flex flex-wrap items-center gap-3 text-sm"><span className="rounded bg-slate-100 px-2 py-1">{channelingTypeLabels[row.channelingType]}</span><span>{row.injectionWell} → {row.productionWell} · {row.reservoirLayer} · {relationLabels[row.status]}</span><button type="button" onClick={() => onOpenRelation(row.id)}>查看详情/跟踪记录</button>{canOperate && row.status === 'suspected' && <button onClick={() => void confirmSuspected(row.id)}>提交疑似确认</button>}{isAdmin && row.status !== 'released' && <button onClick={() => void releaseRelation(row.id)}>解除关系</button>}{isAdmin && <button disabled={historyProtected} onClick={() => void deleteRelation(row.id)}>删除关系</button>}{historyProtected && <span className="text-amber-700">已有跟踪历史，请解除关系并保留历史。</span>}</div>; })}{!visibleRelations.length && <p className="text-sm text-slate-500">暂无符合条件的关系{canOperate ? '，可手工新增或通过上方识别卡导入 Excel 关系。' : '。'}</p>}</div><div className="mt-3 space-y-1">{imports.map((item) => <div key={item.id} className="flex flex-wrap gap-3 text-sm"><span>{item.fileName} · {channelingTypeLabels[item.channelingType]}：有效 {item.validCount}，重复 {item.duplicateCount}，自身 {item.selfRelationCount}，无效 {item.invalidCount}</span>{canOperate && item.status === 'preview' && <button disabled={confirming} onClick={() => void confirmImport(item.id)}>{confirmingImportIdRef.current === item.id ? '正在确认…' : '确认导入'}</button>}</div>)}</div></section>}
+          <div className="mt-3 space-y-2">{visibleRelations.map((row) => { const protectedKey = `${selected.id}:${row.id}`; const historyProtected = row.canDelete === false || protectedRelationKeys.has(protectedKey); return <div key={row.id} className="flex flex-wrap items-center gap-3 text-sm"><span className="rounded bg-slate-100 px-2 py-1">{channelingTypeLabels[row.channelingType]}</span><span>{row.injectionWell} → {row.productionWell} · {row.reservoirLayer} · {relationLabels[row.status]}</span><button type="button" onClick={() => onOpenRelation(row.id)}>查看详情/跟踪记录</button>{canOperate && row.status === 'suspected' && <button onClick={() => void confirmSuspected(row.id)}>提交疑似确认</button>}{isAdmin && row.status !== 'released' && <button onClick={() => void releaseRelation(row.id)}>解除关系</button>}{isAdmin && <button disabled={historyProtected} onClick={() => void deleteRelation(row.id)}>删除关系</button>}{historyProtected && <span className="text-amber-700">已有跟踪历史，请解除关系并保留历史。</span>}</div>; })}{!visibleRelations.length && <p className="text-sm text-slate-500">暂无符合条件的关系{canOperate ? '，可手工新增或通过上方识别卡导入 Excel 关系。' : '。'}</p>}</div><div className="mt-3 space-y-1">{imports.map((item) => <div key={item.id} className="flex flex-wrap gap-3 text-sm"><span>{item.fileName} · {channelingTypeLabels[item.channelingType]}：有效 {item.validCount}，重复 {item.duplicateCount}，自身 {item.selfRelationCount}，无效 {item.invalidCount}</span>{canOperate && item.status === 'preview' && <button disabled={confirming} onClick={() => void confirmImport(item.id)}>{confirmingImportIdRef.current === item.id ? '正在确认…' : '确认导入'}</button>}</div>)}</div></section>}
         {projectTab === 'timeline' && <div id="project-panel-timeline" role="tabpanel" aria-labelledby="project-tab-timeline" className="mt-4"><ChannelingTimeline role={isAdmin ? 'admin' : 'guest'} subject={{ subjectType: 'project', subjectId: selected.id }}/></div>}
       </section> : <section className="app-card p-5 text-sm text-slate-500">暂无项目详情。{canOperate ? '请新建项目；关系文件仍可先在上方识别预览。' : '可使用左侧筛选查看完整台账。'}</section>}
     </section>

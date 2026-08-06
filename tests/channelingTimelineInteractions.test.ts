@@ -91,6 +91,18 @@ test('guest timeline renders loading and every event kind with audit fields but 
   await cleanup(root, dom);
 });
 
+test('guest can inspect a persisted project evaluation snapshot without affecting relation events', async () => {
+  const { dom, host, root } = setup();
+  globalThis.fetch = (async () => response([
+    event(1, 'evaluated', { metricsSnapshot: { projectId: 7, range: { start: '2026-07-01', end: '2026-07-31' }, relationCount: 3, activeRelationCount: 2, injectorCount: 2, producerCount: 2, cumulativeSteam: 88.5, initialTotalOil: 4, latestTotalOil: 7, totalOilChange: 3 } }),
+    event(2, 'evaluated', { links: [{ subjectType: 'relation', subjectId: 9 }], metricsSnapshot: { unexpected: true } }),
+  ])) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingTimeline, { role: 'guest', subject: { subjectType: 'project', subjectId: 7 } })));
+  assert.match(host.textContent || '', /评价指标快照/); assert.match(host.textContent || '', /2026-07-01 至 2026-07-31/); assert.match(host.textContent || '', /关系数量 3/); assert.match(host.textContent || '', /累计注汽量 88\.5/); assert.match(host.textContent || '', /日产油变化 3/);
+  assert.equal(host.querySelectorAll('[aria-label="项目评价指标快照"]').length, 1, 'malformed or relation snapshots remain harmless');
+  await cleanup(root, dom);
+});
+
 test('timeline shows an error, retries, and then renders the empty state', async () => {
   const { dom, host, root } = setup();
   let calls = 0;

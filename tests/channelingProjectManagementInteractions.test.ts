@@ -349,3 +349,27 @@ for (const operation of ['提交疑似确认', '解除关系'] as const) test(`a
   assert.equal(oldRelationLoads, 1); assert.match(host.textContent || '', /当前井/); assert.doesNotMatch(host.textContent || '', /旧井/);
   await act(async () => root.unmount()); dom.window.close();
 });
+
+test('server-derived delete capabilities disable hard deletes before any probing request', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); let deletes = 0;
+  const protectedProject = { ...project, canDelete: false, hasTrackingHistory: false, relationCount: 1 };
+  const tracked = { ...relation('跟踪井', 'steam'), canDelete: false, hasTrackingHistory: true };
+  const clean = { ...relation('干净井', 'nitrogen'), canDelete: true, hasTrackingHistory: false };
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (init?.method === 'DELETE') { deletes++; return payload(undefined); }
+    if (url === '/api/channeling-projects') return payload([protectedProject]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7/relations') return payload([tracked, clean]);
+    if (url.endsWith('/relation-imports')) return payload([]);
+    throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const deleteProjectButton = [...host.querySelectorAll('button')].find((button) => button.textContent === '删除项目') as HTMLButtonElement;
+  assert.equal(deleteProjectButton.disabled, true); assert.match(host.textContent || '', /项目存在 1 条关系，请保留项目历史/);
+  await openRelations(host);
+  const deleteRelations = [...host.querySelectorAll('button')].filter((button) => button.textContent === '删除关系') as HTMLButtonElement[];
+  assert.equal(deleteRelations[0].disabled, true); assert.equal(deleteRelations[1].disabled, false);
+  assert.match(deleteRelations[0].parentElement?.textContent || '', /已有跟踪历史，请解除关系并保留历史/);
+  await act(async () => { deleteProjectButton.click(); deleteRelations[0].click(); }); assert.equal(deletes, 0);
+  await act(async () => root.unmount()); dom.window.close();
+});

@@ -29,6 +29,15 @@ type EventDraft = { eventType: ManualTrackingEventType; occurredOn: string; cont
 type CorrectionDraft = { reason: string; occurredOn: string; content: string; evidence: string; owner: string };
 const emptyEventDraft = (): EventDraft => ({ eventType: 'discovered', occurredOn: '', content: '', evidence: '', owner: '' });
 const emptyCorrectionDraft = (): CorrectionDraft => ({ reason: '', occurredOn: '', content: '', evidence: '', owner: '' });
+type ProjectEvaluationSnapshot = { projectId: number; range: { start: string; end: string }; relationCount?: unknown; activeRelationCount?: unknown; injectorCount?: unknown; producerCount?: unknown; cumulativeSteam?: unknown; initialTotalOil?: unknown; latestTotalOil?: unknown; totalOilChange?: unknown };
+const projectEvaluationSnapshot = (item: TrackingEvent): ProjectEvaluationSnapshot | null => {
+  if (item.eventType !== 'evaluated' || !item.links.some((link) => link.subjectType === 'project') || !item.metricsSnapshot || typeof item.metricsSnapshot !== 'object') return null;
+  const snapshot = item.metricsSnapshot as Record<string, unknown>;
+  const range = snapshot.range;
+  if (typeof snapshot.projectId !== 'number' || !range || typeof range !== 'object' || typeof (range as Record<string, unknown>).start !== 'string' || typeof (range as Record<string, unknown>).end !== 'string') return null;
+  return snapshot as unknown as ProjectEvaluationSnapshot;
+};
+const snapshotValue = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? String(value) : '暂无';
 
 export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
   const subjectKey = `${subject.subjectType}:${subject.subjectId}`;
@@ -211,7 +220,7 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
     {!loading && loadError && <div role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{loadError} <button type="button" onClick={() => void loadEvents()} className="ml-3 underline">重试</button></div>}
     {!loading && !loadError && events.length === 0 && <p className="rounded border border-dashed p-6 text-center text-sm text-slate-500">暂无跟踪记录</p>}
     {!loading && !loadError && events.length > 0 && <ol className="space-y-3">
-      {events.map((item) => <li key={item.id} className="rounded-lg border border-slate-200 bg-white p-4">
+      {events.map((item) => { const snapshot = projectEvaluationSnapshot(item); return <li key={item.id} className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div><strong>{trackingEventLabels[item.eventType]}</strong><span className="ml-3 text-sm text-slate-500">{item.occurredOn}</span></div>
           {role === 'admin' && !item.voidedAt && <button type="button" aria-label={`更正记录 ${item.id}`} onClick={() => startCorrection(item)} className="text-sm text-emerald-700 underline">更正</button>}
@@ -222,6 +231,7 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
           <div><dt className="inline">负责人：</dt><dd className="inline">{item.owner}</dd></div>
           <div><dt className="inline">创建人：</dt><dd className="inline">{item.createdBy}</dd></div>
         </dl>
+        {snapshot && <section aria-label="项目评价指标快照" className="mt-3 rounded border border-emerald-100 bg-emerald-50 p-3 text-sm"><h4 className="font-semibold text-emerald-800">评价指标快照</h4><p className="mt-1 text-slate-600">{snapshot.range.start} 至 {snapshot.range.end}</p><p className="mt-1 text-slate-700">关系数量 {snapshotValue(snapshot.relationCount)} · 有效关系 {snapshotValue(snapshot.activeRelationCount)} · 注入井 {snapshotValue(snapshot.injectorCount)} · 生产井 {snapshotValue(snapshot.producerCount)}</p><p className="mt-1 text-slate-700">累计注汽量 {snapshotValue(snapshot.cumulativeSteam)} · 期初日产油 {snapshotValue(snapshot.initialTotalOil)} · 最新日产油 {snapshotValue(snapshot.latestTotalOil)} · 日产油变化 {snapshotValue(snapshot.totalOilChange)}</p></section>}
         {item.supersedesEventId !== null && <p className="mt-2 text-sm text-amber-700">更正自记录 #{item.supersedesEventId}</p>}
         {item.voidedAt && <p className="mt-2 text-sm text-red-700">已作废：{item.voidReason || '已更正'}</p>}
         {correctingId === item.id && <form data-correction-for={item.id} aria-label={`更正跟踪记录 ${item.id}`} onSubmit={(e) => void submitCorrection(e, item.id)} className="mt-4 grid gap-2 rounded bg-amber-50 p-3 md:grid-cols-2">
@@ -236,7 +246,7 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
             <button type="button" disabled={correctionSubmitting} onClick={() => setCorrectingId(null)} className="rounded border px-3 py-2">取消</button>
           </div>
         </form>}
-      </li>)}
+      </li>; })}
     </ol>}
   </section>;
 }
