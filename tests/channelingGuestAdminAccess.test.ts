@@ -20,7 +20,7 @@ test("channeling permissions consist only of guest read-only and administrator m
   assert.match(timeline, /role === 'admin' && <form[^>]*aria-label="新增跟踪记录"/);
   assert.match(wellTracking, /role === 'admin' && <form[^>]*aria-label="新建或复用单井档案"/);
   assert.match(relationDetail, /role === 'admin' \? <form[^>]*aria-label="新增效果评价"/);
-  assert.match(relationDetail, /role === 'admin' && <button[^>]*onClick=\{onRecompute\}/);
+  assert.match(relationDetail, /role === 'admin' && current && <button[^>]*onClick=\{onRecompute\}/);
   assert.match(relationDetail, /游客只读，可查看已形成的评价记录/);
 
   for (const source of [timeline, wellTracking, relationDetail]) {

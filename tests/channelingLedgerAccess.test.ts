@@ -3,7 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("channeling ledger exposes complete lists and role-specific actions instead of a todo-only blank state", async () => {
-  const component = await readFile(new URL("../src/components/ChannelingProjectManagement.tsx", import.meta.url), "utf8");
+  const [component, api] = await Promise.all([
+    readFile(new URL("../src/components/ChannelingProjectManagement.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/channelingTrackingApi.ts", import.meta.url), "utf8"),
+  ]);
   assert.match(component, /projectFilters/);
   assert.match(component, /relationFilters/);
   assert.match(component, /canOperate/);
@@ -11,7 +14,9 @@ test("channeling ledger exposes complete lists and role-specific actions instead
   assert.match(component, /deleteProject/);
   assert.match(component, /releaseRelation/);
   assert.match(component, /<form key=\{selected\.id\}/);
-  assert.match(component, /auth-expired/);
+  assert.match(component, /channelingRequest/);
+  assert.match(api, /auth-expired/);
+  assert.match(api, /localStorage\.removeItem\('token'\)/);
 });
 
 test("channeling relation recognition stays available before project selection and uses standalone preview confirmation", async () => {
