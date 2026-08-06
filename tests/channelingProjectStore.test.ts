@@ -156,6 +156,48 @@ test('status transitions create one event and same-status or unrelated updates c
   });
 });
 
+test('relation well edits ensure profiles without duplicating status history', async () => {
+  await withStore(async (db) => {
+    const project = await createChannelingProject(db, projectInput());
+    const relation = await createChannelingRelation(db, { ...relationInput(project.id), injectionWell: 'I1', productionWell: 'P1' });
+    const reused = await createWellProfile(db, { wellNo: ' i2 ', block: 'existing', owner: 'existing' });
+
+    await updateChannelingRelation(db, relation.id, { injectionWell: 'I2', productionWell: 'P2' });
+
+    const profiles = await listWellProfiles(db);
+    assert.equal(profiles.find((item) => item.normalizedWellNo === 'I2')?.id, reused.id);
+    assert.deepEqual(profiles.map((item) => item.normalizedWellNo).sort(), ['I1', 'I2', 'P1', 'P2']);
+    const events = await listTrackingEvents(db, { subjectType: 'relation', subjectId: relation.id });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].eventType, 'relation_confirmed');
+  });
+});
+
+test('relation well edits and newly ensured profiles roll back together', async () => {
+  await withStore(async (db) => {
+    const project = await createChannelingProject(db, projectInput());
+    const relation = await createChannelingRelation(db, { ...relationInput(project.id), injectionWell: 'I1', productionWell: 'P1', source: 'suspected', status: 'suspected' });
+    const ensured = new Set<string>();
+    const failingDb = new Proxy(db, {
+      get(target, property) {
+        if (property === 'run') return async (sql: string, params?: unknown[]) => {
+          if (sql.startsWith('INSERT INTO channeling_well_profiles')) ensured.add(String(params?.[1]));
+          const result = await target.run(sql, params);
+          if (sql.startsWith('UPDATE channeling_relations') && ensured.has('I2') && ensured.has('P2')) throw new Error('injected post-update failure');
+          return result;
+        };
+        const value = target[property as keyof typeof target];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+
+    await assert.rejects(() => updateChannelingRelation(failingDb, relation.id, { injectionWell: 'I2', productionWell: 'P2' }), /injected post-update failure/);
+    const [stored] = await listChannelingRelations(db, { projectId: project.id });
+    assert.deepEqual([stored.injectionWell, stored.productionWell], ['I1', 'P1']);
+    assert.deepEqual((await listWellProfiles(db)).map((item) => item.normalizedWellNo).sort(), ['I1', 'P1']);
+  });
+});
+
 test('relation creation rolls back when automatic tracking fails', async () => {
   await withStore(async (db) => {
     const project = await createChannelingProject(db, projectInput());

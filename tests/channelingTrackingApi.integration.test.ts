@@ -189,10 +189,18 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
 
     const missingRelationResponse = await request(`/api/channeling-projects/${project.id}/relations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...relationBody, injectionWell: 'missing-i', productionWell: 'missing-p' }) });
     const missingRelation = await json(missingRelationResponse);
-    const automaticProfileEvaluationResponse = await request(`/api/channeling-relations/${missingRelation.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: 'x', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) });
-    assert.equal(automaticProfileEvaluationResponse.status, 201);
-    const automaticProfileEvaluation = await json(automaticProfileEvaluationResponse);
-    assert.deepEqual(automaticProfileEvaluation.links.map((link: any) => link.subjectType).sort(), ['project', 'relation', 'well', 'well']);
+    const editedRelationResponse = await request(`/api/channeling-relations/${missingRelation.id}`, { method: 'PATCH', headers: admin, body: JSON.stringify({ injectionWell: 'edited-i', productionWell: 'edited-p' }) });
+    assert.equal(editedRelationResponse.status, 200);
+    const editedProfiles = await db.all("SELECT id, normalized_well_no FROM channeling_well_profiles WHERE normalized_well_no IN ('EDITED-I', 'EDITED-P') ORDER BY normalized_well_no");
+    const editedEvaluationResponse = await request(`/api/channeling-relations/${missingRelation.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: 'x', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) });
+    assert.equal(editedEvaluationResponse.status, 201);
+    const editedEvaluation = await json(editedEvaluationResponse);
+    assert.deepEqual(editedEvaluation.links, [
+      { subjectType: 'project', subjectId: project.id },
+      { subjectType: 'relation', subjectId: missingRelation.id },
+      { subjectType: 'well', subjectId: editedProfiles[0].id },
+      { subjectType: 'well', subjectId: editedProfiles[1].id },
+    ]);
 
     const legacyRelation = await db.run("INSERT INTO channeling_relations (project_id, channeling_type, injection_well, production_well, reservoir_layer, impact_level, confidence, status, source, evidence, effective_start_date, effective_end_date, owner, created_at, updated_at) VALUES (?, 'steam', 'legacy-i', 'legacy-p', 'S1', 'high', .9, 'confirmed', 'manual', 'legacy', '2026-01-01', '2026-12-31', 'owner', ?, ?)", [project.id, new Date().toISOString(), new Date().toISOString()]);
     assert.equal((await request(`/api/channeling-relations/${legacyRelation.lastID}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: 'x', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) })).status, 404);

@@ -131,15 +131,17 @@ async function createRelationStatusEvent(db: DatabaseLike, current: ChannelingRe
 }
 
 async function updateChannelingRelationUnlocked(db: DatabaseLike, id: number, changes: Partial<Omit<ChannelingRelationInput, 'projectId'>>, audit: ChannelingAuditContext = { createdBy: 'system' }): Promise<ChannelingRelation> {
-  const current = await db.get('SELECT * FROM channeling_relations WHERE id = ?', [id]);
+  const current = await db.get('SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id WHERE r.id = ?', [id]);
   if (!current) throw new Error('Relation not found');
   const merged: ChannelingRelationInput = { projectId: current.project_id, channelingType: current.channeling_type, injectionWell: current.injection_well, productionWell: current.production_well, reservoirLayer: current.reservoir_layer, impactLevel: current.impact_level, confidence: current.confidence, status: current.status, source: current.source, evidence: current.evidence, effectiveStartDate: current.effective_start_date, effectiveEndDate: current.effective_end_date, owner: current.owner, ...changes };
   validateRelation(merged);
+  const injectionProfile = await ensureWellProfileUnlocked(db, { wellNo: merged.injectionWell, block: current.block, owner: merged.owner });
+  const productionProfile = await ensureWellProfileUnlocked(db, { wellNo: merged.productionWell, block: current.block, owner: merged.owner });
   const now = new Date().toISOString();
   await db.run('UPDATE channeling_relations SET channeling_type=?, injection_well=?, production_well=?, reservoir_layer=?, impact_level=?, confidence=?, status=?, source=?, evidence=?, effective_start_date=?, effective_end_date=?, owner=?, updated_at=? WHERE id=?', [merged.channelingType, merged.injectionWell.trim(), merged.productionWell.trim(), merged.reservoirLayer.trim(), merged.impactLevel, merged.confidence, merged.status, merged.source, merged.evidence.trim(), merged.effectiveStartDate, merged.effectiveEndDate, merged.owner.trim(), now, id]);
   const updated = relation(await db.get('SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id WHERE r.id = ?', [id]));
-  if (updated.status !== current.status && updated.status === 'confirmed') await createRelationStatusEvent(db, updated, 'relation_confirmed', audit);
-  if (updated.status !== current.status && updated.status === 'released') await createRelationStatusEvent(db, updated, 'relation_released', audit);
+  if (updated.status !== current.status && updated.status === 'confirmed') await createRelationStatusEvent(db, updated, 'relation_confirmed', audit, injectionProfile.id, productionProfile.id);
+  if (updated.status !== current.status && updated.status === 'released') await createRelationStatusEvent(db, updated, 'relation_released', audit, injectionProfile.id, productionProfile.id);
   return updated;
 }
 export function updateChannelingRelation(db: DatabaseLike, id: number, changes: Partial<Omit<ChannelingRelationInput, 'projectId'>>, audit?: ChannelingAuditContext): Promise<ChannelingRelation> { return withTransaction(db, () => updateChannelingRelationUnlocked(db, id, changes, audit)); }
