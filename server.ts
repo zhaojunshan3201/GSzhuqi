@@ -8,8 +8,6 @@ import oracledb from "oracledb";
 import dotenv from "dotenv";
 import multer from "multer";
 
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
 import * as XLSX from "xlsx";
 import { MEASURE_IMPORT_FILE_TYPE_MESSAGE, isHtmlMeasureImportFile, isMeasureImportWorkbookFile } from "./src/lib/measureImportUpload.ts";
 import { parseWellTemperatureWorkbook } from "./src/lib/wellTemperature.ts";
@@ -65,6 +63,7 @@ import { createWellProfile, getWellProfile, initChannelingWellTables, listWellPr
 import { correctTrackingEvent, createTrackingEvent, createTrackingEventUnlocked, initChannelingTrackingTables, listTrackingEvents, type TrackingSubjectType } from "./src/lib/channelingTrackingStore.ts";
 import { getProjectSummary, getRelationMetrics, getWellMetrics, initChannelingMetricIndexes, validateComparisonRange, validateMetricRange } from "./src/lib/channelingMetrics.ts";
 import { createProjectEvaluation } from "./src/lib/channelingProjectEvaluationStore.ts";
+import { openConfiguredSqliteDatabase } from "./src/lib/configuredSqliteConnection.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -1668,10 +1667,7 @@ function ensureStartupSyncTask() {
 }
 
 async function initLocalDb() {
-  localDb = await open({
-    filename: DB_FILE,
-    driver: sqlite3.Database
-  });
+  localDb = await openConfiguredSqliteDatabase(DB_FILE);
 
   await localDb.exec(`
     CREATE TABLE IF NOT EXISTS production (
@@ -4813,20 +4809,56 @@ app.post("/api/register", async (req, res) => {
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) throw new Error("body is invalid");
     return value as Record<string, any>;
   };
+  type ChannelingTransactionKind = "relation-evaluation" | "project-evaluation" | "import-confirmation";
+  const pauseChannelingTransactionForTest = async (req: express.Request, kind: ChannelingTransactionKind) => {
+    if (process.env.CHANNELING_TEST_FORCE_ERROR !== "1") return;
+    const legacyRelationPause = kind === "relation-evaluation" && req.get("x-channeling-pause-evaluation") === "1";
+    if (req.get("x-channeling-pause-transaction") !== kind && !legacyRelationPause) return;
+    const pauseFile = process.env.CHANNELING_TEST_TRANSACTION_PAUSE_FILE || (legacyRelationPause ? process.env.CHANNELING_TEST_EVALUATION_PAUSE_FILE : undefined);
+    if (!pauseFile) return;
+    fs.writeFileSync(`${pauseFile}.${kind}.ready`, "ready");
+    if (!fs.existsSync(pauseFile)) return;
+    await new Promise<void>((resolve, reject) => {
+      const watcher = fs.watch(path.dirname(pauseFile), (_event, fileName) => {
+        if (String(fileName) === path.basename(pauseFile) && !fs.existsSync(pauseFile)) {
+          clearTimeout(timeout);
+          watcher.close();
+          resolve();
+        }
+      });
+      const timeout = setTimeout(() => {
+        watcher.close();
+        reject(new Error("forced transaction pause timed out"));
+      }, 5000);
+      if (!fs.existsSync(pauseFile)) {
+        clearTimeout(timeout);
+        watcher.close();
+        resolve();
+      }
+    });
+  };
+  const withChannelingTransactionTestPause = (db: any, req: express.Request, kind: ChannelingTransactionKind) => {
+    let paused = false;
+    return {
+      exec: async (sql: string) => {
+        await db.exec(sql);
+        if (!paused && /^\s*BEGIN IMMEDIATE\b/i.test(sql)) {
+          paused = true;
+          await pauseChannelingTransactionForTest(req, kind);
+        }
+      },
+      run: db.run.bind(db),
+      get: db.get.bind(db),
+      all: db.all.bind(db),
+    };
+  };
   const createRelationEvaluationWithDedicatedConnection = async (req: express.Request, relationId: number, body: Record<string, any>, range: { beforeStart: string; splitDate: string; afterEnd: string }, createdBy: string) => {
-    const channelingDb = await open({ filename: DB_FILE, driver: sqlite3.Database });
+    const channelingDb = await openConfiguredSqliteDatabase(DB_FILE);
     let transactionStarted = false;
     try {
       await channelingDb.exec("BEGIN IMMEDIATE");
       transactionStarted = true;
-      const pauseFile = process.env.CHANNELING_TEST_EVALUATION_PAUSE_FILE;
-      if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-pause-evaluation") === "1" && pauseFile) {
-        const deadline = Date.now() + 5000;
-        while (fs.existsSync(pauseFile)) {
-          if (Date.now() >= deadline) throw new Error("forced evaluation pause timed out");
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
-      }
+      await pauseChannelingTransactionForTest(req, "relation-evaluation");
       const relation = await channelingDb.get("SELECT * FROM channeling_relations WHERE id = ?", [relationId]);
       if (!relation) throw new Error("Relation not found");
       const profiles = await channelingDb.all("SELECT id, normalized_well_no FROM channeling_well_profiles WHERE normalized_well_no IN (UPPER(TRIM(?)), UPPER(TRIM(?)))", [relation.injection_well, relation.production_well]);
@@ -4850,10 +4882,10 @@ app.post("/api/register", async (req, res) => {
       await channelingDb.close();
     }
   };
-  const createProjectEvaluationWithDedicatedConnection = async (projectId: number, body: Record<string, any>, range: { start: string; end: string }, createdBy: string) => {
-    const channelingDb = await open({ filename: DB_FILE, driver: sqlite3.Database });
+  const createProjectEvaluationWithDedicatedConnection = async (req: express.Request, projectId: number, body: Record<string, any>, range: { start: string; end: string }, createdBy: string) => {
+    const channelingDb = await openConfiguredSqliteDatabase(DB_FILE);
     try {
-      return await createProjectEvaluation(channelingDb, {
+      return await createProjectEvaluation(withChannelingTransactionTestPause(channelingDb, req, "project-evaluation"), {
         projectId, start: range.start, end: range.end, occurredOn: body.occurredOn,
         content: body.conclusion, evidence: body.evidence, owner: body.owner, createdBy,
       });
@@ -4998,7 +5030,7 @@ app.post("/api/register", async (req, res) => {
       if (typeof body.owner !== "string" || !body.owner.trim()) throw new Error("owner is required");
       const range = channelingProjectEvaluationRange(plainChannelingBody(body.range));
       const createdBy = authenticatedUser(req)!.username;
-      const data = await createProjectEvaluationWithDedicatedConnection(projectId, body, range, createdBy);
+      const data = await createProjectEvaluationWithDedicatedConnection(req, projectId, body, range, createdBy);
       res.status(201).json({ success: true, data });
     } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
@@ -5017,9 +5049,9 @@ app.post("/api/register", async (req, res) => {
       res.status(201).json({ success: true, data });
     } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
-  async function confirmChannelingRelationImportWithDedicatedConnection(importId: number, projectId: number) {
-    const channelingDb = await open({ filename: DB_FILE, driver: sqlite3.Database });
-    try { return await confirmChannelingRelationImport(channelingDb, importId, projectId); }
+  async function confirmChannelingRelationImportWithDedicatedConnection(req: express.Request, importId: number, projectId: number) {
+    const channelingDb = await openConfiguredSqliteDatabase(DB_FILE);
+    try { return await confirmChannelingRelationImport(withChannelingTransactionTestPause(channelingDb, req, "import-confirmation"), importId, projectId); }
     finally { await channelingDb.close(); }
   }
   app.get("/api/channeling-projects/:id/relations", async (req, res) => {
@@ -5092,7 +5124,7 @@ app.post("/api/register", async (req, res) => {
       forceChannelingTestError(req);
       const projectId = requestedProjectId ?? (await getChannelingRelationImport(localDb, importId)).projectId;
       if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "\u672a\u7ed1\u5b9a\u9879\u76ee\u7684\u9884\u89c8\u5fc5\u987b\u63d0\u4f9b projectId" });
-      res.json({ success: true, data: await confirmChannelingRelationImportWithDedicatedConnection(importId, projectId) });
+      res.json({ success: true, data: await confirmChannelingRelationImportWithDedicatedConnection(req, importId, projectId) });
     }
     catch (error: any) { const status = error.message === "channeling relation import not found" || error.message === "Project not found" ? 404 : error.message === "only preview imports can be confirmed" || error.message === "preview belongs to another project" ? 409 : channelingErrorStatus(error); res.status(status).json({ success: false, message: error.message }); }
   });

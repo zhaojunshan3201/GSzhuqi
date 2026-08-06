@@ -27,9 +27,10 @@ test('registers standalone relationship import preview, detail and confirmation 
   assert.match(server, /app\.post\("\/api\/channeling-relation-imports\/preview", requireChannelingAdminMiddleware, channelingRelationImportUploadMiddleware/);
   assert.match(server, /app\.get\("\/api\/channeling-relation-imports\/:id", requireChannelingAdminMiddleware/);
   assert.match(server, /getChannelingRelationImport/);
-  assert.match(server, /confirmChannelingRelationImportWithDedicatedConnection\(importId, projectId\)/);
-  assert.match(server, /const channelingDb = await open\(\{ filename: DB_FILE, driver: sqlite3\.Database \}\)/);
-  assert.match(server, /confirmChannelingRelationImport\(channelingDb, importId, projectId\)/);
+  assert.match(server, /confirmChannelingRelationImportWithDedicatedConnection\(req, importId, projectId\)/);
+  assert.match(server, /openConfiguredSqliteDatabase\(DB_FILE\)/);
+  assert.doesNotMatch(server, /const channelingDb = await open\(\{ filename: DB_FILE, driver: sqlite3\.Database \}\)/);
+  assert.match(server, /confirmChannelingRelationImport\(withChannelingTransactionTestPause\(channelingDb, req, "import-confirmation"\), importId, projectId\)/);
   assert.match(server, /finally \{ await channelingDb\.close\(\); \}/);
   assert.match(server, /getChannelingRelationImport\(localDb, importId\)/);
   assert.match(server, /channelingType: typeof req\.query\.channelingType === "string" \? req\.query\.channelingType : undefined/);
