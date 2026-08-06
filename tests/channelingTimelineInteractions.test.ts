@@ -206,3 +206,83 @@ test('a stale response from the previous subject cannot replace the current subj
   assert.doesNotMatch(host.textContent || '', /旧井记录/);
   await cleanup(root, dom);
 });
+
+test('a delayed add from the previous subject cannot reset or reload the current subject', async () => {
+  const { dom, host, root } = setup();
+  const oldPost = deferred<Response>();
+  const getUrls: string[] = [];
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (init?.method === 'POST') return oldPost.promise;
+    getUrls.push(url);
+    return url.includes('subjectId=1') ? response([]) : response([event(22, 'discovered', { content: '对象 B 的时间线' })]);
+  }) as typeof fetch;
+
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 1 } })); });
+  const oldForm = host.querySelector('form[data-event-form]') as HTMLFormElement;
+  await act(async () => {
+    change(oldForm.elements.namedItem('occurredOn') as HTMLInputElement, '2026-08-06');
+    change(oldForm.elements.namedItem('content') as HTMLTextAreaElement, '对象 A 的待提交记录');
+    change(oldForm.elements.namedItem('owner') as HTMLInputElement, '甲');
+  });
+  await act(async () => { oldForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 2 } })); });
+  const currentForm = host.querySelector('form[data-event-form]') as HTMLFormElement;
+  await act(async () => {
+    change(currentForm.elements.namedItem('occurredOn') as HTMLInputElement, '2026-08-07');
+    change(currentForm.elements.namedItem('content') as HTMLTextAreaElement, '对象 B 正在填写的记录');
+    change(currentForm.elements.namedItem('owner') as HTMLInputElement, '乙');
+  });
+  assert.match(host.textContent || '', /对象 B 的时间线/);
+
+  await act(async () => { oldPost.resolve(await response(event(11))); await oldPost.promise; });
+  assert.equal((currentForm.elements.namedItem('content') as HTMLTextAreaElement).value, '对象 B 正在填写的记录');
+  assert.equal((currentForm.elements.namedItem('owner') as HTMLInputElement).value, '乙');
+  assert.match(host.textContent || '', /对象 B 的时间线/);
+  assert.deepEqual(getUrls, [
+    '/api/channeling-tracking-events?subjectType=well&subjectId=1',
+    '/api/channeling-tracking-events?subjectType=well&subjectId=2',
+  ]);
+  await cleanup(root, dom);
+});
+
+test('a delayed correction from the previous subject cannot close or reload the current correction', async () => {
+  const { dom, host, root } = setup();
+  const oldCorrection = deferred<Response>();
+  const getUrls: string[] = [];
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (init?.method === 'POST') return oldCorrection.promise;
+    getUrls.push(url);
+    return url.includes('subjectId=1')
+      ? response([event(31, 'reviewed', { content: '对象 A 原记录' })])
+      : response([event(32, 'reviewed', { content: '对象 B 原记录' })]);
+  }) as typeof fetch;
+
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 1 } })); });
+  await act(async () => { (host.querySelector('button[aria-label="更正记录 31"]') as HTMLButtonElement).click(); });
+  const oldForm = host.querySelector('form[data-correction-for="31"]') as HTMLFormElement;
+  await act(async () => {
+    change(oldForm.elements.namedItem('reason') as HTMLInputElement, '对象 A 更正原因');
+    change(oldForm.elements.namedItem('evidence') as HTMLInputElement, '对象 A 复核证据');
+  });
+  await act(async () => { oldForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 2 } })); });
+  await act(async () => { (host.querySelector('button[aria-label="更正记录 32"]') as HTMLButtonElement).click(); });
+  const currentCorrection = host.querySelector('form[data-correction-for="32"]') as HTMLFormElement;
+  await act(async () => { change(currentCorrection.elements.namedItem('reason') as HTMLInputElement, '对象 B 正在填写的更正原因'); });
+
+  await act(async () => { oldCorrection.resolve(await response(event(33, 'corrected', { supersedesEventId: 31 }))); await oldCorrection.promise; });
+  const preserved = host.querySelector('form[data-correction-for="32"]') as HTMLFormElement;
+  assert.ok(preserved);
+  assert.equal((preserved.elements.namedItem('reason') as HTMLInputElement).value, '对象 B 正在填写的更正原因');
+  assert.match(host.textContent || '', /对象 B 原记录/);
+  assert.doesNotMatch(host.textContent || '', /对象 A 原记录/);
+  assert.deepEqual(getUrls, [
+    '/api/channeling-tracking-events?subjectType=well&subjectId=1',
+    '/api/channeling-tracking-events?subjectType=well&subjectId=2',
+  ]);
+  await cleanup(root, dom);
+});

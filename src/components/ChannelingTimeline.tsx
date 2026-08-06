@@ -31,6 +31,11 @@ const emptyEventDraft = (): EventDraft => ({ eventType: 'discovered', occurredOn
 const emptyCorrectionDraft = (): CorrectionDraft => ({ reason: '', occurredOn: '', content: '', evidence: '', owner: '' });
 
 export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
+  const subjectKey = `${subject.subjectType}:${subject.subjectId}`;
+  const subjectIdentity = useRef({ key: subjectKey, generation: 0 });
+  if (subjectIdentity.current.key !== subjectKey) {
+    subjectIdentity.current = { key: subjectKey, generation: subjectIdentity.current.generation + 1 };
+  }
   const [events, setEvents] = useState<TrackingEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -43,6 +48,8 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
   const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const correctionSubmittingRef = useRef(false);
+  const addMutationToken = useRef(0);
+  const correctionMutationToken = useRef(0);
   const requestGeneration = useRef(0);
   const activeController = useRef<AbortController | null>(null);
 
@@ -68,9 +75,18 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
   }, [subject.subjectId, subject.subjectType]);
 
   useEffect(() => {
+    addMutationToken.current++;
+    correctionMutationToken.current++;
+    submittingRef.current = false;
+    correctionSubmittingRef.current = false;
+    setSubmitting(false);
+    setCorrectionSubmitting(false);
+    setDraft(emptyEventDraft());
+    setFormError('');
     setEvents([]);
     setCorrectingId(null);
     setCorrection(emptyCorrectionDraft());
+    setCorrectionError('');
     void loadEvents();
     return () => {
       requestGeneration.current++;
@@ -81,6 +97,8 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
   const submitEvent = async (formEvent: FormEvent) => {
     formEvent.preventDefault();
     if (submittingRef.current) return;
+    const subjectGeneration = subjectIdentity.current.generation;
+    const mutationToken = ++addMutationToken.current;
     submittingRef.current = true;
     setSubmitting(true);
     setFormError('');
@@ -97,13 +115,18 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
           links: [subject],
         }),
       });
+      if (subjectIdentity.current.generation !== subjectGeneration || addMutationToken.current !== mutationToken) return;
       setDraft(emptyEventDraft());
       await loadEvents();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : '新增跟踪记录失败');
+      if (subjectIdentity.current.generation === subjectGeneration && addMutationToken.current === mutationToken) {
+        setFormError(error instanceof Error ? error.message : '新增跟踪记录失败');
+      }
     } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
+      if (subjectIdentity.current.generation === subjectGeneration && addMutationToken.current === mutationToken) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
     }
   };
 
@@ -120,6 +143,8 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
       setCorrectionError('请完整填写更正原因、日期、内容、证据和负责人');
       return;
     }
+    const subjectGeneration = subjectIdentity.current.generation;
+    const mutationToken = ++correctionMutationToken.current;
     correctionSubmittingRef.current = true;
     setCorrectionSubmitting(true);
     setCorrectionError('');
@@ -135,14 +160,19 @@ export function ChannelingTimeline({ role, subject }: ChannelingTimelineProps) {
           owner: correction.owner.trim(),
         }),
       });
+      if (subjectIdentity.current.generation !== subjectGeneration || correctionMutationToken.current !== mutationToken) return;
       setCorrectingId(null);
       setCorrection(emptyCorrectionDraft());
       await loadEvents();
     } catch (error) {
-      setCorrectionError(error instanceof Error ? error.message : '更正跟踪记录失败');
+      if (subjectIdentity.current.generation === subjectGeneration && correctionMutationToken.current === mutationToken) {
+        setCorrectionError(error instanceof Error ? error.message : '更正跟踪记录失败');
+      }
     } finally {
-      correctionSubmittingRef.current = false;
-      setCorrectionSubmitting(false);
+      if (subjectIdentity.current.generation === subjectGeneration && correctionMutationToken.current === mutationToken) {
+        correctionSubmittingRef.current = false;
+        setCorrectionSubmitting(false);
+      }
     }
   };
 
