@@ -179,6 +179,38 @@ test('failed add keeps controlled values for correction and retry', async () => 
   await cleanup(root, dom);
 });
 
+test('pending add disables every draft field and ignores programmatic edits', async () => {
+  const { dom, host, root } = setup();
+  const pending = deferred<Response>();
+  globalThis.fetch = (async (_input, init) => init?.method === 'POST' ? pending.promise : response([])) as typeof fetch;
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 8 } })); });
+  const form = host.querySelector('form[data-event-form]') as HTMLFormElement;
+  await act(async () => {
+    change(form.elements.namedItem('eventType') as HTMLSelectElement, 'executed');
+    change(form.elements.namedItem('occurredOn') as HTMLInputElement, '2026-08-06');
+    change(form.elements.namedItem('content') as HTMLTextAreaElement, '待保存内容');
+    change(form.elements.namedItem('evidence') as HTMLInputElement, '原证据');
+    change(form.elements.namedItem('owner') as HTMLInputElement, '原负责人');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  for (const name of ['eventType', 'occurredOn', 'content', 'evidence', 'owner']) assert.equal((form.elements.namedItem(name) as HTMLInputElement).disabled, true, name);
+  await act(async () => {
+    change(form.elements.namedItem('eventType') as HTMLSelectElement, 'closed');
+    change(form.elements.namedItem('occurredOn') as HTMLInputElement, '2026-08-07');
+    change(form.elements.namedItem('content') as HTMLTextAreaElement, '不应写入');
+    change(form.elements.namedItem('evidence') as HTMLInputElement, '不应写入');
+    change(form.elements.namedItem('owner') as HTMLInputElement, '不应写入');
+    pending.resolve(await response(undefined, { status: 400, success: false, message: '保存失败' }));
+    await pending.promise;
+  });
+  assert.equal((form.elements.namedItem('eventType') as HTMLSelectElement).value, 'executed');
+  assert.equal((form.elements.namedItem('occurredOn') as HTMLInputElement).value, '2026-08-06');
+  assert.equal((form.elements.namedItem('content') as HTMLTextAreaElement).value, '待保存内容');
+  assert.equal((form.elements.namedItem('evidence') as HTMLInputElement).value, '原证据');
+  assert.equal((form.elements.namedItem('owner') as HTMLInputElement).value, '原负责人');
+  await cleanup(root, dom);
+});
+
 test('admin correction requires all fields, keeps the original visible, and refreshes after success', async () => {
   const { dom, host, root } = setup();
   const original = event(4, 'reviewed');
@@ -206,6 +238,64 @@ test('admin correction requires all fields, keeps the original visible, and refr
   assert.match(host.textContent || '', /更正后的内容/);
   assert.match(host.textContent || '', /已作废：文字错误/);
   await cleanup(root, dom);
+});
+
+test('pending correction disables every field and ignores programmatic edits', async () => {
+  const { dom, host, root } = setup();
+  const pending = deferred<Response>();
+  globalThis.fetch = (async (_input, init) => init?.method === 'POST' ? pending.promise : response([event(14, 'reviewed')])) as typeof fetch;
+  await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'project', subjectId: 7 } })); });
+  await act(async () => { (host.querySelector('button[aria-label="更正记录 14"]') as HTMLButtonElement).click(); });
+  const form = host.querySelector('form[data-correction-for="14"]') as HTMLFormElement;
+  const original = { reason: '原更正原因', occurredOn: '2026-08-06', content: '原更正内容', evidence: '原更正证据', owner: '原负责人' };
+  await act(async () => {
+    for (const [name, value] of Object.entries(original)) change(form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement, value);
+  });
+  await act(async () => {
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  for (const name of Object.keys(original)) assert.equal((form.elements.namedItem(name) as HTMLInputElement).disabled, true, name);
+  await act(async () => {
+    for (const name of Object.keys(original)) change(form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement, '不应写入');
+    pending.resolve(await response(undefined, { status: 400, success: false, message: '更正失败' }));
+    await pending.promise;
+  });
+  for (const [name, value] of Object.entries(original)) assert.equal((form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement).value, value, name);
+  await cleanup(root, dom);
+});
+
+test('old add and correction failures do not alter newer subject drafts', async () => {
+  const run = async (kind: 'add' | 'correction') => {
+    const { dom, host, root } = setup(); const pending = deferred<Response>();
+    globalThis.fetch = (async (input, init) => {
+      if (init?.method === 'POST') return pending.promise;
+      return response(kind === 'correction' ? [event(String(input).includes('subjectId=1') ? 21 : 22, 'reviewed')] : []);
+    }) as typeof fetch;
+    await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 1 } })); });
+    if (kind === 'add') {
+      const form = host.querySelector('form[data-event-form]') as HTMLFormElement;
+      await act(async () => { change(form.elements.namedItem('occurredOn') as HTMLInputElement, '2026-08-06'); change(form.elements.namedItem('content') as HTMLTextAreaElement, '旧内容'); change(form.elements.namedItem('owner') as HTMLInputElement, '旧负责人'); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    } else {
+      await act(async () => { (host.querySelector('button[aria-label="更正记录 21"]') as HTMLButtonElement).click(); });
+      const form = host.querySelector('form[data-correction-for="21"]') as HTMLFormElement;
+      await act(async () => { change(form.elements.namedItem('reason') as HTMLInputElement, '旧原因'); change(form.elements.namedItem('evidence') as HTMLInputElement, '旧证据'); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    }
+    await act(async () => { root.render(createElement(ChannelingTimeline, { role: 'admin', subject: { subjectType: 'well', subjectId: 2 } })); });
+    if (kind === 'add') {
+      const current = host.querySelector('form[data-event-form]') as HTMLFormElement;
+      await act(async () => { change(current.elements.namedItem('content') as HTMLTextAreaElement, '新对象草稿'); });
+    } else {
+      await act(async () => { (host.querySelector('button[aria-label="更正记录 22"]') as HTMLButtonElement).click(); });
+      const current = host.querySelector('form[data-correction-for="22"]') as HTMLFormElement;
+      await act(async () => { change(current.elements.namedItem('reason') as HTMLInputElement, '新对象更正草稿'); });
+    }
+    await act(async () => { pending.resolve(await response(undefined, { status: 400, success: false, message: '旧请求失败' })); await pending.promise; });
+    if (kind === 'add') assert.equal(((host.querySelector('form[data-event-form]') as HTMLFormElement).elements.namedItem('content') as HTMLTextAreaElement).value, '新对象草稿');
+    else assert.equal(((host.querySelector('form[data-correction-for="22"]') as HTMLFormElement).elements.namedItem('reason') as HTMLInputElement).value, '新对象更正草稿');
+    assert.doesNotMatch(host.textContent || '', /旧请求失败/);
+    await cleanup(root, dom);
+  };
+  await run('add'); await run('correction');
 });
 
 test('a stale response from the previous subject cannot replace the current subject timeline', async () => {

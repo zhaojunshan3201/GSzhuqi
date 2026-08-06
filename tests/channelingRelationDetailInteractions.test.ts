@@ -133,6 +133,41 @@ test('successful evaluation submits once and shows immutable metric snapshot', a
   await cleanup(root, dom);
 });
 
+test('pending evaluation disables every field and ignores rapid programmatic edits', async () => {
+  const { dom, host, root } = setup(); const pending = deferred<Response>();
+  globalThis.fetch = (async (raw, init) => init?.method === 'POST' ? pending.promise : mockReads()(raw, init)) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingRelationDetail, { role: 'admin', relationId: 7, onOpenWell: () => {}, onBack: () => {} })));
+  await click(host, '效果评价');
+  const form = host.querySelector('form[aria-label="新增效果评价"]') as HTMLFormElement;
+  const original = { beforeStart: '2026-07-01', splitDate: '2026-07-16', afterEnd: '2026-07-31', conclusion: '原评价', evidence: '原证据', owner: '原负责人' };
+  await act(async () => { for (const [name, value] of Object.entries(original)) input(form, name, value); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  for (const name of Object.keys(original)) assert.equal((form.elements.namedItem(name) as HTMLInputElement).disabled, true, name);
+  await act(async () => {
+    for (const name of Object.keys(original)) input(form, name, '2026-08-01');
+    pending.resolve(await reply(null, 500, false, '评价失败')); await pending.promise;
+  });
+  for (const [name, value] of Object.entries(original)) assert.equal((form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement).value, value, name);
+  await cleanup(root, dom);
+});
+
+test('relation detail tabs expose ARIA semantics and support roving keyboard navigation', async () => {
+  const { dom, host, root } = setup(); globalThis.fetch = mockReads();
+  await act(async () => root.render(createElement(ChannelingRelationDetail, { role: 'guest', relationId: 7, onOpenWell: () => {}, onBack: () => {} })));
+  const tablist = host.querySelector('[role="tablist"]'); assert.ok(tablist);
+  const tabs = () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  assert.equal(tabs().length, 4);
+  assert.deepEqual(tabs().map((tab) => tab.getAttribute('aria-selected')), ['true', 'false', 'false', 'false']);
+  assert.deepEqual(tabs().map((tab) => tab.tabIndex), [0, -1, -1, -1]);
+  const assertActivePanel = () => { const active = tabs().find((tab) => tab.getAttribute('aria-selected') === 'true')!; const panel = host.querySelector('[role="tabpanel"]')!; assert.equal(active.getAttribute('aria-controls'), panel.id); assert.equal(panel.getAttribute('aria-labelledby'), active.id); };
+  assertActivePanel();
+  const press = async (key: string) => { const active = tabs().find((tab) => tab.tabIndex === 0)!; active.focus(); await act(async () => active.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true }))); assert.equal(document.activeElement, tabs().find((tab) => tab.tabIndex === 0)); assertActivePanel(); };
+  await press('ArrowRight'); assert.equal(tabs()[1].getAttribute('aria-selected'), 'true');
+  await press('End'); assert.equal(tabs()[3].getAttribute('aria-selected'), 'true');
+  await press('Home'); assert.equal(tabs()[0].getAttribute('aria-selected'), 'true');
+  await press('ArrowLeft'); assert.equal(tabs()[3].getAttribute('aria-selected'), 'true');
+  await cleanup(root, dom);
+});
+
 test('ignores stale relation responses and is safe in StrictMode and after unmount', async () => {
   const { dom, host, root } = setup(); const old = deferred<Response>();
   globalThis.fetch = (async (raw) => { const url = String(raw); if (url.includes('/7/detail?')) return old.promise; if (url.includes('/8/detail?')) return reply(detail(8)); if (url.startsWith('/api/channeling-wells?')) return reply([]); if (url.startsWith('/api/channeling-tracking-events?')) return reply([]); throw new Error(url); }) as typeof fetch;
