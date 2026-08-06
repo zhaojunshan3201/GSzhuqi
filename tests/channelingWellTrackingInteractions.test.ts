@@ -3,7 +3,7 @@ import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ChannelingWellTracking } from '../src/components/ChannelingWellTracking.tsx';
+import { ChannelingWellTracking, channelingWellMetricRange, formatChannelingMetricValue } from '../src/components/ChannelingWellTracking.tsx';
 import type { ChannelingWellProfile, WellMetrics } from '../src/lib/channelingTrackingApi.ts';
 
 const response = (data: unknown, init: { status?: number; success?: boolean; message?: string } = {}) => Promise.resolve(new Response(JSON.stringify({ success: init.success ?? true, data, message: init.message }), { status: init.status ?? 200 }));
@@ -75,6 +75,54 @@ test('creation succeeds after StrictMode replays mount effects', async () => {
   assert.equal((form.elements.namedItem('block') as HTMLInputElement).value, '');
   assert.equal((form.elements.namedItem('owner') as HTMLInputElement).value, '');
   assert.equal((form.querySelector('button[type="submit"]') as HTMLButtonElement).disabled, false);
+  await cleanup(root, dom);
+});
+
+test('an older list response cannot remove a newly created profile', async () => {
+  const { dom, host, root } = setup(); const oldList = deferred<Response>();
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (init?.method === 'POST') return response(profile(12, '新建井'));
+    if (url.startsWith('/api/channeling-wells?')) return oldList.promise;
+    if (url.includes('/metrics?')) return response(metrics([]));
+    if (url.endsWith('/relations')) return response([]);
+    return response(profile(12, '新建井'));
+  }) as typeof fetch;
+  await act(async () => { root.render(createElement(ChannelingWellTracking, { role: 'admin' })); });
+  const form = host.querySelector('form[aria-label="新建或复用单井档案"]') as HTMLFormElement;
+  await act(async () => { change(form.elements.namedItem('wellNo') as HTMLInputElement, '新建井'); });
+  await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  assert.equal(host.querySelectorAll('[data-well-id="12"]').length, 1);
+  await act(async () => { oldList.resolve(await response([])); await oldList.promise; });
+  assert.equal(host.querySelectorAll('[data-well-id="12"]').length, 1);
+  await cleanup(root, dom);
+});
+
+test('metric range follows the Shanghai business date across its midnight boundary', () => {
+  assert.deepEqual(channelingWellMetricRange(new Date('2026-08-05T16:30:00.000Z')), { start: '2026-07-08', end: '2026-08-06' });
+});
+
+test('metric value formatting rejects non-finite numbers', () => {
+  assert.equal(formatChannelingMetricValue(Number.NaN), '暂无');
+  assert.equal(formatChannelingMetricValue(Number.POSITIVE_INFINITY), '暂无');
+  assert.equal(formatChannelingMetricValue(Number.NEGATIVE_INFINITY), '暂无');
+  assert.equal(formatChannelingMetricValue(0), '0');
+});
+
+test('forms have accessible field names and tabs expose selected state', async () => {
+  const { dom, host, root } = setup();
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url.startsWith('/api/channeling-wells?')) return response([]);
+    if (url.includes('/metrics?')) return response(metrics([]));
+    if (url.endsWith('/relations')) return response([]);
+    return response(profile(1, 'H1'));
+  }) as typeof fetch;
+  await act(async () => { root.render(createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 1 })); });
+  for (const name of ['井号搜索', '新建井号', '新建区块', '新建负责人']) assert.ok(host.querySelector(`[aria-label="${name}"]`), name);
+  const tablist = host.querySelector('[role="tablist"]'); assert.ok(tablist);
+  const overview = [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === '概览'); assert.equal(overview?.getAttribute('aria-selected'), 'true');
+  const metricTab = [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === '生产指标') as HTMLButtonElement; await act(async () => { metricTab.click(); }); assert.equal(metricTab.getAttribute('aria-selected'), 'true'); assert.equal(overview?.getAttribute('aria-selected'), 'false');
   await cleanup(root, dom);
 });
 
