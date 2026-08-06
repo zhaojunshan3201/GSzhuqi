@@ -113,6 +113,10 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     assert.equal(summary.latestAvailableDate, '2026-01-03');
     const defaultSummary = await json(await request(`/api/channeling-projects/${project.id}/summary`));
     assert.deepEqual(defaultSummary.range, { start: '2025-12-05', end: '2026-01-03' });
+    const listedProject = (await json(await request('/api/channeling-projects'))).find((item: any) => item.id === project.id);
+    assert.deepEqual({ canDelete: listedProject.canDelete, hasTrackingHistory: listedProject.hasTrackingHistory }, { canDelete: false, hasTrackingHistory: true });
+    const listedRelation = (await json(await request(`/api/channeling-projects/${project.id}/relations`))).find((item: any) => item.id === relation.id);
+    assert.deepEqual({ canDelete: listedRelation.canDelete, hasTrackingHistory: listedRelation.hasTrackingHistory }, { canDelete: false, hasTrackingHistory: true });
     const detail = await json(await request(`/api/channeling-relations/${relation.id}/detail?beforeStart=2026-01-01&splitDate=2026-01-02&afterEnd=2026-01-03`));
     assert.equal(detail.comparison.oil.beforeAverage, 12.5); assert.equal(detail.comparison.oil.afterAverage, 20);
 
@@ -158,6 +162,24 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     const correctionResponse = await request(`/api/channeling-tracking-events/${event.id}/corrections`, { method: 'POST', headers: admin, body: JSON.stringify({ reason: 'wrong wording', occurredOn: '2026-01-02', content: 'corrected', evidence: '', owner: 'alice', createdBy: 'attacker' }) });
     assert.equal(correctionResponse.status, 201); assert.equal((await json(correctionResponse)).createdBy, 'admin');
     assert.equal((await request(`/api/channeling-tracking-events/${event.id}/corrections`, { method: 'POST', headers: admin, body: JSON.stringify({ reason: 'again', occurredOn: '2026-01-02', content: 'again', owner: 'alice' }) })).status, 409);
+
+    const projectEvaluationBody = { occurredOn: '2026-01-03', conclusion: 'project effective', evidence: 'project metrics', owner: 'alice', range: { start: '2026-01-01', end: '2026-01-03' } };
+    assert.equal((await request(`/api/channeling-projects/${project.id}/evaluations`, { method: 'POST', body: JSON.stringify(projectEvaluationBody) })).status, 401);
+    assert.equal((await request(`/api/channeling-projects/${project.id}/evaluations`, { method: 'POST', headers: ordinary, body: JSON.stringify(projectEvaluationBody) })).status, 403);
+    const projectEvaluationResponse = await request(`/api/channeling-projects/${project.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify(projectEvaluationBody) });
+    assert.equal(projectEvaluationResponse.status, 201);
+    const projectEvaluation = await json(projectEvaluationResponse);
+    assert.equal(projectEvaluation.eventType, 'evaluated'); assert.equal(projectEvaluation.createdBy, 'admin');
+    assert.deepEqual(projectEvaluation.links, [{ subjectType: 'project', subjectId: project.id }]);
+    assert.deepEqual(projectEvaluation.metricsSnapshot.range, projectEvaluationBody.range);
+    assert.equal(projectEvaluation.metricsSnapshot.cumulativeSteam, 100);
+    assert.equal(projectEvaluation.metricsSnapshot.latestTotalOil, 20);
+    assert.equal((await request(`/api/channeling-projects/${project.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...projectEvaluationBody, metricsSnapshot: { forged: true } }) })).status, 400);
+    assert.equal((await request(`/api/channeling-projects/${project.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...projectEvaluationBody, conclusion: '' }) })).status, 400);
+    assert.equal((await request(`/api/channeling-projects/${project.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...projectEvaluationBody, evidence: [] }) })).status, 400);
+    assert.equal((await request(`/api/channeling-projects/${project.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...projectEvaluationBody, owner: '' }) })).status, 400);
+    assert.equal((await request(`/api/channeling-projects/${project.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...projectEvaluationBody, range: { start: '2026-01-04', end: '2026-01-03' } }) })).status, 400);
+    assert.equal((await request('/api/channeling-projects/99999/evaluations', { method: 'POST', headers: admin, body: JSON.stringify(projectEvaluationBody) })).status, 404);
 
     const evaluationResponse = await request(`/api/channeling-relations/${relation.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: 'effective', evidence: 'metrics', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) });
     assert.equal(evaluationResponse.status, 201);

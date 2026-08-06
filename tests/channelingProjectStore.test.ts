@@ -12,6 +12,7 @@ import {
   deleteChannelingProject,
   deleteChannelingRelation,
   initChannelingProjectTables,
+  listChannelingGovernanceTodos,
   listChannelingProjects,
   listChannelingRelations,
   updateChannelingProject,
@@ -101,11 +102,55 @@ test('migrates existing relations with steam as the safe default and creates a n
   } finally { await db.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('derives deletion capabilities from relations and direct or relation-linked tracking history', async () => {
+  await withStore(async (db) => {
+    const empty = await createChannelingProject(db, { ...projectInput(), projectName: 'empty' });
+    const directHistory = await createChannelingProject(db, { ...projectInput(), projectName: 'direct history' });
+    const relationHistory = await createChannelingProject(db, { ...projectInput(), projectName: 'relation history' });
+    const cleanRelation = await createChannelingRelation(db, { ...relationInput(relationHistory.id), status: 'suspected', source: 'suspected' });
+
+    await createTrackingEvent(db, {
+      eventType: 'reviewed', occurredOn: '2026-08-06', content: 'project review', owner: 'owner', createdBy: 'admin',
+      links: [{ subjectType: 'project', subjectId: directHistory.id }],
+    });
+
+    let projects = await listChannelingProjects(db);
+    assert.deepEqual(
+      Object.fromEntries(projects.map((item) => [item.projectName, { canDelete: item.canDelete, hasTrackingHistory: item.hasTrackingHistory, relationCount: item.relationCount }])),
+      {
+        empty: { canDelete: true, hasTrackingHistory: false, relationCount: 0 },
+        'direct history': { canDelete: false, hasTrackingHistory: true, relationCount: 0 },
+        'relation history': { canDelete: false, hasTrackingHistory: false, relationCount: 1 },
+      },
+    );
+    assert.deepEqual(
+      (await listChannelingRelations(db, { projectId: relationHistory.id })).map((item) => ({ canDelete: item.canDelete, hasTrackingHistory: item.hasTrackingHistory })),
+      [{ canDelete: true, hasTrackingHistory: false }],
+    );
+
+    await createTrackingEvent(db, {
+      eventType: 'reviewed', occurredOn: '2026-08-07', content: 'relation review', owner: 'owner', createdBy: 'admin',
+      links: [{ subjectType: 'relation', subjectId: cleanRelation.id }],
+    });
+
+    projects = await listChannelingProjects(db);
+    const linked = projects.find((item) => item.id === relationHistory.id)!;
+    assert.deepEqual({ canDelete: linked.canDelete, hasTrackingHistory: linked.hasTrackingHistory }, { canDelete: false, hasTrackingHistory: true });
+    const todo = (await listChannelingGovernanceTodos(db, '2026-08-07')).find((item) => item.id === relationHistory.id)!;
+    assert.deepEqual({ canDelete: todo.canDelete, hasTrackingHistory: todo.hasTrackingHistory }, { canDelete: false, hasTrackingHistory: true });
+    assert.deepEqual(
+      (await listChannelingRelations(db, { projectId: relationHistory.id })).map((item) => ({ canDelete: item.canDelete, hasTrackingHistory: item.hasTrackingHistory })),
+      [{ canDelete: false, hasTrackingHistory: true }],
+    );
+  });
+});
+
 test('relation creation reuses normalized well profiles and records a linked confirmation event', async () => {
   await withStore(async (db) => {
     const project = await createChannelingProject(db, projectInput());
     const existing = await createWellProfile(db, { wellNo: ' 注a-1 ', block: '旧区', owner: '原负责人' });
     const created = await createChannelingRelation(db, relationInput(project.id), { createdBy: 'admin' });
+    assert.deepEqual({ canDelete: created.canDelete, hasTrackingHistory: created.hasTrackingHistory }, { canDelete: false, hasTrackingHistory: true });
     const profiles = await listWellProfiles(db);
     assert.equal(profiles.length, 2);
     assert.equal(profiles.find((item) => item.normalizedWellNo === '注A-1')?.id, existing.id);
@@ -145,7 +190,8 @@ test('status transitions create one event and same-status or unrelated updates c
     ]);
     await updateChannelingProject(db, project.id, { owner: '项目新负责人' });
     await updateChannelingProject(db, project.id, { status: 'identified' });
-    await updateChannelingProject(db, project.id, { status: 'confirmed' }, { createdBy: 'governor' });
+    const governed = await updateChannelingProject(db, project.id, { status: 'confirmed' }, { createdBy: 'governor' });
+    assert.deepEqual({ canDelete: governed.canDelete, hasTrackingHistory: governed.hasTrackingHistory }, { canDelete: false, hasTrackingHistory: true });
     const projectEvents = await listTrackingEvents(db, { subjectType: 'project', subjectId: project.id });
     assert.equal(projectEvents.filter((event) => event.eventType === 'status_changed').length, 1);
     const statusEvent = projectEvents.find((event) => event.eventType === 'status_changed')!;

@@ -64,6 +64,7 @@ import { confirmChannelingRelationImport, createChannelingRelationPreview, getCh
 import { createWellProfile, getWellProfile, initChannelingWellTables, listWellProfiles, updateWellProfile } from "./src/lib/channelingWellStore.ts";
 import { correctTrackingEvent, createTrackingEvent, createTrackingEventUnlocked, initChannelingTrackingTables, listTrackingEvents, type TrackingSubjectType } from "./src/lib/channelingTrackingStore.ts";
 import { getProjectSummary, getRelationMetrics, getWellMetrics, initChannelingMetricIndexes, validateComparisonRange, validateMetricRange } from "./src/lib/channelingMetrics.ts";
+import { createProjectEvaluation } from "./src/lib/channelingProjectEvaluationStore.ts";
 import { parseMonthlyInjectionPlan } from "./src/lib/monthlyInjectionPlanParser.ts";
 import { confirmPlanImport, createPlanPreview, initMonthlyInjectionPlanImportTables, listPlanImports } from "./src/lib/monthlyInjectionPlanImportStore.ts";
 import { decodeUploadedFileName } from "./src/lib/uploadFileName.ts";
@@ -4793,6 +4794,12 @@ app.post("/api/register", async (req, res) => {
     validateComparisonRange(range);
     return range;
   };
+  const channelingProjectEvaluationRange = (values: Record<string, unknown>) => {
+    const start = singleChannelingQuery(values.start, "start", true)!;
+    const end = singleChannelingQuery(values.end, "end", true)!;
+    validateMetricRange(start, end);
+    return { start, end };
+  };
   const channelingSubject = (req: express.Request) => {
     const subjectType = singleChannelingQuery(req.query.subjectType, "subjectType", true);
     if (subjectType !== "project" && subjectType !== "relation" && subjectType !== "well") throw new Error("subjectType is invalid");
@@ -4839,6 +4846,17 @@ app.post("/api/register", async (req, res) => {
     } catch (error) {
       if (transactionStarted) await channelingDb.exec("ROLLBACK");
       throw error;
+    } finally {
+      await channelingDb.close();
+    }
+  };
+  const createProjectEvaluationWithDedicatedConnection = async (projectId: number, body: Record<string, any>, range: { start: string; end: string }, createdBy: string) => {
+    const channelingDb = await open({ filename: DB_FILE, driver: sqlite3.Database });
+    try {
+      return await createProjectEvaluation(channelingDb, {
+        projectId, start: range.start, end: range.end, occurredOn: body.occurredOn,
+        content: body.conclusion, evidence: body.evidence, owner: body.owner, createdBy,
+      });
     } finally {
       await channelingDb.close();
     }
@@ -4965,6 +4983,23 @@ app.post("/api/register", async (req, res) => {
       const body = plainChannelingBody(req.body);
       const createdBy = authenticatedUser(req)!.username;
       res.status(201).json({ success: true, data: await correctTrackingEvent(localDb, id, { reason: body.reason, occurredOn: body.occurredOn, content: body.content, evidence: body.evidence, owner: body.owner, createdBy }) });
+    } catch (error: any) { sendChannelingTrackingError(res, error); }
+  });
+  app.post("/api/channeling-projects/:id/evaluations", async (req, res) => {
+    if (!requireChannelingAdmin(req, res)) return;
+    try {
+      const projectId = positiveChannelingId(req.params.id);
+      const body = plainChannelingBody(req.body);
+      if (Object.hasOwn(body, "metricsSnapshot")) throw new Error("metricsSnapshot is reserved for server-generated events");
+      const allowedFields = new Set(["occurredOn", "conclusion", "evidence", "owner", "range"]);
+      if (Object.keys(body).some((key) => !allowedFields.has(key))) throw new Error("body is invalid");
+      if (typeof body.conclusion !== "string" || !body.conclusion.trim()) throw new Error("content is required");
+      if (body.evidence !== undefined && typeof body.evidence !== "string") throw new Error("evidence is invalid");
+      if (typeof body.owner !== "string" || !body.owner.trim()) throw new Error("owner is required");
+      const range = channelingProjectEvaluationRange(plainChannelingBody(body.range));
+      const createdBy = authenticatedUser(req)!.username;
+      const data = await createProjectEvaluationWithDedicatedConnection(projectId, body, range, createdBy);
+      res.status(201).json({ success: true, data });
     } catch (error: any) { sendChannelingTrackingError(res, error); }
   });
   app.post("/api/channeling-relations/:id/evaluations", async (req, res) => {
