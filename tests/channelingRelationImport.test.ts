@@ -6,13 +6,16 @@ import test from 'node:test';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import * as XLSX from 'xlsx';
-import { confirmChannelingRelationImport, createChannelingRelationPreview, getChannelingRelationImport, initChannelingRelationImportTables, parseChannelingRelationRows } from '../src/lib/channelingRelationImport.ts';
+import { confirmChannelingRelationImport, createChannelingRelationPreview, defaultChannelingRelationEffectiveDate, getChannelingRelationImport, initChannelingRelationImportTables, parseChannelingRelationRows } from '../src/lib/channelingRelationImport.ts';
 import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingProjects, listChannelingRelations, updateChannelingRelation } from '../src/lib/channelingProjectStore.ts';
 import { listTrackingEvents } from '../src/lib/channelingTrackingStore.ts';
 import { listWellProfiles } from '../src/lib/channelingWellStore.ts';
 const h = { injector: '\u6ce8\u4e95', producer: '\u91c7\u6cb9\u4e95', impact: '\u5f71\u54cd\u7b49\u7ea7', confidence: '\u7f6e\u4fe1\u5ea6', source: '\u6765\u6e90', high: '\u9ad8', medium: '\u4e2d', low: '\u4f4e', suspected: '\u7591\u4f3c\u8bc6\u522b', imported: '\u5bfc\u5165' };
 function workbookWithRows(rows: unknown[][]): XLSX.WorkBook { const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'relations'); return workbook; }
 const matrixWorkbook = (rows: unknown[][]) => workbookWithRows(rows);
+test('import fallback date follows the Shanghai business day', () => {
+  assert.equal(defaultChannelingRelationEffectiveDate(new Date('2026-08-05T16:30:00.000Z')), '2026-08-06');
+});
 function matrixWorkbookWithFormattedWell(): XLSX.WorkBook {
   const workbook = matrixWorkbook([['注汽井', '井号1'], ['Z1', 24]]);
   workbook.Sheets.relations.B2.z = '000';

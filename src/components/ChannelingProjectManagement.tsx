@@ -3,12 +3,14 @@ import type { ChannelingGovernanceStatus, ChannelingProject, ChannelingRelation,
 import type { ChannelingRelationImport, ChannelingRelationImportRow } from '../lib/channelingRelationImport';
 import { ChannelingTimeline } from './ChannelingTimeline.tsx';
 import { ChannelingApiError, channelingRequest, type ProjectSummary } from '../lib/channelingTrackingApi.ts';
+import { formatShanghaiBusinessDate } from '../lib/businessDate.ts';
 
 const statusLabels: Record<ChannelingGovernanceStatus, string> = { identified: '识别/导入', confirmed: '确认', risk_assessed: '风险分级', planned: '治理方案', governing: '执行跟踪', verifying: '效果验证', closed: '关闭', recurred: '复发回流' };
 const relationLabels = { confirmed: '已确认', suspected: '疑似', released: '已解除' } as const;
 const channelingTypeLabels: Record<ChannelingType, string> = { steam: '注汽窜', nitrogen: '注氮气窜' };
-const today = () => new Date().toISOString().slice(0, 10);
-const blankRelation = (): Omit<ChannelingRelationInput, 'projectId'> => ({ channelingType: 'steam', injectionWell: '', productionWell: '', reservoirLayer: '', impactLevel: 'medium', confidence: .5, status: 'confirmed', source: 'manual', evidence: '', effectiveStartDate: today(), effectiveEndDate: today(), owner: '' });
+const today = () => formatShanghaiBusinessDate(new Date());
+export const defaultManualRelationDraft = (now = new Date()): Omit<ChannelingRelationInput, 'projectId'> => ({ channelingType: 'steam', injectionWell: '', productionWell: '', reservoirLayer: '', impactLevel: 'medium', confidence: .5, status: 'confirmed', source: 'manual', evidence: '', effectiveStartDate: formatShanghaiBusinessDate(now), effectiveEndDate: formatShanghaiBusinessDate(now), owner: '' });
+const blankRelation = () => defaultManualRelationDraft();
 type Props = { role: string; onOpenRelation?: (relationId: number) => void };
 type MessageTone = 'info' | 'success' | 'warning' | 'error';
 const messageClasses: Record<MessageTone, string> = { info: 'status-banner-info', success: 'status-banner-success border-emerald-200 bg-emerald-50 text-emerald-700', warning: 'status-banner-warning border-amber-200 bg-amber-50 text-amber-700', error: 'status-banner-error border-red-200 bg-red-50 text-red-700' };

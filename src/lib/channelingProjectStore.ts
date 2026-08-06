@@ -140,9 +140,9 @@ export async function listChannelingRelations(db: DatabaseLike, options: { proje
 async function createRelationStatusEvent(db: DatabaseLike, current: ChannelingRelation, eventType: 'relation_confirmed' | 'relation_released', audit: ChannelingAuditContext, injectionProfileId?: number, productionProfileId?: number): Promise<void> {
   const injection = injectionProfileId ?? (await ensureWellProfileUnlocked(db, { wellNo: current.injectionWell, block: current.block, owner: current.owner })).id;
   const production = productionProfileId ?? (await ensureWellProfileUnlocked(db, { wellNo: current.productionWell, block: current.block, owner: current.owner })).id;
-  const verb = eventType === 'relation_confirmed' ? 'confirmed' : 'released';
+  const verb = eventType === 'relation_confirmed' ? '关系已确认' : '关系已解除';
   await createTrackingEventUnlocked(db, {
-    eventType, occurredOn: shanghaiCalendarDate(), content: `Relation ${verb}: ${current.injectionWell} -> ${current.productionWell}`,
+    eventType, occurredOn: shanghaiCalendarDate(), content: `${verb}：${current.injectionWell} → ${current.productionWell}`,
     evidence: current.evidence, owner: current.owner, createdBy: audit.createdBy,
     links: [{ subjectType: 'project', subjectId: current.projectId }, { subjectType: 'relation', subjectId: current.id }, { subjectType: 'well', subjectId: injection }, { subjectType: 'well', subjectId: production }],
   });

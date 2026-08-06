@@ -48,6 +48,11 @@ test('admin can explicitly search and create or reuse a profile without duplicat
   await act(async () => { change(create.elements.namedItem('wellNo') as HTMLInputElement, 'H609'); change(create.elements.namedItem('block') as HTMLInputElement, '高4'); change(create.elements.namedItem('owner') as HTMLInputElement, '王'); });
   await act(async () => { create.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); create.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
   assert.equal(posts, 1);
+  assert.ok([...create.querySelectorAll('input, button')].every((control) => (control as HTMLInputElement).disabled));
+  const pendingWellNo = create.elements.namedItem('wellNo') as HTMLInputElement;
+  await act(async () => change(pendingWellNo, '不应覆盖'));
+  await act(async () => root.render(createElement(ChannelingWellTracking, { role: 'admin' })));
+  assert.equal(pendingWellNo.value, 'H609');
   await act(async () => { post.resolve(await response(profile(2, 'H609'))); await post.promise; });
   assert.equal(posts, 1);
   assert.match(host.textContent || '', /H609/);
@@ -125,6 +130,10 @@ test('forms have accessible field names and tabs expose selected state', async (
   const tablist = host.querySelector('[role="tablist"]'); assert.ok(tablist);
   const overview = [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === '概览'); assert.equal(overview?.getAttribute('aria-selected'), 'true');
   const metricTab = [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === '生产指标') as HTMLButtonElement; await act(async () => { metricTab.click(); }); assert.equal(metricTab.getAttribute('aria-selected'), 'true'); assert.equal(overview?.getAttribute('aria-selected'), 'false');
+  assert.equal(metricTab.tabIndex, 0); assert.equal((overview as HTMLButtonElement).tabIndex, -1); assert.equal(host.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby'), 'well-tab-metrics');
+  await act(async () => metricTab.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+  const relationsTab = [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === '关联关系') as HTMLButtonElement;
+  assert.equal(relationsTab.getAttribute('aria-selected'), 'true'); assert.equal(document.activeElement, relationsTab);
   await cleanup(root, dom);
 });
 
@@ -259,7 +268,7 @@ test('dual-role metrics, missing values, query time, relations callback, and wel
     const url = String(input);
     if (url.startsWith('/api/channeling-wells?')) return response([profile(1, '高3-1', ['injector', 'producer'])]);
     if (url.includes('/metrics?')) { const value = metrics(['injector', 'producer']); value.injection!.stages[0].endDate = null; return response(value); }
-    if (url.endsWith('/relations')) return response([{ id: 9, injectionWell: '高3-1', productionWell: '高3-2', status: 'confirmed', channelingType: '注汽窜', confidence: null, evidence: '', owner: '周', effectiveStartDate: '2026-08-01', effectiveEndDate: null, project: { id: 3, name: '蒸汽窜', block: '高3' } }]);
+    if (url.endsWith('/relations')) return response([{ id: 9, injectionWell: '高3-1', productionWell: '高3-2', status: 'confirmed', channelingType: 'steam', confidence: null, evidence: '', owner: '周', effectiveStartDate: '2026-08-01', effectiveEndDate: null, project: { id: 3, name: '蒸汽窜', block: '高3' } }]);
     if (url.includes('channeling-tracking-events')) return response([]);
     return response(profile(1, '高3-1', ['injector', 'producer']));
   }) as typeof fetch;
@@ -267,7 +276,7 @@ test('dual-role metrics, missing values, query time, relations callback, and wel
   await clickText(host, '生产指标');
   for (const value of ['注汽指标', '周期 2', '累计注汽量 180', '温度 255', '压力 12', '干度 0.72', '生产时数 48', '采油井指标', '最新日产油 12', '7日均值 12', '30日均值 11', '查询时间 2026-08-06T08:30:00Z', '暂无']) assert.match(host.textContent || '', new RegExp(value));
   await clickText(host, '关联关系');
-  assert.match(host.textContent || '', /高3-1 → 高3-2/); await clickText(host, '查看关系详情'); assert.equal(opened, 9);
+  assert.match(host.textContent || '', /高3-1 → 高3-2/); assert.match(host.textContent || '', /注汽窜 · 已确认/); await clickText(host, '查看关系详情'); assert.equal(opened, 9);
   await clickText(host, '跟踪记录');
   assert.ok(host.querySelector('[aria-label="跟踪记录时间线"]'));
   await cleanup(root, dom);
@@ -322,6 +331,11 @@ test('admin updates only block and owner with the optimistic token and duplicate
   assert.ok(form); await act(async () => { change(form.elements.namedItem('block') as HTMLInputElement, '新区块'); change(form.elements.namedItem('owner') as HTMLInputElement, '新负责人'); });
   await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
   assert.equal(patches, 1); assert.deepEqual(body, { block: '新区块', owner: '新负责人', updatedAt: '2026-08-01T00:00:00Z' });
+  assert.ok([...form.querySelectorAll('input, button')].every((control) => (control as HTMLInputElement).disabled));
+  const pendingOwner = form.elements.namedItem('owner') as HTMLInputElement;
+  await act(async () => change(pendingOwner, '不应覆盖'));
+  await act(async () => root.render(createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 1 })));
+  assert.equal(pendingOwner.value, '新负责人');
   const updated = { ...profile(1, '维护井'), block: '新区块', owner: '新负责人', updatedAt: '2026-08-02T00:00:00Z' };
   const { roles: _roles, relationCount: _relationCount, projectCount: _projectCount, ...sparsePatchResponse } = updated;
   await act(async () => { pending.resolve(await response(sparsePatchResponse)); await pending.promise; });

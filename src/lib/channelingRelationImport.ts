@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 
 import { createChannelingRelationUnlocked, initChannelingProjectTables, type ChannelingType, type DatabaseLike, type ImpactLevel, type RelationSource } from './channelingProjectStore.ts';
 import { withChannelingWriteLock } from './channelingWriteQueue.ts';
+import { formatShanghaiBusinessDate } from './businessDate.ts';
 
 export type ChannelingRelationImportRow = {
   rowNumber: number;
@@ -17,6 +18,7 @@ export type ChannelingRelationImportRow = {
   effectiveEndDate?: string;
   owner?: string;
 };
+export const defaultChannelingRelationEffectiveDate = (now = new Date()) => formatShanghaiBusinessDate(now);
 
 export type ChannelingRelationImportPreviewRows = {
   valid: ChannelingRelationImportRow[];
@@ -223,7 +225,7 @@ export async function confirmChannelingRelationImport(db: DatabaseLike, importId
           newDuplicates++;
         } else remaining.push(row);
       }
-      const today = new Date().toISOString().slice(0, 10);
+      const today = defaultChannelingRelationEffectiveDate();
       for (const row of remaining) {
         const source = row.source ?? 'import';
         await createChannelingRelationUnlocked(db, {

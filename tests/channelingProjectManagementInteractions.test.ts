@@ -3,7 +3,7 @@ import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { act, createElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ChannelingProjectManagement } from '../src/components/ChannelingProjectManagement.tsx';
+import { ChannelingProjectManagement, defaultManualRelationDraft } from '../src/components/ChannelingProjectManagement.tsx';
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -48,6 +48,12 @@ const changeInput = (input: HTMLInputElement, value: string) => {
   Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, value);
   input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
 };
+
+test('manual relation defaults follow the Shanghai business day', () => {
+  const draft = defaultManualRelationDraft(new Date('2026-08-05T16:30:00.000Z'));
+  assert.equal(draft.effectiveStartDate, '2026-08-06');
+  assert.equal(draft.effectiveEndDate, '2026-08-06');
+});
 
 test('preview selects the current project when projects finish loading after upload', async () => {
   const dom = setupDom();

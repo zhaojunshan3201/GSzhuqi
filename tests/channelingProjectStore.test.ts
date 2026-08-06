@@ -160,7 +160,7 @@ test('relation creation reuses normalized well profiles and records a linked con
     const events = await listTrackingEvents(db, { subjectType: 'relation', subjectId: created.id });
     assert.equal(events.length, 1);
     assert.equal(events[0].eventType, 'relation_confirmed');
-    assert.equal(events[0].content, 'Relation confirmed: 注A-1 -> 采A-2');
+    assert.equal(events[0].content, '关系已确认：注A-1 → 采A-2');
     assert.equal(events[0].evidence, '示踪剂响应');
     assert.equal(events[0].owner, '李工');
     assert.equal(events[0].createdBy, 'admin');
