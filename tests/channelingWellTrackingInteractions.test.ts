@@ -396,3 +396,18 @@ test('unmount invalidates a delayed profile maintenance request', async () => {
   await act(async () => { pending.resolve(await response({ ...profile(1, '卸载井'), block: '迟到区块' })); await pending.promise; });
   assert.equal(host.textContent, '');
 });
+
+test('updating a selected profile absent from the current list inserts one enriched row', async () => {
+  const { dom, host, root } = setup();
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (init?.method === 'PATCH') { const base = profile(1, '筛选外井'); const { roles: _roles, relationCount: _relations, projectCount: _projects, ...sparse } = base; return response({ ...sparse, block: '新区', owner: '新负责人', updatedAt: '2026-08-02T00:00:00Z' }); }
+    if (url.startsWith('/api/channeling-wells?')) return response([]); if (url.includes('/metrics?')) return response(metrics(['injector'])); if (url.endsWith('/relations')) return response([]); return response(profile(1, '筛选外井', ['injector']));
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingWellTracking, { role: 'admin', selectedWellId: 1 })));
+  assert.equal(host.querySelector('[data-well-id="1"]'), null);
+  const form = host.querySelector('form[aria-label="维护单井档案"]') as HTMLFormElement;
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  assert.equal(host.querySelectorAll('[data-well-id="1"]').length, 1); assert.match(host.textContent || '', /关联关系数1/); assert.match(host.textContent || '', /注汽井/);
+  await cleanup(root, dom);
+});

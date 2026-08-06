@@ -22,6 +22,7 @@ export function channelingWellMetricRange(now: Date = new Date()) {
   startDate.setUTCDate(startDate.getUTCDate() - 29);
   return { start: startDate.toISOString().slice(0, 10), end };
 }
+export const mergeChannelingWellProfile = (current: ChannelingWellProfile, updated: ChannelingWellProfile): ChannelingWellProfile => ({ ...current, ...updated });
 
 export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, onBack }: ChannelingWellTrackingProps) {
   const [query, setQuery] = useState('');
@@ -170,11 +171,11 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
         body: JSON.stringify({ block: editDraft.block, owner: editDraft.owner, updatedAt: detail.updatedAt }),
       });
       if (!mounted.current || updateMutationToken.current !== mutationToken || selectedId !== wellId) return;
-      const mergedDetail = { ...detail, ...updated };
+      const mergedDetail = mergeChannelingWellProfile(detail, updated);
       setDetail(mergedDetail);
       setProfiles((current) => {
         const existing = current.some((item) => item.id === updated.id);
-        return existing ? current.map((item) => item.id === updated.id ? { ...item, ...updated } : item) : [updated, ...current];
+        return existing ? current.map((item) => item.id === updated.id ? mergeChannelingWellProfile(item, mergedDetail) : item) : [mergedDetail, ...current];
       });
       setEditDraft({ block: mergedDetail.block, owner: mergedDetail.owner });
       setUpdateSuccess('档案已更新');

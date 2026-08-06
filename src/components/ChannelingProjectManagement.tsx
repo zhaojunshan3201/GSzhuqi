@@ -42,6 +42,12 @@ function ProjectSummaryPanel({ projectId, isAdmin }: { projectId: number; isAdmi
     mounted.current = true;
     return () => { mounted.current = false; evaluationMutationToken.current++; evaluationSubmittingRef.current = false; };
   }, []);
+  useEffect(() => {
+    if (!evaluationSubmittingRef.current) return;
+    evaluationMutationToken.current++;
+    evaluationSubmittingRef.current = false;
+    setEvaluationSubmitting(false);
+  }, [appliedRange.start, appliedRange.end]);
 
   useEffect(() => {
     setSummary(null);
@@ -58,6 +64,7 @@ function ProjectSummaryPanel({ projectId, isAdmin }: { projectId: number; isAdmi
   }, [projectId, requestVersion, retryKey]);
 
   const applyRange = () => {
+    if (evaluationSubmittingRef.current) return;
     const message = !draftRange.start || !draftRange.end ? '请选择完整日期范围' : draftRange.start > draftRange.end ? '开始日期不能晚于结束日期' : '';
     if (message) {
       activeController.current?.abort();
@@ -102,12 +109,12 @@ function ProjectSummaryPanel({ projectId, isAdmin }: { projectId: number; isAdmi
     ['累计注汽量', summary.cumulativeSteam], ['期初日产油合计', summary.initialTotalOil], ['最新日产油合计', summary.latestTotalOil], ['日产油合计变化', summary.totalOilChange], ['已评价次数', summary.evaluatedCount],
   ] : [];
   return <section id="project-panel-overview" role="tabpanel" aria-labelledby="project-tab-overview" className="mt-4">
-    <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]"><label>汇总开始日期<input aria-label="汇总开始日期" className="field-control" type="date" value={draftRange.start} onInput={(event) => { const value = event.currentTarget.value; dirtyDraft.current.start = true; setDraftRange((current) => ({ ...current, start: value })); setValidationError(''); }}/></label><label>汇总结束日期<input aria-label="汇总结束日期" className="field-control" type="date" value={draftRange.end} onInput={(event) => { const value = event.currentTarget.value; dirtyDraft.current.end = true; setDraftRange((current) => ({ ...current, end: value })); setValidationError(''); }}/></label><button type="button" className="action-button" onClick={applyRange}>应用统计范围</button></div>
+    <div className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]"><label>汇总开始日期<input aria-label="汇总开始日期" disabled={evaluationSubmitting} className="field-control" type="date" value={draftRange.start} onInput={(event) => { if (evaluationSubmittingRef.current) return; const value = event.currentTarget.value; dirtyDraft.current.start = true; setDraftRange((current) => ({ ...current, start: value })); setValidationError(''); }}/></label><label>汇总结束日期<input aria-label="汇总结束日期" disabled={evaluationSubmitting} className="field-control" type="date" value={draftRange.end} onInput={(event) => { if (evaluationSubmittingRef.current) return; const value = event.currentTarget.value; dirtyDraft.current.end = true; setDraftRange((current) => ({ ...current, end: value })); setValidationError(''); }}/></label><button type="button" disabled={evaluationSubmitting} className="action-button" onClick={applyRange}>应用统计范围</button></div>
     {validationError && <p role="alert" className="mt-2 text-sm text-red-700">{validationError}</p>}
     {loading && <p className="mt-3 text-sm text-slate-500">正在加载项目汇总…</p>}
     {error && <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p>{error}</p><button type="button" className="mt-2" onClick={() => setRetryKey((value) => value + 1)}>重试</button></div>}
     {!loading && !error && summary && <><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} className="rounded border border-slate-200 p-3"><span className="text-sm text-slate-500">{label}</span><b className="mt-1 block">{displayNumber(value)}</b></div>)}</div><div className="mt-3 rounded border border-slate-200 p-3 text-sm"><span className="text-slate-500">最新评价结论</span><p className="mt-1">{typeof summary.latestEvaluationConclusion === 'string' && summary.latestEvaluationConclusion.trim() ? summary.latestEvaluationConclusion : '暂无数据'}</p></div><p className="mt-3 text-sm text-slate-500">统计范围：{summary.range?.start || summary.start || appliedRange.start} 至 {summary.range?.end || summary.end || appliedRange.end} · 最新可用数据日期：{summary.latestAvailableDate || '暂无数据'} · 查询时间：{summary.generatedAt || '暂无数据'}</p></>}
-    {isAdmin && summary && <form aria-label="人工项目评价" onSubmit={submitEvaluation} className="mt-4 grid gap-3 rounded border border-slate-200 bg-slate-50 p-4 md:grid-cols-2"><div className="md:col-span-2"><h4 className="font-semibold">人工项目评价</h4><p className="text-sm text-slate-500">评价范围：{summary.range.start} 至 {summary.range.end}</p></div><label className="md:col-span-2">评价结论<textarea name="conclusion" required className="field-control" value={evaluationDraft.conclusion} onInput={(event) => { const conclusion = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, conclusion })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label><label>评价证据<input name="evidence" className="field-control" value={evaluationDraft.evidence} onInput={(event) => { const evidence = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, evidence })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label><label>负责人<input name="owner" required className="field-control" value={evaluationDraft.owner} onInput={(event) => { const owner = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, owner })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label>{evaluationError && <p role="alert" className="text-sm text-red-700 md:col-span-2">{evaluationError}</p>}<button type="submit" disabled={evaluationSubmitting} className="action-button action-primary md:col-span-2">{evaluationSubmitting ? '评价保存中…' : '保存人工评价'}</button></form>}
+    {isAdmin && summary && <form aria-label="人工项目评价" onSubmit={submitEvaluation} className="mt-4 grid gap-3 rounded border border-slate-200 bg-slate-50 p-4 md:grid-cols-2"><div className="md:col-span-2"><h4 className="font-semibold">人工项目评价</h4><p className="text-sm text-slate-500">评价范围：{summary.range.start} 至 {summary.range.end}</p></div><label className="md:col-span-2">评价结论<textarea name="conclusion" required disabled={evaluationSubmitting} className="field-control" value={evaluationDraft.conclusion} onInput={(event) => { if (evaluationSubmittingRef.current) return; const conclusion = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, conclusion })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label><label>评价证据<input name="evidence" disabled={evaluationSubmitting} className="field-control" value={evaluationDraft.evidence} onInput={(event) => { if (evaluationSubmittingRef.current) return; const evidence = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, evidence })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label><label>负责人<input name="owner" required disabled={evaluationSubmitting} className="field-control" value={evaluationDraft.owner} onInput={(event) => { if (evaluationSubmittingRef.current) return; const owner = event.currentTarget.value; setEvaluationDraft((current) => ({ ...current, owner })); setEvaluationError(''); setEvaluationSuccess(''); }}/></label>{evaluationError && <p role="alert" className="text-sm text-red-700 md:col-span-2">{evaluationError}</p>}<button type="submit" disabled={evaluationSubmitting} className="action-button action-primary md:col-span-2">{evaluationSubmitting ? '评价保存中…' : '保存人工评价'}</button></form>}
     {evaluationSuccess && <p role="status" className="mt-3 text-sm text-emerald-700">{evaluationSuccess}</p>}
     {!loading && !error && !summary && !validationError && <p className="mt-3 text-sm text-slate-500">暂无汇总数据</p>}
   </section>;
@@ -136,10 +143,13 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const [protectedProjectIds, setProtectedProjectIds] = useState<Set<number>>(() => new Set());
   const [protectedRelationKeys, setProtectedRelationKeys] = useState<Set<string>>(() => new Set());
   const confirmingImportIdRef = useRef<number | null>(null);
+  const projectCreateMutationToken = useRef(0);
+  const projectCreateDraftVersion = useRef(0);
   const relationRequestRef = useRef<AbortController | null>(null);
   const relationProjectIdRef = useRef<number | null>(null);
-  const viewSelectionRef = useRef({ selectedId, channelingType: relationFilters.channelingType });
-  viewSelectionRef.current = { selectedId, channelingType: relationFilters.channelingType };
+  const viewSelectionRef = useRef({ selectedId, channelingType: relationFilters.channelingType, status: relationFilters.status, source: relationFilters.source });
+  viewSelectionRef.current = { selectedId, channelingType: relationFilters.channelingType, status: relationFilters.status, source: relationFilters.source };
+  const isCurrentView = (view: { selectedId: number | null; channelingType: string; status: string; source: string }) => viewSelectionRef.current.selectedId === view.selectedId && viewSelectionRef.current.channelingType === view.channelingType && viewSelectionRef.current.status === view.status && viewSelectionRef.current.source === view.source;
   const selected = projects.find((item) => item.id === selectedId);
   const visibleProjects = useMemo(() => projects.filter((item) => (!projectFilters.block || item.block.includes(projectFilters.block)) && (!projectFilters.status || item.status === projectFilters.status)), [projects, projectFilters]);
   const visibleRelations = useMemo(() => relations.filter((item) => (!relationFilters.channelingType || item.channelingType === relationFilters.channelingType) && (!relationFilters.status || item.status === relationFilters.status) && (!relationFilters.source || item.source === relationFilters.source)), [relations, relationFilters]);
@@ -201,6 +211,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   useEffect(() => { if (selectedId) void loadRelations(selectedId).catch(() => setMessage('关系加载失败，请稍后重试。')); else { relationRequestRef.current?.abort(); relationProjectIdRef.current = null; setRelations([]); setImports([]); } }, [selectedId, relationFilters.channelingType]);
   useEffect(() => { setProjectTab('overview'); }, [selectedId]);
   useEffect(() => () => relationRequestRef.current?.abort(), []);
+  useEffect(() => () => { projectCreateMutationToken.current++; }, []);
   useEffect(() => {
     if (!preview) return;
     setPreviewProjectId((current) => {
@@ -233,16 +244,32 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
       if (viewSelectionRef.current.selectedId === projectId) setMessage('治理台账已保存。', 'success');
     } catch (error: any) { if (viewSelectionRef.current.selectedId === projectId) setMessage(error.message); }
   };
-  const create = async (event: React.FormEvent) => { event.preventDefault(); try { const created = await request('/api/channeling-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProject) }); setNewProject({ projectName: '', block: '', owner: '' }); await load(); selectProject(created.id); setPreviewProjectId((id) => id ?? created.id); } catch (error: any) { setMessage(error.message); } };
+  const create = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const view = { ...viewSelectionRef.current };
+    const draftVersion = projectCreateDraftVersion.current;
+    const mutationToken = ++projectCreateMutationToken.current;
+    const remainsCurrent = () => projectCreateMutationToken.current === mutationToken && projectCreateDraftVersion.current === draftVersion && isCurrentView(view);
+    try {
+      const created = await request('/api/channeling-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProject) });
+      if (!remainsCurrent()) return;
+      await load();
+      if (!remainsCurrent()) return;
+      setNewProject({ projectName: '', block: '', owner: '' });
+      selectProject(created.id);
+      setPreviewProjectId((id) => id ?? created.id);
+    } catch (error: any) { if (remainsCurrent()) setMessage(error.message); }
+  };
   const createRelation = async (event: React.FormEvent) => {
     event.preventDefault(); if (!selected) return;
     const projectId = selected.id;
+    const view = { ...viewSelectionRef.current };
     try {
       await request(`/api/channeling-projects/${projectId}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(relationDraft) });
-      if (viewSelectionRef.current.selectedId !== projectId) return;
+      if (!isCurrentView(view)) return;
       setRelationDraft(blankRelation());
       await loadRelations(projectId);
-    } catch (error: any) { if (viewSelectionRef.current.selectedId === projectId) setMessage(error.message); }
+    } catch (error: any) { if (isCurrentView(view)) setMessage(error.message); }
   };
   const uploadRelations = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -277,12 +304,12 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     try {
       await request(`/api/channeling-relation-imports/${batchId}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId }) });
     } catch (error: any) {
-      if (viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType) setMessage(`确认失败：${error.message}`);
+      if (isCurrentView(viewSelection)) setMessage(`确认失败：${error.message}`);
       confirmingImportIdRef.current = null;
       setConfirming(false);
       return;
     }
-    const viewIsUnchanged = () => viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType;
+    const viewIsUnchanged = () => isCurrentView(viewSelection);
     if (!viewIsUnchanged()) { if (confirmingImportIdRef.current === batchId) confirmingImportIdRef.current = null; setConfirming(false); return; }
     setPreview((current) => current?.id === batchId ? null : current);
     setValidRowsExpanded(false);
@@ -306,17 +333,17 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     try {
       await request(`/api/channeling-relation-imports/${id}/confirm`, { method: 'POST' });
     } catch (error: any) {
-      if (viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType) setMessage(`确认失败：${error.message}`);
+      if (isCurrentView(viewSelection)) setMessage(`确认失败：${error.message}`);
       confirmingImportIdRef.current = null;
       setConfirming(false);
       return;
     }
-    if (viewSelectionRef.current.selectedId !== viewSelection.selectedId || viewSelectionRef.current.channelingType !== viewSelection.channelingType) { if (confirmingImportIdRef.current === id) confirmingImportIdRef.current = null; setConfirming(false); return; }
+    if (!isCurrentView(viewSelection)) { if (confirmingImportIdRef.current === id) confirmingImportIdRef.current = null; setConfirming(false); return; }
     setImports((current) => current.map((item) => item.id === id ? { ...item, status: 'confirmed' } : item));
     setPreview((current) => current?.id === id ? null : current);
     setMessage('关系导入已确认。', 'success');
     try {
-      if (selected && viewSelectionRef.current.selectedId === viewSelection.selectedId && viewSelectionRef.current.channelingType === viewSelection.channelingType) await loadRelations(selected.id);
+      if (selected && isCurrentView(viewSelection)) await loadRelations(selected.id);
     } catch {
       setMessage('关系已确认，但刷新失败，请稍后手动刷新项目数据。', 'warning');
     } finally {
@@ -327,10 +354,11 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const mutateRelationStatus = async (id: number, status: 'confirmed' | 'released') => {
     if (!selected) return;
     const projectId = selected.id;
+    const view = { ...viewSelectionRef.current };
     try {
       await request(`/api/channeling-relations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
-      if (viewSelectionRef.current.selectedId === projectId) await loadRelations(projectId);
-    } catch (error: any) { if (viewSelectionRef.current.selectedId === projectId) setMessage(error.message); }
+      if (isCurrentView(view)) await loadRelations(projectId);
+    } catch (error: any) { if (isCurrentView(view)) setMessage(error.message); }
   };
   const confirmSuspected = (id: number) => mutateRelationStatus(id, 'confirmed');
   const releaseRelation = (id: number) => mutateRelationStatus(id, 'released');
@@ -355,14 +383,15 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     const relation = relations.find((item) => item.id === id);
     if (relation?.canDelete === false) return;
     const projectId = selected.id; const key = `${projectId}:${id}`;
+    const view = { ...viewSelectionRef.current };
     if (protectedRelationKeys.has(key) || !window.confirm('删除关系后无法恢复，是否继续？')) return;
     try {
       await request(`/api/channeling-relations/${id}`, { method: 'DELETE' });
-      if (viewSelectionRef.current.selectedId !== projectId) return;
+      if (!isCurrentView(view)) return;
       setProtectedRelationKeys((current) => { const next = new Set(current); next.delete(key); return next; });
       if (viewSelectionRef.current.selectedId === projectId) await loadRelations(projectId);
     } catch (error: unknown) {
-      if (viewSelectionRef.current.selectedId !== projectId) return;
+      if (!isCurrentView(view)) return;
       if (isTrackingHistoryConflict(error)) {
         setProtectedRelationKeys((current) => new Set(current).add(key));
         setMessage('关系已有跟踪历史，请解除关系并保留历史。', 'warning');
@@ -374,7 +403,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
 
   return <div className="page-stack">
     <section className="app-card p-5"><h3 className="section-title">注窜项目台账（治理闭环）</h3><p className="mt-1 text-sm text-slate-500">游客只读，可查看完整项目、关系和筛选结果；管理员可维护、导入、确认、治理、关闭、解除和删除。</p>{message && <p aria-live="polite" className={`status-banner mt-3 ${messageClasses[message.tone]}`}>{message.text}</p>}
-      {canOperate && <form className="mt-4 grid gap-2 md:grid-cols-4" onSubmit={create}><input className="field-control" required placeholder="项目名称" value={newProject.projectName} onChange={(e) => setNewProject({ ...newProject, projectName: e.target.value })}/><input className="field-control" required placeholder="区块" value={newProject.block} onChange={(e) => setNewProject({ ...newProject, block: e.target.value })}/><input className="field-control" required placeholder="责任人" value={newProject.owner} onChange={(e) => setNewProject({ ...newProject, owner: e.target.value })}/><button className="action-button action-primary">新增项目</button></form>}</section>
+      {canOperate && <form className="mt-4 grid gap-2 md:grid-cols-4" onSubmit={create}><input className="field-control" required placeholder="项目名称" value={newProject.projectName} onChange={(e) => { projectCreateDraftVersion.current++; setNewProject({ ...newProject, projectName: e.target.value }); }}/><input className="field-control" required placeholder="区块" value={newProject.block} onChange={(e) => { projectCreateDraftVersion.current++; setNewProject({ ...newProject, block: e.target.value }); }}/><input className="field-control" required placeholder="责任人" value={newProject.owner} onChange={(e) => { projectCreateDraftVersion.current++; setNewProject({ ...newProject, owner: e.target.value }); }}/><button className="action-button action-primary">新增项目</button></form>}</section>
 
     <section className="app-card p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="section-title">注窜关系识别</h3><p className="mt-1 text-sm text-slate-500">上传一个 Excel 文件进行分类预览，再确认写入现有项目。关系类型：注汽窜 / 注氮气窜。</p></div>{!isAdmin && <span className="rounded bg-slate-100 px-2 py-1 text-sm text-slate-600">游客只读</span>}</div>
       {isAdmin && <div className="mt-4 flex flex-wrap items-center gap-4"><fieldset className="flex gap-4"><legend className="sr-only">注窜类型</legend>{(['steam', 'nitrogen'] as ChannelingType[]).map((value) => <label key={value} className="flex items-center gap-2 text-sm"><input type="radio" name="channeling-type" value={value} checked={channelingType === value} disabled={uploading || confirming} onChange={() => setChannelingType(value)}/>{channelingTypeLabels[value]}</label>)}</fieldset><label className="text-sm">关系文件<input className="ml-2" type="file" accept=".xlsx,.xls" disabled={uploading || confirming} onChange={uploadRelations}/></label>{uploading && <span className="text-sm text-slate-500">正在解析上传文件…</span>}</div>}

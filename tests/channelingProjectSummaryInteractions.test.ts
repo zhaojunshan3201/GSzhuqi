@@ -269,10 +269,17 @@ test('admin submits one manual project evaluation for the applied range and refr
   await act(async () => { changeText(form.elements.namedItem('conclusion') as HTMLTextAreaElement, '治理有效'); changeText(form.elements.namedItem('evidence') as HTMLInputElement, '日报附件'); changeText(form.elements.namedItem('owner') as HTMLInputElement, '评价人'); });
   await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
   assert.equal(posts, 1); assert.deepEqual(posted, { occurredOn: '2026-08-06', conclusion: '治理有效', evidence: '日报附件', owner: '评价人', range: { start: '2026-07-08', end: '2026-08-06' } });
+  const summaryStart = host.querySelector('input[aria-label="汇总开始日期"]') as HTMLInputElement; const summaryEnd = host.querySelector('input[aria-label="汇总结束日期"]') as HTMLInputElement;
+  const conclusion = form.elements.namedItem('conclusion') as HTMLTextAreaElement; const evidence = form.elements.namedItem('evidence') as HTMLInputElement; const owner = form.elements.namedItem('owner') as HTMLInputElement;
+  assert.ok(summaryStart.disabled && summaryEnd.disabled && conclusion.disabled && evidence.disabled && owner.disabled);
+  await act(async () => { changeInput(summaryStart, '2026-08-01'); changeText(conclusion, '迟到新结论'); changeText(evidence, '迟到新证据'); changeText(owner, '迟到新负责人'); });
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  assert.deepEqual([summaryStart.value, summaryEnd.value, conclusion.value, evidence.value, owner.value], ['2026-07-08', '2026-08-06', '治理有效', '日报附件', '评价人']);
   await act(async () => { resolvePost(await response({ id: 44, eventType: 'evaluated' })); await pendingPost; });
   assert.equal(summaryCalls, 2); assert.match(host.textContent || '', /项目评价已保存/); assert.match(host.textContent || '', /正在加载项目汇总/);
   await act(async () => { resolveRefresh(await response({ ...summary(7), evaluatedCount: 2, latestEvaluationConclusion: '治理有效' })); await pendingRefresh; });
   assert.match(host.textContent || '', /已评价次数\s*2/); assert.match(host.textContent || '', /最新评价结论\s*治理有效/);
+  const refreshedForm = host.querySelector('form[aria-label="人工项目评价"]') as HTMLFormElement; assert.equal((refreshedForm.elements.namedItem('conclusion') as HTMLTextAreaElement).value, ''); assert.equal((refreshedForm.querySelector('button[type="submit"]') as HTMLButtonElement).disabled, false);
   await act(async () => root.unmount()); dom.window.close();
 });
 

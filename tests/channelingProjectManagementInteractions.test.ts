@@ -44,6 +44,10 @@ const openRelations = async (host: HTMLElement) => {
   const tab = [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === '关系清单') as HTMLButtonElement;
   await act(async () => tab.click());
 };
+const changeInput = (input: HTMLInputElement, value: string) => {
+  Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+  input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
+};
 
 test('preview selects the current project when projects finish loading after upload', async () => {
   const dom = setupDom();
@@ -423,5 +427,76 @@ test('a delayed governance save cannot reload or acknowledge after switching pro
   const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('当前项目')) as HTMLButtonElement; await act(async () => second.click());
   await act(async () => { pending.resolve(await payload(project)); await pending.promise; });
   assert.ok(second.className.includes('bg-red-50')); assert.equal(projectLoads, 1); assert.doesNotMatch(host.textContent || '', /治理台账已保存/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a delayed project create cannot clear a newer draft or change the current project and type view', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const pending = deferred<Response>(); let projectLoads = 0;
+  const secondProject = { ...project, id: 8, projectName: '当前项目' };
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (url === '/api/channeling-projects' && !init?.method) { projectLoads++; return payload([project, secondProject]); }
+    if (url === '/api/channeling-projects' && init?.method === 'POST') return pending.promise;
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]); throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const createForm = [...host.querySelectorAll('form')].find((form) => form.querySelector('input[placeholder="项目名称"]'))!;
+  const name = createForm.querySelector('input[placeholder="项目名称"]') as HTMLInputElement;
+  const block = createForm.querySelector('input[placeholder="区块"]') as HTMLInputElement;
+  const owner = createForm.querySelector('input[placeholder="责任人"]') as HTMLInputElement;
+  await act(async () => { for (const [input, value] of [[name, '旧草稿'], [block, '旧区块'], [owner, '旧负责人']] as const) changeInput(input, value); });
+  await act(async () => createForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('当前项目')) as HTMLButtonElement; await act(async () => second.click()); await openRelations(host);
+  const filter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement; await act(async () => { filter.value = 'nitrogen'; filter.dispatchEvent(new Event('change', { bubbles: true })); });
+  const currentName = host.querySelector('input[placeholder="项目名称"]') as HTMLInputElement; await act(async () => changeInput(currentName, '新草稿'));
+  await act(async () => { pending.resolve(await payload({ ...project, id: 9, projectName: '旧草稿' })); await pending.promise; });
+  assert.ok(second.className.includes('bg-red-50')); assert.equal(filter.value, 'nitrogen'); assert.equal(currentName.value, '新草稿'); assert.equal(projectLoads, 1);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a delayed project create error cannot pollute a newly selected view', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const pending = deferred<Response>();
+  const secondProject = { ...project, id: 8, projectName: '当前项目' };
+  globalThis.fetch = (async (input, init) => { const url = String(input); if (url === '/api/channeling-projects' && init?.method === 'POST') return pending.promise; if (url === '/api/channeling-projects') return payload([project, secondProject]); if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]); throw new Error(url); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const form = [...host.querySelectorAll('form')].find((item) => item.querySelector('input[placeholder="项目名称"]'))!; await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('当前项目')) as HTMLButtonElement; await act(async () => second.click());
+  await act(async () => { pending.resolve(new Response(JSON.stringify({ success: false, message: '旧创建失败' }), { status: 500 })); await pending.promise; });
+  assert.ok(second.className.includes('bg-red-50')); assert.doesNotMatch(host.textContent || '', /旧创建失败/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a delayed manual relation create cannot reload the old type view', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const pending = deferred<Response>(); let oldLoads = 0;
+  globalThis.fetch = (async (input, init) => { const url = String(input); if (url === '/api/channeling-projects') return payload([project]); if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url === '/api/channeling-projects/7/relations' && init?.method === 'POST') return pending.promise; if (url === '/api/channeling-projects/7/relations') { oldLoads++; return payload([]); } if (url.includes('channelingType=nitrogen')) return payload([relation('当前氮井', 'nitrogen')]); if (url.includes('/relation-imports')) return payload([]); throw new Error(url); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' }))); await openRelations(host);
+  const form = [...host.querySelectorAll('form')].find((item) => item.textContent?.includes('手工新增关系'))!; await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const filter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement; await act(async () => { filter.value = 'nitrogen'; filter.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => { pending.resolve(await payload(relation('旧新增井', 'steam'))); await pending.promise; });
+  assert.equal(oldLoads, 1); assert.match(host.textContent || '', /当前氮井/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+for (const operation of ['提交疑似确认', '解除关系', '删除关系'] as const) test(`a delayed ${operation} cannot reload or error the old type view`, async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const pending = deferred<Response>(); let oldLoads = 0;
+  Object.defineProperty(window, 'confirm', { configurable: true, value: () => true });
+  const old = { ...relation('旧汽井', 'steam'), status: operation === '提交疑似确认' ? 'suspected' : 'confirmed' };
+  globalThis.fetch = (async (input, init) => { const url = String(input); if (url === '/api/channeling-projects') return payload([project]); if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url === '/api/channeling-projects/7/relations') { oldLoads++; return payload([old]); } if (url.includes('channelingType=nitrogen')) return payload([relation('当前氮井', 'nitrogen')]); if (url.endsWith('/relation-imports')) return payload([]); if (url === `/api/channeling-relations/${old.id}` && (init?.method === 'PATCH' || init?.method === 'DELETE')) return pending.promise; throw new Error(url); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' }))); await openRelations(host);
+  const action = [...host.querySelectorAll('button')].find((button) => button.textContent === operation) as HTMLButtonElement; await act(async () => action.click());
+  const filter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement; await act(async () => { filter.value = 'nitrogen'; filter.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => { pending.resolve(await payload(old)); await pending.promise; });
+  assert.equal(oldLoads, 1); assert.match(host.textContent || '', /当前氮井/); assert.doesNotMatch(host.textContent || '', /删除关系失败/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a delayed listed import confirmation cannot reload or error the old type view', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const pending = deferred<Response>(); let oldLoads = 0;
+  const listedImport = { ...preview, id: 77, projectId: 7 };
+  globalThis.fetch = (async (input) => { const url = String(input); if (url === '/api/channeling-projects') return payload([project]); if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url === '/api/channeling-projects/7/relations') { oldLoads++; return payload([]); } if (url.includes('channelingType=nitrogen')) return payload([relation('当前氮井', 'nitrogen')]); if (url === '/api/channeling-projects/7/relation-imports') return payload([listedImport]); if (url === `/api/channeling-relation-imports/${listedImport.id}/confirm`) return pending.promise; throw new Error(url); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' }))); await openRelations(host);
+  const confirm = [...host.querySelectorAll('button')].find((button) => button.textContent === '确认导入') as HTMLButtonElement; await act(async () => confirm.click());
+  const filter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement; await act(async () => { filter.value = 'nitrogen'; filter.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => { pending.resolve(new Response(JSON.stringify({ success: false, message: '旧类型确认失败' }), { status: 500 })); await pending.promise; });
+  assert.equal(oldLoads, 1); assert.match(host.textContent || '', /当前氮井/); assert.doesNotMatch(host.textContent || '', /旧类型确认失败/);
   await act(async () => root.unmount()); dom.window.close();
 });
