@@ -1,5 +1,8 @@
 import { withChannelingWriteLock } from './channelingWriteQueue.ts';
 
+import { createTrackingEventUnlocked, initChannelingTrackingTables } from './channelingTrackingStore.ts';
+import { ensureWellProfileUnlocked, initChannelingWellTables } from './channelingWellStore.ts';
+
 export type DatabaseLike = { exec(sql: string): Promise<void>; run(sql: string, params?: unknown[]): Promise<{ lastID?: number }>; get(sql: string, params?: unknown[]): Promise<any>; all(sql: string, params?: unknown[]): Promise<any[]> };
 export type ChannelingType = 'steam' | 'nitrogen';
 export type ImpactLevel = 'high' | 'medium' | 'low';
@@ -12,6 +15,7 @@ export type ChannelingRelationInput = { projectId: number; channelingType: Chann
 export type ChannelingProject = Required<Omit<ChannelingProjectInput, 'plannedDate' | 'actualDate' | 'beforeMetric' | 'afterMetric' | 'estimatedLoss' | 'affectedWellCount' | 'affectedDailyOil' | 'occupiedProduction'>> & { id: number; plannedDate: string | null; actualDate: string | null; beforeMetric: number | null; afterMetric: number | null; estimatedLoss: number | null; affectedWellCount: number | null; affectedDailyOil: number | null; occupiedProduction: number | null; createdAt: string; updatedAt: string };
 export type ChannelingGovernanceTodo = ChannelingProject & { overdue: boolean };
 export type ChannelingRelation = ChannelingRelationInput & { id: number; block: string; createdAt: string; updatedAt: string };
+export type ChannelingAuditContext = { createdBy: string };
 
 const impactLevels = new Set<ImpactLevel>(['high', 'medium', 'low']);
 const channelingTypes = new Set<ChannelingType>(['steam', 'nitrogen']);
@@ -34,6 +38,22 @@ export async function initChannelingProjectTables(db: DatabaseLike) {
   }
   try { await db.exec("ALTER TABLE channeling_relations ADD COLUMN channeling_type TEXT NOT NULL DEFAULT 'steam'"); } catch (error: any) { if (!String(error.message).includes('duplicate column name')) throw error; }
   await db.exec('CREATE INDEX IF NOT EXISTS idx_channeling_relations_pair ON channeling_relations(project_id, channeling_type, injection_well, production_well)');
+  await initChannelingWellTables(db);
+  await initChannelingTrackingTables(db);
+}
+
+function withTransaction<T>(db: DatabaseLike, operation: () => Promise<T>): Promise<T> {
+  return withChannelingWriteLock(db, async () => {
+    await db.exec('BEGIN IMMEDIATE');
+    try { const result = await operation(); await db.exec('COMMIT'); return result; }
+    catch (error) { await db.exec('ROLLBACK'); throw error; }
+  });
+}
+
+function shanghaiCalendarDate(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)!.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
 function required(value: unknown, field: string): string { if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required`); return value.trim(); }
@@ -62,38 +82,82 @@ async function createChannelingProjectUnlocked(db: DatabaseLike, input: Channeli
 }
 export function createChannelingProject(db: DatabaseLike, input: ChannelingProjectInput): Promise<ChannelingProject> { return withChannelingWriteLock(db, () => createChannelingProjectUnlocked(db, input)); }
 export async function listChannelingProjects(db: DatabaseLike, options: { block?: string } = {}): Promise<ChannelingProject[]> { const where = options.block ? ' WHERE block = ?' : ''; return (await db.all(`SELECT * FROM channeling_projects${where} ORDER BY updated_at DESC, id DESC`, options.block ? [options.block] : [])).map(project); }
-async function updateChannelingProjectUnlocked(db: DatabaseLike, id: number, changes: ChannelingProjectPatch): Promise<ChannelingProject> {
+async function updateChannelingProjectUnlocked(db: DatabaseLike, id: number, changes: ChannelingProjectPatch, audit: ChannelingAuditContext = { createdBy: 'system' }): Promise<ChannelingProject> {
   const current = await db.get('SELECT * FROM channeling_projects WHERE id = ?', [id]); if (!current) throw new Error('Project not found');
   const previous = project(current); const merged: ChannelingProjectInput = { ...previous, ...changes };
   if (changes.status !== undefined && changes.status !== previous.status && !nextGovernanceStatuses[previous.status].includes(changes.status)) throw new Error(`Invalid governance status transition: ${previous.status} -> ${changes.status}`);
   validateProject(merged);
   const normalized = { ...merged, governanceMeasure: optionalText(merged.governanceMeasure, 'governanceMeasure'), closureEvidence: optionalText(merged.closureEvidence, 'closureEvidence'), plannedDate: nullableDate(merged.plannedDate, 'plannedDate'), actualDate: nullableDate(merged.actualDate, 'actualDate'), beforeMetric: nullableNonNegative(merged.beforeMetric, 'beforeMetric'), afterMetric: nullableNonNegative(merged.afterMetric, 'afterMetric'), estimatedLoss: nullableNonNegative(merged.estimatedLoss, 'estimatedLoss'), affectedWellCount: nullableNonNegative(merged.affectedWellCount, 'affectedWellCount', true), affectedDailyOil: nullableNonNegative(merged.affectedDailyOil, 'affectedDailyOil'), occupiedProduction: nullableNonNegative(merged.occupiedProduction, 'occupiedProduction') };
   await db.run('UPDATE channeling_projects SET project_name=?, block=?, owner=?, status=?, governance_measure=?, planned_date=?, actual_date=?, before_metric=?, after_metric=?, closure_evidence=?, risk_level=?, estimated_loss=?, affected_well_count=?, affected_daily_oil=?, occupied_production=?, updated_at=? WHERE id=?', [normalized.projectName.trim(), normalized.block.trim(), normalized.owner.trim(), normalized.status, normalized.governanceMeasure, normalized.plannedDate, normalized.actualDate, normalized.beforeMetric, normalized.afterMetric, normalized.closureEvidence, normalized.riskLevel, normalized.estimatedLoss, normalized.affectedWellCount, normalized.affectedDailyOil, normalized.occupiedProduction, new Date().toISOString(), id]);
-  return project(await db.get('SELECT * FROM channeling_projects WHERE id = ?', [id]));
+  const updated = project(await db.get('SELECT * FROM channeling_projects WHERE id = ?', [id]));
+  if (updated.status !== previous.status) await createTrackingEventUnlocked(db, {
+    eventType: 'status_changed', occurredOn: shanghaiCalendarDate(), content: `Project status changed: ${previous.status} -> ${updated.status}`,
+    evidence: updated.closureEvidence || updated.governanceMeasure, owner: updated.owner, createdBy: audit.createdBy,
+    links: [{ subjectType: 'project', subjectId: updated.id }],
+  });
+  return updated;
 }
-export function updateChannelingProject(db: DatabaseLike, id: number, changes: ChannelingProjectPatch): Promise<ChannelingProject> { return withChannelingWriteLock(db, () => updateChannelingProjectUnlocked(db, id, changes)); }
+export function updateChannelingProject(db: DatabaseLike, id: number, changes: ChannelingProjectPatch, audit?: ChannelingAuditContext): Promise<ChannelingProject> { return withTransaction(db, () => updateChannelingProjectUnlocked(db, id, changes, audit)); }
 export async function listChannelingGovernanceTodos(db: DatabaseLike, date = new Date().toISOString().slice(0, 10)): Promise<ChannelingGovernanceTodo[]> {
   validDate(date, 'date'); const rows = (await db.all("SELECT * FROM channeling_projects WHERE status != 'closed'", [])).map(project);
   const risk = { high: 3, medium: 2, low: 1 } as const;
   return rows.map((item) => ({ ...item, overdue: Boolean(item.plannedDate && item.plannedDate < date && !item.actualDate) })).sort((a, b) => risk[b.riskLevel] - risk[a.riskLevel] || Number(b.overdue) - Number(a.overdue) || (b.estimatedLoss ?? 0) - (a.estimatedLoss ?? 0) || (b.affectedWellCount ?? 0) - (a.affectedWellCount ?? 0) || b.id - a.id);
 }
-export async function createChannelingRelationUnlocked(db: DatabaseLike, input: ChannelingRelationInput): Promise<ChannelingRelation> { validateRelation(input); if (input.source === 'suspected' && input.status !== 'suspected') throw new Error('suspected relations must be created as suspected'); if (!await db.get('SELECT id FROM channeling_projects WHERE id = ?', [input.projectId])) throw new Error('Project not found'); const now = new Date().toISOString(); const values = [input.projectId, input.channelingType, input.injectionWell.trim(), input.productionWell.trim(), input.reservoirLayer.trim(), input.impactLevel, input.confidence, input.status, input.source, input.evidence.trim(), input.effectiveStartDate, input.effectiveEndDate, input.owner.trim(), now, now]; const result = await db.run('INSERT INTO channeling_relations (project_id, channeling_type, injection_well, production_well, reservoir_layer, impact_level, confidence, status, source, evidence, effective_start_date, effective_end_date, owner, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', values); return relation(await db.get('SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id WHERE r.id = ?', [result.lastID])); }
-export function createChannelingRelation(db: DatabaseLike, input: ChannelingRelationInput): Promise<ChannelingRelation> { return withChannelingWriteLock(db, () => createChannelingRelationUnlocked(db, input)); }
+export async function createChannelingRelationUnlocked(db: DatabaseLike, input: ChannelingRelationInput, audit: ChannelingAuditContext = { createdBy: 'system' }): Promise<ChannelingRelation> {
+  validateRelation(input);
+  if (input.source === 'suspected' && input.status !== 'suspected') throw new Error('suspected relations must be created as suspected');
+  const projectRow = await db.get('SELECT id, block FROM channeling_projects WHERE id = ?', [input.projectId]);
+  if (!projectRow) throw new Error('Project not found');
+  const injectionProfile = await ensureWellProfileUnlocked(db, { wellNo: input.injectionWell, block: projectRow.block, owner: input.owner });
+  const productionProfile = await ensureWellProfileUnlocked(db, { wellNo: input.productionWell, block: projectRow.block, owner: input.owner });
+  const now = new Date().toISOString();
+  const values = [input.projectId, input.channelingType, input.injectionWell.trim(), input.productionWell.trim(), input.reservoirLayer.trim(), input.impactLevel, input.confidence, input.status, input.source, input.evidence.trim(), input.effectiveStartDate, input.effectiveEndDate, input.owner.trim(), now, now];
+  const result = await db.run('INSERT INTO channeling_relations (project_id, channeling_type, injection_well, production_well, reservoir_layer, impact_level, confidence, status, source, evidence, effective_start_date, effective_end_date, owner, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', values);
+  const created = relation(await db.get('SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id WHERE r.id = ?', [result.lastID]));
+  if (created.status === 'confirmed') await createRelationStatusEvent(db, created, 'relation_confirmed', audit, injectionProfile.id, productionProfile.id);
+  return created;
+}
+export function createChannelingRelation(db: DatabaseLike, input: ChannelingRelationInput, audit?: ChannelingAuditContext): Promise<ChannelingRelation> { return withTransaction(db, () => createChannelingRelationUnlocked(db, input, audit)); }
 export async function listChannelingRelations(db: DatabaseLike, options: { projectId?: number; channelingType?: string; status?: string; source?: string; block?: string } = {}): Promise<ChannelingRelation[]> { if (options.channelingType !== undefined && !channelingTypes.has(options.channelingType as ChannelingType)) throw new Error('channelingType is invalid'); if (options.status !== undefined && !statuses.has(options.status as RelationStatus)) throw new Error('status is invalid'); if (options.source !== undefined && !sources.has(options.source as RelationSource)) throw new Error('source is invalid'); const clauses: string[] = []; const params: unknown[] = []; for (const [column, value] of [['r.project_id', options.projectId], ['r.channeling_type', options.channelingType], ['r.status', options.status], ['r.source', options.source], ['p.block', options.block]] as const) if (value !== undefined) { clauses.push(`${column} = ?`); params.push(value); } return (await db.all(`SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id${clauses.length ? ` WHERE ${clauses.join(' AND ')}` : ''} ORDER BY r.updated_at DESC, r.id DESC`, params)).map(relation); }
-async function updateChannelingRelationUnlocked(db: DatabaseLike, id: number, changes: Partial<Omit<ChannelingRelationInput, 'projectId'>>): Promise<ChannelingRelation> { const current = await db.get('SELECT * FROM channeling_relations WHERE id = ?', [id]); if (!current) throw new Error('Relation not found'); const merged: ChannelingRelationInput = { projectId: current.project_id, channelingType: current.channeling_type, injectionWell: current.injection_well, productionWell: current.production_well, reservoirLayer: current.reservoir_layer, impactLevel: current.impact_level, confidence: current.confidence, status: current.status, source: current.source, evidence: current.evidence, effectiveStartDate: current.effective_start_date, effectiveEndDate: current.effective_end_date, owner: current.owner, ...changes }; validateRelation(merged); const now = new Date().toISOString(); await db.run('UPDATE channeling_relations SET channeling_type=?, injection_well=?, production_well=?, reservoir_layer=?, impact_level=?, confidence=?, status=?, source=?, evidence=?, effective_start_date=?, effective_end_date=?, owner=?, updated_at=? WHERE id=?', [merged.channelingType, merged.injectionWell.trim(), merged.productionWell.trim(), merged.reservoirLayer.trim(), merged.impactLevel, merged.confidence, merged.status, merged.source, merged.evidence.trim(), merged.effectiveStartDate, merged.effectiveEndDate, merged.owner.trim(), now, id]); return relation(await db.get('SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id WHERE r.id = ?', [id])); }
-export function updateChannelingRelation(db: DatabaseLike, id: number, changes: Partial<Omit<ChannelingRelationInput, 'projectId'>>): Promise<ChannelingRelation> { return withChannelingWriteLock(db, () => updateChannelingRelationUnlocked(db, id, changes)); }
+async function createRelationStatusEvent(db: DatabaseLike, current: ChannelingRelation, eventType: 'relation_confirmed' | 'relation_released', audit: ChannelingAuditContext, injectionProfileId?: number, productionProfileId?: number): Promise<void> {
+  const injection = injectionProfileId ?? (await ensureWellProfileUnlocked(db, { wellNo: current.injectionWell, block: current.block, owner: current.owner })).id;
+  const production = productionProfileId ?? (await ensureWellProfileUnlocked(db, { wellNo: current.productionWell, block: current.block, owner: current.owner })).id;
+  const verb = eventType === 'relation_confirmed' ? 'confirmed' : 'released';
+  await createTrackingEventUnlocked(db, {
+    eventType, occurredOn: shanghaiCalendarDate(), content: `Relation ${verb}: ${current.injectionWell} -> ${current.productionWell}`,
+    evidence: current.evidence, owner: current.owner, createdBy: audit.createdBy,
+    links: [{ subjectType: 'project', subjectId: current.projectId }, { subjectType: 'relation', subjectId: current.id }, { subjectType: 'well', subjectId: injection }, { subjectType: 'well', subjectId: production }],
+  });
+}
+
+async function updateChannelingRelationUnlocked(db: DatabaseLike, id: number, changes: Partial<Omit<ChannelingRelationInput, 'projectId'>>, audit: ChannelingAuditContext = { createdBy: 'system' }): Promise<ChannelingRelation> {
+  const current = await db.get('SELECT * FROM channeling_relations WHERE id = ?', [id]);
+  if (!current) throw new Error('Relation not found');
+  const merged: ChannelingRelationInput = { projectId: current.project_id, channelingType: current.channeling_type, injectionWell: current.injection_well, productionWell: current.production_well, reservoirLayer: current.reservoir_layer, impactLevel: current.impact_level, confidence: current.confidence, status: current.status, source: current.source, evidence: current.evidence, effectiveStartDate: current.effective_start_date, effectiveEndDate: current.effective_end_date, owner: current.owner, ...changes };
+  validateRelation(merged);
+  const now = new Date().toISOString();
+  await db.run('UPDATE channeling_relations SET channeling_type=?, injection_well=?, production_well=?, reservoir_layer=?, impact_level=?, confidence=?, status=?, source=?, evidence=?, effective_start_date=?, effective_end_date=?, owner=?, updated_at=? WHERE id=?', [merged.channelingType, merged.injectionWell.trim(), merged.productionWell.trim(), merged.reservoirLayer.trim(), merged.impactLevel, merged.confidence, merged.status, merged.source, merged.evidence.trim(), merged.effectiveStartDate, merged.effectiveEndDate, merged.owner.trim(), now, id]);
+  const updated = relation(await db.get('SELECT r.*, p.block FROM channeling_relations r JOIN channeling_projects p ON p.id = r.project_id WHERE r.id = ?', [id]));
+  if (updated.status !== current.status && updated.status === 'confirmed') await createRelationStatusEvent(db, updated, 'relation_confirmed', audit);
+  if (updated.status !== current.status && updated.status === 'released') await createRelationStatusEvent(db, updated, 'relation_released', audit);
+  return updated;
+}
+export function updateChannelingRelation(db: DatabaseLike, id: number, changes: Partial<Omit<ChannelingRelationInput, 'projectId'>>, audit?: ChannelingAuditContext): Promise<ChannelingRelation> { return withTransaction(db, () => updateChannelingRelationUnlocked(db, id, changes, audit)); }
 
 async function deleteChannelingProjectUnlocked(db: DatabaseLike, id: number): Promise<void> {
   if (!await db.get('SELECT id FROM channeling_projects WHERE id = ?', [id])) throw new Error('Project not found');
-  await db.run('DELETE FROM channeling_relations WHERE project_id = ?', [id]);
-  await db.run('DELETE FROM channeling_relation_import_rows WHERE import_id IN (SELECT id FROM channeling_relation_imports WHERE project_id = ?)', [id]);
-  await db.run('DELETE FROM channeling_relation_imports WHERE project_id = ?', [id]);
+  if (await db.get("SELECT 1 FROM channeling_relations WHERE project_id = ? UNION ALL SELECT 1 FROM channeling_tracking_event_links WHERE subject_type = 'project' AND subject_id = ? LIMIT 1", [id, id])) throw new Error('Project has relations or tracking history');
+  if (await db.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channeling_relation_imports'")) {
+    await db.run('DELETE FROM channeling_relation_import_rows WHERE import_id IN (SELECT id FROM channeling_relation_imports WHERE project_id = ?)', [id]);
+    await db.run('DELETE FROM channeling_relation_imports WHERE project_id = ?', [id]);
+  }
   await db.run('DELETE FROM channeling_projects WHERE id = ?', [id]);
 }
-export function deleteChannelingProject(db: DatabaseLike, id: number): Promise<void> { return withChannelingWriteLock(db, () => deleteChannelingProjectUnlocked(db, id)); }
+export function deleteChannelingProject(db: DatabaseLike, id: number): Promise<void> { return withTransaction(db, () => deleteChannelingProjectUnlocked(db, id)); }
 
 async function deleteChannelingRelationUnlocked(db: DatabaseLike, id: number): Promise<void> {
   if (!await db.get('SELECT id FROM channeling_relations WHERE id = ?', [id])) throw new Error('Relation not found');
+  if (await db.get("SELECT 1 FROM channeling_tracking_event_links WHERE subject_type = 'relation' AND subject_id = ? LIMIT 1", [id])) throw new Error('Relation has tracking history');
   await db.run('DELETE FROM channeling_relations WHERE id = ?', [id]);
 }
-export function deleteChannelingRelation(db: DatabaseLike, id: number): Promise<void> { return withChannelingWriteLock(db, () => deleteChannelingRelationUnlocked(db, id)); }
+export function deleteChannelingRelation(db: DatabaseLike, id: number): Promise<void> { return withTransaction(db, () => deleteChannelingRelationUnlocked(db, id)); }

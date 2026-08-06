@@ -140,7 +140,16 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     assert.equal(eventResponse.status, 201);
     const event = await json(eventResponse); assert.equal(event.createdBy, 'admin');
     const events = await json(await request(`/api/channeling-tracking-events?subjectType=project&subjectId=${project.id}`));
-    assert.equal(events[0].id, event.id);
+    assert.equal(events.find((item: any) => item.eventType === 'discovered' && item.content === 'found')?.id, event.id);
+    const automaticConfirmation = events.find((item: any) => item.eventType === 'relation_confirmed');
+    assert.ok(automaticConfirmation);
+    assert.equal(automaticConfirmation.createdBy, 'admin');
+    assert.deepEqual(automaticConfirmation.links, [
+      { subjectType: 'project', subjectId: project.id },
+      { subjectType: 'relation', subjectId: relation.id },
+      { subjectType: 'well', subjectId: injector.id },
+      { subjectType: 'well', subjectId: producer.id },
+    ]);
     const correctionResponse = await request(`/api/channeling-tracking-events/${event.id}/corrections`, { method: 'POST', headers: admin, body: JSON.stringify({ reason: 'wrong wording', occurredOn: '2026-01-02', content: 'corrected', evidence: '', owner: 'alice', createdBy: 'attacker' }) });
     assert.equal(correctionResponse.status, 201); assert.equal((await json(correctionResponse)).createdBy, 'admin');
     assert.equal((await request(`/api/channeling-tracking-events/${event.id}/corrections`, { method: 'POST', headers: admin, body: JSON.stringify({ reason: 'again', occurredOn: '2026-01-02', content: 'again', owner: 'alice' }) })).status, 409);
@@ -180,7 +189,13 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
 
     const missingRelationResponse = await request(`/api/channeling-projects/${project.id}/relations`, { method: 'POST', headers: admin, body: JSON.stringify({ ...relationBody, injectionWell: 'missing-i', productionWell: 'missing-p' }) });
     const missingRelation = await json(missingRelationResponse);
-    assert.equal((await request(`/api/channeling-relations/${missingRelation.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: 'x', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) })).status, 404);
+    const automaticProfileEvaluationResponse = await request(`/api/channeling-relations/${missingRelation.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: 'x', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) });
+    assert.equal(automaticProfileEvaluationResponse.status, 201);
+    const automaticProfileEvaluation = await json(automaticProfileEvaluationResponse);
+    assert.deepEqual(automaticProfileEvaluation.links.map((link: any) => link.subjectType).sort(), ['project', 'relation', 'well', 'well']);
+
+    const legacyRelation = await db.run("INSERT INTO channeling_relations (project_id, channeling_type, injection_well, production_well, reservoir_layer, impact_level, confidence, status, source, evidence, effective_start_date, effective_end_date, owner, created_at, updated_at) VALUES (?, 'steam', 'legacy-i', 'legacy-p', 'S1', 'high', .9, 'confirmed', 'manual', 'legacy', '2026-01-01', '2026-12-31', 'owner', ?, ?)", [project.id, new Date().toISOString(), new Date().toISOString()]);
+    assert.equal((await request(`/api/channeling-relations/${legacyRelation.lastID}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: 'x', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) })).status, 404);
     assert.equal((await request(`/api/channeling-relations/${relation.id}/evaluations`, { method: 'POST', headers: admin, body: JSON.stringify({ occurredOn: '2026-01-03', conclusion: '', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) })).status, 400);
   } finally {
     await concurrencyDb?.close();

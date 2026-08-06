@@ -4731,7 +4731,7 @@ app.post("/api/register", async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     if (!req.body || typeof req.body !== "object" || Object.keys(req.body).some((key) => !allowedProjectPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported project patch field" });
-    try { res.json({ success: true, data: await updateChannelingProject(localDb, id, req.body) }); }
+    try { res.json({ success: true, data: await updateChannelingProject(localDb, id, req.body, { createdBy: authenticatedUser(req)!.username }) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.delete("/api/channeling-projects/:id", async (req, res) => {
@@ -4742,7 +4742,7 @@ app.post("/api/register", async (req, res) => {
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   const allowedRelationPatchFields = new Set(["channelingType", "injectionWell", "productionWell", "reservoirLayer", "impactLevel", "confidence", "status", "source", "evidence", "effectiveStartDate", "effectiveEndDate", "owner"]);
-  const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") || error.message?.includes("Invalid governance status transition") ? 400 : 500;
+  const channelingErrorStatus = (error: any) => error.message === "Project not found" || error.message === "Relation not found" ? 404 : error.message === "Relation has tracking history" || error.message === "Project has relations or tracking history" ? 409 : error.message?.includes(" is invalid") || error.message?.includes(" is required") || error.message?.includes("must") || error.message?.includes("Invalid governance status transition") ? 400 : 500;
   const forceChannelingTestError = (req: any) => {
     if (process.env.CHANNELING_TEST_FORCE_ERROR === "1" && req.get("x-channeling-force-error") === "1") throw new Error("forced channeling runtime error");
   };
@@ -4994,7 +4994,7 @@ app.post("/api/register", async (req, res) => {
     if (!requireChannelingAdmin(req, res)) return;
     const projectId = Number(req.params.id);
     if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
-    try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, channelingType: req.body?.channelingType ?? "steam", projectId }) }); }
+    try { forceChannelingTestError(req); res.status(201).json({ success: true, data: await createChannelingRelation(localDb, { ...req.body, channelingType: req.body?.channelingType ?? "steam", projectId }, { createdBy: authenticatedUser(req)!.username }) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
   app.post("/api/channeling-relation-imports/preview", requireChannelingAdminMiddleware, channelingRelationImportUploadMiddleware, async (req, res) => {
@@ -5059,7 +5059,7 @@ app.post("/api/register", async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success: false, message: "id is invalid" });
     if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || Object.getPrototypeOf(req.body) !== Object.prototype || Object.keys(req.body).length === 0 || Object.keys(req.body).some((key) => !allowedRelationPatchFields.has(key))) return res.status(400).json({ success: false, message: "Unsupported relation patch field" });
-    try { forceChannelingTestError(req); res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body) }); }
+    try { forceChannelingTestError(req); res.json({ success: true, data: await updateChannelingRelation(localDb, id, req.body, { createdBy: authenticatedUser(req)!.username }) }); }
     catch (error: any) { res.status(channelingErrorStatus(error)).json({ success: false, message: error.message }); }
   });
 

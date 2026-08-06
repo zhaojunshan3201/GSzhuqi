@@ -8,6 +8,8 @@ import { open } from 'sqlite';
 import * as XLSX from 'xlsx';
 import { confirmChannelingRelationImport, createChannelingRelationPreview, getChannelingRelationImport, initChannelingRelationImportTables, parseChannelingRelationRows } from '../src/lib/channelingRelationImport.ts';
 import { createChannelingProject, createChannelingRelation, initChannelingProjectTables, listChannelingProjects, listChannelingRelations, updateChannelingRelation } from '../src/lib/channelingProjectStore.ts';
+import { listTrackingEvents } from '../src/lib/channelingTrackingStore.ts';
+import { listWellProfiles } from '../src/lib/channelingWellStore.ts';
 const h = { injector: '\u6ce8\u4e95', producer: '\u91c7\u6cb9\u4e95', impact: '\u5f71\u54cd\u7b49\u7ea7', confidence: '\u7f6e\u4fe1\u5ea6', source: '\u6765\u6e90', high: '\u9ad8', medium: '\u4e2d', low: '\u4f4e', suspected: '\u7591\u4f3c\u8bc6\u522b', imported: '\u5bfc\u5165' };
 function workbookWithRows(rows: unknown[][]): XLSX.WorkBook { const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'relations'); return workbook; }
 const matrixWorkbook = (rows: unknown[][]) => workbookWithRows(rows);
@@ -155,6 +157,27 @@ test('rolls back relation inserts and preview confirmation when confirmation fai
   await assert.rejects(() => confirmChannelingRelationImport(failingDb, preview.id, project.id), /forced relation failure/);
   assert.equal((await getChannelingRelationImport(db, preview.id)).status, 'preview');
   assert.equal((await listChannelingRelations(db, { projectId: project.id })).length, 0);
+}); });
+
+test('import confirmation creates linked profiles and history atomically', async () => { await withStore(async (db) => {
+  const project = await createChannelingProject(db, { projectName: 'project', block: 'A', owner: 'owner' });
+  const makePreview = (fileName: string) => createChannelingRelationPreview(db, null, fileName, 'steam', { valid: [{ rowNumber: 2, injectorWellNo: 'Z1', producerWellNo: 'C1', channelingType: 'steam' }], duplicates: [], selfRelations: [], invalid: [] });
+  const preview = await makePreview('success.xlsx');
+  await confirmChannelingRelationImport(db, preview.id, project.id);
+  const [relation] = await listChannelingRelations(db, { projectId: project.id });
+  const profiles = await listWellProfiles(db);
+  const event = (await listTrackingEvents(db, { subjectType: 'relation', subjectId: relation.id }))[0];
+  assert.deepEqual(profiles.map((item) => item.normalizedWellNo).sort(), ['C1', 'Z1']);
+  assert.equal(event.eventType, 'relation_confirmed');
+  assert.equal(event.createdBy, 'system');
+  assert.deepEqual(event.links.map((link) => link.subjectType).sort(), ['project', 'relation', 'well', 'well']);
+
+  const failedPreview = await createChannelingRelationPreview(db, null, 'failure.xlsx', 'steam', { valid: [{ rowNumber: 2, injectorWellNo: 'Z2', producerWellNo: 'C2', channelingType: 'steam' }], duplicates: [], selfRelations: [], invalid: [] });
+  const failingDb = { exec: db.exec.bind(db), get: db.get.bind(db), all: db.all.bind(db), run: async (sql: string, params?: unknown[]) => { if (sql.startsWith('INSERT INTO channeling_tracking_events')) throw new Error('forced event failure'); return db.run(sql, params); } };
+  await assert.rejects(() => confirmChannelingRelationImport(failingDb, failedPreview.id, project.id), /forced event failure/);
+  assert.equal((await getChannelingRelationImport(db, failedPreview.id)).status, 'preview');
+  assert.equal((await listChannelingRelations(db, { projectId: project.id })).length, 1);
+  assert.deepEqual((await listWellProfiles(db)).map((item) => item.normalizedWellNo).sort(), ['C1', 'Z1']);
 }); });
 
 test('a failed confirmation rollback cannot consume a concurrent channeling project write', async () => { await withStore(async (db) => {
