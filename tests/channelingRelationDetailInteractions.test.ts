@@ -3,8 +3,8 @@ import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { buildAlignedRelationRows, buildRelationChart, ChannelingRelationDetail, evaluationRangeAroundSplit } from '../src/components/ChannelingRelationDetail.tsx';
-import type { RelationDetail } from '../src/lib/channelingTrackingApi.ts';
+import { buildAlignedRelationRows, buildEvaluationLineages, buildRelationChart, ChannelingRelationDetail, evaluationRangeAroundSplit } from '../src/components/ChannelingRelationDetail.tsx';
+import type { RelationDetail, TrackingEvent } from '../src/lib/channelingTrackingApi.ts';
 
 const reply = (data: unknown, status = 200, success = true, message?: string) => Promise.resolve(new Response(JSON.stringify({ success, data, message }), { status }));
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((yes) => { resolve = yes; }); return { promise, resolve }; };
@@ -48,6 +48,62 @@ test('maps suspected source and aligns irregular injection and production dates 
 });
 
 test('builds symmetric calendar-day evaluation ranges without date drift', () => { assert.deepEqual(evaluationRangeAroundSplit('2026-03-01'), { beforeStart: '2026-01-30', splitDate: '2026-03-01', afterEnd: '2026-03-31' }); });
+
+test('resolves an evaluation root to its latest live correction and rejects malformed branches and cycles', () => {
+  const event = (id: number, eventType: TrackingEvent['eventType'], supersedesEventId: number | null, voidedAt: string | null): TrackingEvent => ({
+    id, eventType, supersedesEventId, voidedAt, occurredOn: '2026-07-31', content: `content ${id}`, evidence: `evidence ${id}`, owner: `owner ${id}`,
+    metricsSnapshot: id === 1 ? detail() : null, voidReason: null, createdBy: 'admin', createdAt: `2026-08-0${Math.min(id, 9)}T00:00:00Z`, links: [],
+  });
+  const events = [
+    event(1, 'evaluated', null, '2026-08-01T00:00:00Z'),
+    event(2, 'corrected', 1, '2026-08-02T00:00:00Z'),
+    event(3, 'corrected', 2, null),
+    event(4, 'corrected', 999, null),
+    event(5, 'corrected', 6, null),
+    event(6, 'corrected', 5, null),
+  ];
+
+  const lineages = buildEvaluationLineages(events);
+  assert.equal(lineages.length, 1);
+  assert.equal(lineages[0].root.id, 1);
+  assert.equal(lineages[0].current?.id, 3);
+});
+
+test('guest and admin use corrected evaluation text with the original snapshot after remount', async () => {
+  const rootEvent: TrackingEvent = { id: 91, eventType: 'evaluated', occurredOn: '2026-07-31', content: '原始结论', evidence: '原始证据', owner: '原负责人', metricsSnapshot: detail(), supersedesEventId: null, voidedAt: '2026-08-01T00:00:00Z', voidReason: '措辞更正', createdBy: 'admin', createdAt: '2026-08-01T00:00:00Z', links: [] };
+  const firstCorrection: TrackingEvent = { ...rootEvent, id: 92, eventType: 'corrected', content: '第一次更正', evidence: '更正证据一', owner: '负责人一', metricsSnapshot: null, supersedesEventId: 91, voidedAt: '2026-08-02T00:00:00Z', createdAt: '2026-08-02T00:00:00Z' };
+  const currentCorrection: TrackingEvent = { ...firstCorrection, id: 93, content: '最终更正结论', evidence: '最终更正证据', owner: '最终负责人', supersedesEventId: 92, voidedAt: null, createdAt: '2026-08-03T00:00:00Z' };
+  const events = [currentCorrection, firstCorrection, rootEvent];
+  let postedBody: any = null;
+  const fetcher = (async (raw: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(raw);
+    if (init?.method === 'POST') { postedBody = JSON.parse(String(init.body)); return reply({ ...rootEvent, id: 94, voidedAt: null }, 201); }
+    if (url.startsWith('/api/channeling-tracking-events?')) return reply(events);
+    return mockReads()(raw, init);
+  }) as typeof fetch;
+
+  const guest = setup(); globalThis.fetch = fetcher;
+  await act(async () => guest.root.render(createElement(ChannelingRelationDetail, { role: 'guest', relationId: 7, onOpenWell: () => {}, onBack: () => {} })));
+  await click(guest.host, '效果评价');
+  assert.equal(guest.host.querySelectorAll('[data-evaluation-event]').length, 1);
+  assert.match(guest.host.textContent || '', /最终更正结论/);
+  assert.match(guest.host.textContent || '', /最终更正证据/);
+  assert.match(guest.host.textContent || '', /最终负责人/);
+  assert.match(guest.host.textContent || '', /2026-07-01.*2026-07-31/);
+  assert.doesNotMatch(guest.host.textContent || '', /按最新数据重新计算/);
+  await cleanup(guest.root, guest.dom);
+
+  const admin = setup(); globalThis.fetch = fetcher;
+  await act(async () => admin.root.render(createElement(ChannelingRelationDetail, { role: 'admin', relationId: 7, onOpenWell: () => {}, onBack: () => {} })));
+  await click(admin.host, '效果评价');
+  assert.equal(admin.host.querySelectorAll('[data-evaluation-event]').length, 1);
+  await click(admin.host, '按最新数据重新计算');
+  assert.equal(postedBody.conclusion, '最终更正结论');
+  assert.equal(postedBody.evidence, '最终更正证据');
+  assert.equal(postedBody.owner, '最终负责人');
+  assert.deepEqual(postedBody.range, detail().range);
+  await cleanup(admin.root, admin.dom);
+});
 
 test('renders the actual suspected source as a Chinese label', async () => {
   const { dom, host, root } = setup(); globalThis.fetch = (async (raw, init) => { const url = String(raw); if (url.endsWith('/relations')) return reply([{ ...relation, source: 'suspected' }]); return mockReads()(raw, init); }) as typeof fetch;

@@ -24,6 +24,36 @@ export function evaluationRangeAroundSplit(splitDate: string): Pick<EvaluationDr
 export function defaultRelationComparisonRange(now = new Date()): Pick<EvaluationDraft, 'beforeStart' | 'splitDate' | 'afterEnd'> { return evaluationRangeAroundSplit(formatShanghaiBusinessDate(now)); }
 const blankEvaluation = (): EvaluationDraft => ({ ...defaultRelationComparisonRange(), conclusion: '', evidence: '', owner: '' });
 
+export type EvaluationLineage = { root: TrackingEvent; current: TrackingEvent | null };
+export function buildEvaluationLineages(events: TrackingEvent[]): EvaluationLineage[] {
+  const correctionsByParent = new Map<number, TrackingEvent[]>();
+  for (const event of events) {
+    if (event.eventType !== 'corrected' || !Number.isInteger(event.supersedesEventId) || Number(event.supersedesEventId) <= 0) continue;
+    const children = correctionsByParent.get(Number(event.supersedesEventId)) || [];
+    children.push(event);
+    correctionsByParent.set(Number(event.supersedesEventId), children);
+  }
+  return events.filter((event) => event.eventType === 'evaluated').map((root) => {
+    let current: TrackingEvent | null = root.voidedAt ? null : root;
+    let currentDepth = 0;
+    const visited = new Set<number>([root.id]);
+    const pending = (correctionsByParent.get(root.id) || []).map((event) => ({ event, depth: 1 }));
+    while (pending.length) {
+      const next = pending.pop()!;
+      if (visited.has(next.event.id)) continue;
+      visited.add(next.event.id);
+      if (!next.event.voidedAt && (next.depth > currentDepth
+        || (next.depth === currentDepth && (next.event.createdAt.localeCompare(current?.createdAt || '') > 0
+          || (next.event.createdAt === current?.createdAt && next.event.id > (current?.id || 0)))))) {
+        current = next.event;
+        currentDepth = next.depth;
+      }
+      for (const child of correctionsByParent.get(next.event.id) || []) pending.push({ event: child, depth: next.depth + 1 });
+    }
+    return { root, current };
+  });
+}
+
 const waterCutPercent = (raw: number | null | undefined) => raw == null || !Number.isFinite(raw) ? null : Math.abs(raw) <= 1 ? raw * 100 : raw;
 export type AlignedRelationRow = { date: string; steamVolume: number | null; oil: number | null; liquid: number | null; waterCutPercent: number | null };
 export function buildAlignedRelationRows(detail: RelationDetail): AlignedRelationRow[] {
@@ -60,9 +90,11 @@ const snapshotIsPartial = (snapshot: RelationDetail) => !isRecord(snapshot.injec
 const snapshotMetricValue = (raw: number | null | undefined, percent = false) => {
   const normalized = percent ? waterCutPercent(raw) : raw; return normalized == null ? '缺失' : `${Number(normalized.toFixed(3))}${percent ? '%' : ''}`;
 };
-function EvaluationSnapshot({ event, role, busy, recomputing, onRecompute }: { event: TrackingEvent; role: ChannelingRole; busy: boolean; recomputing: boolean; onRecompute: () => void }) {
-  const snapshot = relationSnapshot(event.metricsSnapshot);
-  if (!snapshot) return <article data-evaluation-event className="rounded border border-amber-200 p-4"><h4 className="font-bold">{event.content}</h4><p>该评价没有可读取的指标快照。</p></article>;
+function EvaluationSnapshot({ lineage, role, busy, recomputing, onRecompute }: { lineage: EvaluationLineage; role: ChannelingRole; busy: boolean; recomputing: boolean; onRecompute: () => void }) {
+  const { root, current } = lineage;
+  const displayed = current || root;
+  const snapshot = relationSnapshot(root.metricsSnapshot);
+  if (!snapshot) return <article data-evaluation-event className="rounded border border-amber-200 p-4"><h4 className="font-bold">{displayed.content}</h4><p className="text-sm text-slate-500">{displayed.occurredOn} · 负责人：{displayed.owner} · 证据：{displayed.evidence || '未提供'}</p><p>该评价没有可读取的指标快照。</p></article>;
   const missing = [...(!snapshot.injector?.injection ? ['注汽数据'] : []), ...(!snapshot.producerSeries?.length ? ['生产数据'] : [])];
   for (const [label, name] of [['日产油', 'oil'], ['日产液', 'liquid'], ['含水', 'waterCut']] as const) {
     const metric = snapshotMetric(snapshot, name);
@@ -72,7 +104,7 @@ function EvaluationSnapshot({ event, role, busy, recomputing, onRecompute }: { e
     if (metric?.beforeValidDays == null) missing.push(`${label}评价前有效天数`);
     if (metric?.afterValidDays == null) missing.push(`${label}评价后有效天数`);
   }
-  return <article data-evaluation-event className="rounded border border-slate-200 p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><h4 className="font-bold">{event.content}</h4><p className="text-sm text-slate-500">{event.occurredOn} · 负责人：{event.owner} · 证据：{event.evidence || '未提供'}</p></div>{role === 'admin' && <button type="button" disabled={busy} onClick={onRecompute}>{recomputing ? '重新计算中…' : '按最新数据重新计算'}</button>}</div>
+  return <article data-evaluation-event className="rounded border border-slate-200 p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><h4 className="font-bold">{displayed.content}</h4><p className="text-sm text-slate-500">{displayed.occurredOn} · 负责人：{displayed.owner} · 证据：{displayed.evidence || '未提供'}</p>{displayed.id !== root.id && <p className="text-sm text-amber-700">当前展示更正后的评价内容，指标快照与评价范围保留自原评价。</p>}{!current && <p className="text-sm text-slate-500">该评价已作废，暂无有效更正记录。</p>}</div>{role === 'admin' && current && <button type="button" disabled={busy} onClick={onRecompute}>{recomputing ? '重新计算中…' : '按最新数据重新计算'}</button>}</div>
     <p className="mt-2 text-sm">快照查询时间：{value(snapshot.generatedAt)} · 范围：{snapshot.range.beforeStart} / {snapshot.range.splitDate} / {snapshot.range.afterEnd}</p>{snapshotIsPartial(snapshot) && <p className="text-sm text-amber-700">该历史快照为旧版或不完整格式，部分字段不可用。</p>}<p className="text-sm">数据来源：{snapshot.injector?.injection ? '注汽阶段数据' : '注汽数据缺失'}、{snapshot.producerSeries?.length ? '生产日报' : '生产数据缺失'}</p>
     <div className="mt-3 overflow-auto"><table className="w-full text-sm"><thead><tr><th>指标</th><th>评价前</th><th>评价后</th><th>变化量</th><th>有效天数（前/后）</th></tr></thead><tbody>{([['日产油', 'oil', false], ['日产液', 'liquid', false], ['含水', 'waterCut', true]] as const).map(([label, name, percent]) => { const metric = snapshotMetric(snapshot, name); return <tr key={name}><td>{label}</td><td>{snapshotMetricValue(metric?.beforeAverage, percent)}</td><td>{snapshotMetricValue(metric?.afterAverage, percent)}</td><td>{snapshotMetricValue(metric?.change, percent)}</td><td>{metric?.beforeValidDays ?? '缺失'} / {metric?.afterValidDays ?? '缺失'}</td></tr>; })}</tbody></table></div>
     <p className="mt-2 text-sm">缺失字段：{missing.length ? missing.join('、') : '无'}</p>
@@ -123,7 +155,7 @@ export function ChannelingRelationDetail({ role, relationId, onOpenWell, onBack 
       const query = new URLSearchParams({ subjectType: 'relation', subjectId: String(relationId) });
       const events = await channelingRequest<TrackingEvent[]>(`/api/channeling-tracking-events?${query}`, { signal: controller.signal });
       if (!controller.signal.aborted && evaluationsGeneration.current === requestGeneration && relationRef.current === activeRelation) {
-        setEvaluations(events.filter((item) => item.eventType === 'evaluated'));
+        setEvaluations(events);
         const executed = events.filter((item) => item.eventType === 'executed' && !item.voidedAt && isBusinessDate(item.occurredOn)).sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt))[0]; setLatestExecutedOn(executed?.occurredOn || null);
       }
     } catch (eventsError) { if (!controller.signal.aborted && evaluationsGeneration.current === requestGeneration && relationRef.current === activeRelation) { setEvaluations([]); setLatestExecutedOn(null); setEvaluationsError(eventsError instanceof Error ? eventsError.message : '历史评价加载失败'); } }
@@ -169,12 +201,12 @@ export function ChannelingRelationDetail({ role, relationId, onOpenWell, onBack 
     } catch (submitError) { if (writeToken.current === token && relationRef.current === activeRelation) setEvaluationError(submitError instanceof Error ? submitError.message : '效果评价保存失败'); }
     finally { if (writeToken.current === token && relationRef.current === activeRelation) { evaluationBusyRef.current = false; setEvaluationBusy(false); setEvaluationBusyTarget(null); } }
   };
-  const recomputeEvaluation = async (event: TrackingEvent) => {
+  const recomputeEvaluation = async ({ root, current }: EvaluationLineage) => {
     if (evaluationBusyRef.current) return;
-    const snapshot = relationSnapshot(event.metricsSnapshot); if (!snapshot) { setRecomputeError('该历史评价缺少可重新计算的日期范围。'); return; }
-    const token = ++writeToken.current; const activeRelation = relationId; evaluationBusyRef.current = true; setEvaluationBusy(true); setEvaluationBusyTarget(event.id); setRecomputeError('');
+    const snapshot = relationSnapshot(root.metricsSnapshot); if (!snapshot || !current) { setRecomputeError('该历史评价缺少可重新计算的日期范围。'); return; }
+    const token = ++writeToken.current; const activeRelation = relationId; evaluationBusyRef.current = true; setEvaluationBusy(true); setEvaluationBusyTarget(root.id); setRecomputeError('');
     try {
-      await channelingRequest<TrackingEvent>(`/api/channeling-relations/${relationId}/evaluations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ occurredOn: snapshot.range.afterEnd, conclusion: event.content, evidence: event.evidence, owner: event.owner, range: snapshot.range }) });
+      await channelingRequest<TrackingEvent>(`/api/channeling-relations/${relationId}/evaluations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ occurredOn: snapshot.range.afterEnd, conclusion: current.content, evidence: current.evidence, owner: current.owner, range: snapshot.range }) });
       if (writeToken.current !== token || relationRef.current !== activeRelation) return;
       await loadEvaluations();
     } catch (recomputeFailure) { if (writeToken.current === token && relationRef.current === activeRelation) setRecomputeError(recomputeFailure instanceof Error ? recomputeFailure.message : '重新计算失败'); }
@@ -182,6 +214,7 @@ export function ChannelingRelationDetail({ role, relationId, onOpenWell, onBack 
   };
   const chart = useMemo(() => detail?.injector.injection ? buildRelationChart(detail) : null, [detail]);
   const alignedRows = useMemo(() => detail ? buildAlignedRelationRows(detail) : [], [detail]);
+  const evaluationLineages = useMemo(() => buildEvaluationLineages(evaluations), [evaluations]);
   const jsdom = typeof navigator !== 'undefined' && /jsdom/i.test(navigator.userAgent);
 
   if (loading) return <section className="app-card p-5"><p role="status">正在加载关系详情…</p></section>;
@@ -206,7 +239,7 @@ export function ChannelingRelationDetail({ role, relationId, onOpenWell, onBack 
     </section>}
     {tab === 'evaluation' && <section className="app-card p-5"><h3 className="font-bold">效果评价</h3>{role === 'admin' ? <form aria-label="新增效果评价" onSubmit={submitEvaluation} className="mt-4 grid gap-3 md:grid-cols-3">{(['beforeStart', 'splitDate', 'afterEnd'] as const).map((name) => <label key={name}>{name === 'beforeStart' ? '评价前开始日' : name === 'splitDate' ? '分界日' : '评价后结束日'}<input required type="date" name={name} value={draft[name]} onInput={(e) => { draftDirty.current = true; const next = e.currentTarget.value; setDraft((current) => ({ ...current, [name]: next })); }} className="field-control" /></label>)}<label className="md:col-span-3">评价结论<textarea required name="conclusion" value={draft.conclusion} onInput={(e) => { draftDirty.current = true; const next = e.currentTarget.value; setDraft((current) => ({ ...current, conclusion: next })); }} className="field-control" /></label><label>证据<input name="evidence" value={draft.evidence} onInput={(e) => { draftDirty.current = true; const next = e.currentTarget.value; setDraft((current) => ({ ...current, evidence: next })); }} className="field-control" /></label><label>负责人<input required name="owner" value={draft.owner} onInput={(e) => { draftDirty.current = true; const next = e.currentTarget.value; setDraft((current) => ({ ...current, owner: next })); }} className="field-control" /></label>{evaluationError && <p role="alert" className="text-red-700 md:col-span-3">{evaluationError}</p>}<button type="submit" disabled={evaluationBusy} className="action-button action-primary md:col-span-3">{evaluationBusyTarget === 'new' ? '保存中…' : '保存效果评价'}</button></form> : <p className="mt-3 text-sm text-slate-500">游客只读，可查看已形成的评价记录。</p>}
       {saved && <article className="mt-5 rounded border border-emerald-200 bg-emerald-50 p-4"><h4 className="font-bold">已保存评价快照</h4><p>{saved.content}</p><p>指标区间：{snapshot?.range.beforeStart || saved.occurredOn} 至 {snapshot?.range.afterEnd || saved.occurredOn}</p><p>日产油变化：{value(savedOil?.change)} · 日产液变化：{value(savedLiquid?.change)} · 含水变化：{snapshotMetricValue(savedWaterCut?.change, true)}</p></article>}
-      <div className="mt-5 space-y-3"><h4 className="font-bold">历史评价快照</h4>{evaluationsLoading && <p role="status">正在加载历史评价…</p>}{evaluationsError && <p role="alert">{evaluationsError} <button type="button" onClick={() => void loadEvaluations()}>重试历史评价</button></p>}{!evaluationsLoading && !evaluationsError && evaluations.length === 0 && <p>暂无历史评价。</p>}{recomputeError && <p role="alert" className="text-red-700">{recomputeError}</p>}{evaluations.map((item) => <EvaluationSnapshot key={item.id} event={item} role={role} busy={evaluationBusy} recomputing={evaluationBusyTarget === item.id} onRecompute={() => void recomputeEvaluation(item)} />)}</div>
+      <div className="mt-5 space-y-3"><h4 className="font-bold">历史评价快照</h4>{evaluationsLoading && <p role="status">正在加载历史评价…</p>}{evaluationsError && <p role="alert">{evaluationsError} <button type="button" onClick={() => void loadEvaluations()}>重试历史评价</button></p>}{!evaluationsLoading && !evaluationsError && evaluationLineages.length === 0 && <p>暂无历史评价。</p>}{recomputeError && <p role="alert" className="text-red-700">{recomputeError}</p>}{evaluationLineages.map((lineage) => <EvaluationSnapshot key={lineage.root.id} lineage={lineage} role={role} busy={evaluationBusy} recomputing={evaluationBusyTarget === lineage.root.id} onRecompute={() => void recomputeEvaluation(lineage)} />)}</div>
     </section>}
     {tab === 'timeline' && <section className="app-card p-5"><ChannelingTimeline role={role} subject={{ subjectType: 'relation', subjectId: relationId }} /></section>}
   </section>;

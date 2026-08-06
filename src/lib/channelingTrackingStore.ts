@@ -217,13 +217,43 @@ export async function getTrackingEvent(db: DatabaseLike, id: number): Promise<Tr
 export async function listTrackingEvents(db: DatabaseLike, subject: TrackingLink): Promise<TrackingEvent[]> {
   validateLinks([subject]);
   const rows = await db.all(
-    `SELECT e.id FROM channeling_tracking_events e
+    `SELECT e.* FROM channeling_tracking_events e
       JOIN channeling_tracking_event_links l ON l.event_id = e.id
       WHERE l.subject_type = ? AND l.subject_id = ?
       ORDER BY e.occurred_on DESC, e.created_at DESC, e.id DESC`,
     [subject.subjectType, subject.subjectId],
   );
-  return Promise.all(rows.map((row) => getTrackingEvent(db, row.id)));
+  if (rows.length === 0) return [];
+  const linkRows = await db.all(
+    `SELECT event_id AS eventId, subject_type AS subjectType, subject_id AS subjectId
+      FROM channeling_tracking_event_links
+      WHERE event_id IN (
+        SELECT event_id FROM channeling_tracking_event_links WHERE subject_type = ? AND subject_id = ?
+      )
+      ORDER BY event_id, subject_type, subject_id`,
+    [subject.subjectType, subject.subjectId],
+  );
+  const linksByEvent = new Map<number, TrackingLink[]>();
+  for (const link of linkRows) {
+    const links = linksByEvent.get(link.eventId) || [];
+    links.push({ subjectType: link.subjectType, subjectId: link.subjectId });
+    linksByEvent.set(link.eventId, links);
+  }
+  return rows.map((row) => ({
+    id: row.id,
+    eventType: row.event_type,
+    occurredOn: row.occurred_on,
+    content: row.content,
+    evidence: row.evidence,
+    owner: row.owner,
+    metricsSnapshot: parseMetricsSnapshot(row.metrics_snapshot_json),
+    supersedesEventId: row.supersedes_event_id,
+    voidedAt: row.voided_at,
+    voidReason: row.void_reason,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    links: linksByEvent.get(row.id) || [],
+  }));
 }
 
 type TrackingCorrectionInput = Omit<TrackingEventInput, 'eventType' | 'links' | 'metricsSnapshot'> & { reason: string };

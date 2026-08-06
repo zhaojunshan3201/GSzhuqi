@@ -101,6 +101,44 @@ test('lists events by date, creation time, and id in descending order', async ()
   });
 });
 
+test('lists many events with two set-based reads while preserving links, snapshots, and corrections', async () => {
+  await withStore(async (db) => {
+    const originals = [];
+    for (let index = 0; index < 12; index += 1) {
+      originals.push(await createTrackingEvent(db, {
+        ...validInput(),
+        content: `event ${index}`,
+        metricsSnapshot: { index },
+        links: [
+          { subjectType: 'project', subjectId: 1 },
+          { subjectType: 'relation', subjectId: 2 },
+        ],
+      }));
+    }
+    const corrected = await correctTrackingEvent(db, originals[0].id, {
+      occurredOn: '2026-08-06', content: 'corrected event', evidence: 'proof', owner: 'owner', createdBy: 'admin', reason: 'fix',
+    });
+
+    const originalAll = db.all.bind(db);
+    const originalGet = db.get.bind(db);
+    let reads = 0;
+    db.all = async (sql: string, params?: unknown[]) => { reads += 1; return originalAll(sql, params); };
+    db.get = async (sql: string, params?: unknown[]) => { reads += 1; return originalGet(sql, params); };
+
+    const events = await listTrackingEvents(db, { subjectType: 'project', subjectId: 1 });
+    assert.equal(reads, 2);
+    assert.equal(events.length, 13);
+    assert.equal(events[0].id, corrected.id);
+    assert.deepEqual(events.find((event) => event.id === originals[5].id)?.metricsSnapshot, { index: 5 });
+    assert.deepEqual(events.find((event) => event.id === originals[5].id)?.links, [
+      { subjectType: 'project', subjectId: 1 },
+      { subjectType: 'relation', subjectId: 2 },
+    ]);
+    assert.equal(events.find((event) => event.id === corrected.id)?.supersedesEventId, originals[0].id);
+    assert.ok(events.find((event) => event.id === originals[0].id)?.voidedAt);
+  });
+});
+
 test('rejects invalid event fields and links', async () => {
   await withStore(async (db) => {
     const invalidInputs: Array<[Partial<TrackingEventInput>, RegExp]> = [
