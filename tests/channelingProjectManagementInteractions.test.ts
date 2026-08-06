@@ -323,8 +323,12 @@ test('a delayed manual relation create cannot reload or pollute a newly selected
   const second = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes('当前项目')) as HTMLButtonElement;
   await act(async () => second.click()); await openRelations(host);
   assert.match(host.textContent || '', /当前井/);
+  const currentForm = [...host.querySelectorAll('form')].find((item) => item.querySelectorAll('input[required]').length === 5)!;
+  const currentDraftType = currentForm.querySelector('select') as HTMLSelectElement;
+  assert.equal(currentDraftType.disabled, false, 'switching projects releases the obsolete write lock');
+  await act(async () => { currentDraftType.value = 'nitrogen'; currentDraftType.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => { pending.resolve(await payload(relation('新增井', 'steam'))); await pending.promise; });
-  assert.equal(oldRelationLoads, 1); assert.match(host.textContent || '', /当前井/); assert.doesNotMatch(host.textContent || '', /新增井/);
+  assert.equal(oldRelationLoads, 1); assert.match(host.textContent || '', /当前井/); assert.doesNotMatch(host.textContent || '', /新增井/); assert.equal(currentDraftType.value, 'nitrogen');
   await act(async () => root.unmount()); dom.window.close();
 });
 
@@ -471,8 +475,11 @@ test('a delayed manual relation create cannot reload the old type view', async (
   await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' }))); await openRelations(host);
   const form = [...host.querySelectorAll('form')].find((item) => item.textContent?.includes('手工新增关系'))!; await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
   const filter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement; await act(async () => { filter.value = 'nitrogen'; filter.dispatchEvent(new Event('change', { bubbles: true })); });
+  const currentDraftType = form.querySelector('select[aria-label="手工关系注窜类型"]') as HTMLSelectElement;
+  assert.equal(currentDraftType.disabled, false, 'switching types releases the obsolete write lock');
+  await act(async () => { currentDraftType.value = 'nitrogen'; currentDraftType.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => { pending.resolve(await payload(relation('旧新增井', 'steam'))); await pending.promise; });
-  assert.equal(oldLoads, 1); assert.match(host.textContent || '', /当前氮井/);
+  assert.equal(oldLoads, 1); assert.match(host.textContent || '', /当前氮井/); assert.equal(currentDraftType.value, 'nitrogen');
   await act(async () => root.unmount()); dom.window.close();
 });
 
@@ -498,5 +505,88 @@ test('a delayed listed import confirmation cannot reload or error the old type v
   const filter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement; await act(async () => { filter.value = 'nitrogen'; filter.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => { pending.resolve(new Response(JSON.stringify({ success: false, message: '旧类型确认失败' }), { status: 500 })); await pending.promise; });
   assert.equal(oldLoads, 1); assert.match(host.textContent || '', /当前氮井/); assert.doesNotMatch(host.textContent || '', /旧类型确认失败/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a preview confirmation refresh failure cannot warn after the project and type view changes', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  const secondProject = { ...project, id: 8, projectName: 'current project' };
+  const confirmation = deferred<Response>(); const refresh = deferred<Response>(); const refreshStarted = deferred<void>(); let projectLoads = 0;
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') { projectLoads++; if (projectLoads === 1) return payload([project, secondProject]); refreshStarted.resolve(); return refresh.promise; }
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-relation-imports/preview') return payload(preview);
+    if (url === `/api/channeling-relation-imports/${preview.id}/confirm`) return confirmation.promise;
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]);
+    throw new Error(url);
+  }) as typeof fetch;
+
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  await uploadPreview(host);
+  const confirm = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('确认导入')) as HTMLButtonElement;
+  await act(async () => confirm.click());
+  await act(async () => { confirmation.resolve(await payload({ ...preview, status: 'confirmed', projectId: 7 })); await refreshStarted.promise; });
+  const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('current project')) as HTMLButtonElement;
+  await act(async () => second.click()); await openRelations(host);
+  const type = host.querySelector('select[aria-label*="类型筛选"]') as HTMLSelectElement;
+  await act(async () => { type.value = 'nitrogen'; type.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => { refresh.reject(new Error('old refresh failed')); try { await refresh.promise; } catch {} });
+
+  assert.ok(second.className.includes('bg-red-50'));
+  assert.equal(type.value, 'nitrogen');
+  assert.equal(host.querySelector('[aria-live="polite"]'), null, 'the obsolete refresh must not publish a warning');
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('manual relation creation synchronously blocks duplicate submit and locks its draft until success', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  const pending = deferred<Response>(); let creates = 0; let submittedBody: any;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7/relations' && init?.method === 'POST') { creates++; submittedBody = JSON.parse(String(init.body)); return pending.promise; }
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]);
+    throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' }))); await openRelations(host);
+  const form = [...host.querySelectorAll('form')].find((item) => item.querySelectorAll('input[required]').length === 5)!;
+  const draftType = form.querySelector('select') as HTMLSelectElement;
+  await act(async () => { draftType.value = 'nitrogen'; draftType.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  assert.equal(creates, 1);
+  assert.ok([...form.querySelectorAll('input, select, button')].every((control) => (control as HTMLInputElement).disabled));
+  await act(async () => { draftType.value = 'steam'; draftType.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  assert.equal(draftType.value, 'nitrogen', 'a pending draft cannot be edited programmatically through its change handler');
+  assert.equal(submittedBody.channelingType, 'nitrogen');
+
+  await act(async () => { pending.resolve(await payload(relation('injector A', 'steam'))); await pending.promise; });
+  assert.equal(draftType.value, 'steam');
+  assert.ok([...form.querySelectorAll('input, select, button')].every((control) => !(control as HTMLInputElement).disabled));
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('failed manual relation creation unlocks the form and retains the submitted draft', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  const pending = deferred<Response>();
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7/relations' && init?.method === 'POST') return pending.promise;
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]);
+    throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' }))); await openRelations(host);
+  const form = [...host.querySelectorAll('form')].find((item) => item.querySelectorAll('input[required]').length === 5)!;
+  const draftType = form.querySelector('select') as HTMLSelectElement;
+  await act(async () => { draftType.value = 'nitrogen'; draftType.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await act(async () => { pending.resolve(new Response(JSON.stringify({ success: false, message: 'create failed' }), { status: 500 })); await pending.promise; });
+  assert.equal(draftType.value, 'nitrogen');
+  assert.ok([...form.querySelectorAll('input, select, button')].every((control) => !(control as HTMLInputElement).disabled));
+  assert.match(host.textContent || '', /create failed/);
   await act(async () => root.unmount()); dom.window.close();
 });

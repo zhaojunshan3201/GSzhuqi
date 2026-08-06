@@ -138,6 +138,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const [previewProjectId, setPreviewProjectId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [relationCreating, setRelationCreating] = useState(false);
   const [projectTab, setProjectTab] = useState<ProjectTab>('overview');
   const [validRowsExpanded, setValidRowsExpanded] = useState(false);
   const [protectedProjectIds, setProtectedProjectIds] = useState<Set<number>>(() => new Set());
@@ -150,6 +151,8 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const viewSelectionRef = useRef({ selectedId, channelingType: relationFilters.channelingType, status: relationFilters.status, source: relationFilters.source });
   viewSelectionRef.current = { selectedId, channelingType: relationFilters.channelingType, status: relationFilters.status, source: relationFilters.source };
   const isCurrentView = (view: { selectedId: number | null; channelingType: string; status: string; source: string }) => viewSelectionRef.current.selectedId === view.selectedId && viewSelectionRef.current.channelingType === view.channelingType && viewSelectionRef.current.status === view.status && viewSelectionRef.current.source === view.source;
+  const relationCreateTokenRef = useRef(0);
+  const activeRelationCreateRef = useRef<{ token: number; view: typeof viewSelectionRef.current } | null>(null);
   const selected = projects.find((item) => item.id === selectedId);
   const visibleProjects = useMemo(() => projects.filter((item) => (!projectFilters.block || item.block.includes(projectFilters.block)) && (!projectFilters.status || item.status === projectFilters.status)), [projects, projectFilters]);
   const visibleRelations = useMemo(() => relations.filter((item) => (!relationFilters.channelingType || item.channelingType === relationFilters.channelingType) && (!relationFilters.status || item.status === relationFilters.status) && (!relationFilters.source || item.source === relationFilters.source)), [relations, relationFilters]);
@@ -157,7 +160,13 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const token = localStorage.getItem('token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   const setMessage = (text: string, tone: MessageTone = 'error') => setMessageState({ text, tone });
-  const selectProject = (id: number | null) => { setMessageState(null); setProjectTab('overview'); setSelectedId(id); };
+  const invalidateRelationCreate = () => {
+    if (!activeRelationCreateRef.current) return;
+    activeRelationCreateRef.current = null;
+    relationCreateTokenRef.current++;
+    setRelationCreating(false);
+  };
+  const selectProject = (id: number | null) => { invalidateRelationCreate(); setMessageState(null); setProjectTab('overview'); setSelectedId(id); };
   const selectProjectTab = (tab: ProjectTab, focus = false) => {
     setProjectTab(tab);
     if (focus) document.getElementById(`project-tab-${tab}`)?.focus();
@@ -212,6 +221,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   useEffect(() => { setProjectTab('overview'); }, [selectedId]);
   useEffect(() => () => relationRequestRef.current?.abort(), []);
   useEffect(() => () => { projectCreateMutationToken.current++; }, []);
+  useEffect(() => () => { activeRelationCreateRef.current = null; relationCreateTokenRef.current++; }, []);
   useEffect(() => {
     if (!preview) return;
     setPreviewProjectId((current) => {
@@ -261,15 +271,26 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     } catch (error: any) { if (remainsCurrent()) setMessage(error.message); }
   };
   const createRelation = async (event: React.FormEvent) => {
-    event.preventDefault(); if (!selected) return;
+    event.preventDefault(); if (!selected || activeRelationCreateRef.current) return;
     const projectId = selected.id;
     const view = { ...viewSelectionRef.current };
+    const draft = { ...relationDraft };
+    const token = ++relationCreateTokenRef.current;
+    activeRelationCreateRef.current = { token, view };
+    setRelationCreating(true);
+    const isActive = () => activeRelationCreateRef.current?.token === token && isCurrentView(view);
     try {
-      await request(`/api/channeling-projects/${projectId}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(relationDraft) });
-      if (!isCurrentView(view)) return;
+      await request(`/api/channeling-projects/${projectId}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) });
+      if (!isActive()) return;
       setRelationDraft(blankRelation());
       await loadRelations(projectId);
-    } catch (error: any) { if (isCurrentView(view)) setMessage(error.message); }
+    } catch (error: any) { if (isActive()) setMessage(error.message); }
+    finally {
+      if (activeRelationCreateRef.current?.token === token) {
+        activeRelationCreateRef.current = null;
+        setRelationCreating(false);
+      }
+    }
   };
   const uploadRelations = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -319,7 +340,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
       await load();
       if (viewIsUnchanged()) await loadRelations(projectId);
     } catch {
-      setMessage('关系已确认，但刷新失败，请稍后手动刷新项目数据。', 'warning');
+      if (viewIsUnchanged()) setMessage('关系已确认，但刷新失败，请稍后手动刷新项目数据。', 'warning');
     } finally {
       if (confirmingImportIdRef.current === batchId) confirmingImportIdRef.current = null;
       setConfirming(false);
@@ -419,8 +440,8 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
         {canOperate && <form key={selected.id} className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); const data = new FormData(e.currentTarget); void save({ owner: data.get('owner'), governanceMeasure: data.get('governanceMeasure'), plannedDate: data.get('plannedDate') || null, riskLevel: data.get('riskLevel'), ...(isAdmin ? { status: data.get('status'), closureEvidence: data.get('closureEvidence') } : {}) }); }}><label>项目状态<select name="status" className="field-control" defaultValue={selected.status} disabled={!isAdmin}>{Object.entries(statusLabels).filter(([value]) => isAdmin || value !== 'closed').map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>责任人<input name="owner" className="field-control" defaultValue={selected.owner}/></label><label className="md:col-span-2">治理措施<input name="governanceMeasure" className="field-control" defaultValue={selected.governanceMeasure}/></label><label>计划日期<input name="plannedDate" type="date" className="field-control" defaultValue={selected.plannedDate ?? ''}/></label><label>风险等级<select name="riskLevel" className="field-control" defaultValue={selected.riskLevel}><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label>{isAdmin && <label className="md:col-span-2">关闭依据<input name="closureEvidence" className="field-control" defaultValue={selected.closureEvidence}/></label>}<button className="action-button action-primary md:col-span-2">保存治理信息</button></form>}
         <div role="tablist" aria-label="项目详情模块" className="mt-6 flex gap-2 border-t pt-4">{projectTabs.map(([value, label]) => <button key={value} id={`project-tab-${value}`} aria-controls={`project-panel-${value}`} type="button" role="tab" aria-selected={projectTab === value} tabIndex={projectTab === value ? 0 : -1} className={`action-button ${projectTab === value ? 'action-primary' : ''}`} onClick={() => selectProjectTab(value)} onKeyDown={(event) => navigateProjectTabs(event, value)}>{label}</button>)}</div>
         {projectTab === 'overview' && <ProjectSummaryPanel key={`summary-${selected.id}`} projectId={selected.id} isAdmin={isAdmin}/>}
-        {projectTab === 'relations' && <section id="project-panel-relations" role="tabpanel" aria-labelledby="project-tab-relations" className="mt-4"><h4 className="sr-only">关系清单</h4><div className="mt-3 grid gap-2 md:grid-cols-3"><select className="field-control" aria-label="注窜类型筛选" value={relationFilters.channelingType} onChange={(e) => setRelationFilters({ ...relationFilters, channelingType: e.target.value })}><option value="">全部注窜类型</option><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><select className="field-control" aria-label="关系状态筛选" value={relationFilters.status} onChange={(e) => setRelationFilters({ ...relationFilters, status: e.target.value })}><option value="">全部关系状态</option>{Object.entries(relationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select className="field-control" aria-label="关系来源筛选" value={relationFilters.source} onChange={(e) => setRelationFilters({ ...relationFilters, source: e.target.value })}><option value="">全部来源</option><option value="manual">手工</option><option value="import">导入</option><option value="suspected">疑似识别</option></select></div>
-          {canOperate && <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={createRelation}><select className="field-control" aria-label="手工关系注窜类型" value={relationDraft.channelingType} onChange={(e) => setRelationDraft({ ...relationDraft, channelingType: e.target.value as ChannelingType })}><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><input className="field-control" required placeholder="注井" value={relationDraft.injectionWell} onChange={(e) => setRelationDraft({ ...relationDraft, injectionWell: e.target.value })}/><input className="field-control" required placeholder="采油井" value={relationDraft.productionWell} onChange={(e) => setRelationDraft({ ...relationDraft, productionWell: e.target.value })}/><input className="field-control" required placeholder="层系" value={relationDraft.reservoirLayer} onChange={(e) => setRelationDraft({ ...relationDraft, reservoirLayer: e.target.value })}/><input className="field-control" required placeholder="证据" value={relationDraft.evidence} onChange={(e) => setRelationDraft({ ...relationDraft, evidence: e.target.value })}/><input className="field-control" required placeholder="责任人" value={relationDraft.owner} onChange={(e) => setRelationDraft({ ...relationDraft, owner: e.target.value })}/><button className="action-button action-primary md:col-span-3">手工新增关系</button></form>}
+        {projectTab === 'relations' && <section id="project-panel-relations" role="tabpanel" aria-labelledby="project-tab-relations" className="mt-4"><h4 className="sr-only">关系清单</h4><div className="mt-3 grid gap-2 md:grid-cols-3"><select className="field-control" aria-label="注窜类型筛选" value={relationFilters.channelingType} onChange={(e) => { invalidateRelationCreate(); setRelationFilters({ ...relationFilters, channelingType: e.target.value }); }}><option value="">全部注窜类型</option><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><select className="field-control" aria-label="关系状态筛选" value={relationFilters.status} onChange={(e) => { invalidateRelationCreate(); setRelationFilters({ ...relationFilters, status: e.target.value }); }}><option value="">全部关系状态</option>{Object.entries(relationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select className="field-control" aria-label="关系来源筛选" value={relationFilters.source} onChange={(e) => { invalidateRelationCreate(); setRelationFilters({ ...relationFilters, source: e.target.value }); }}><option value="">全部来源</option><option value="manual">手工</option><option value="import">导入</option><option value="suspected">疑似识别</option></select></div>
+          {canOperate && <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={createRelation}><select className="field-control" aria-label="手工关系注窜类型" value={relationDraft.channelingType} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, channelingType: e.target.value as ChannelingType }); }}><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><input className="field-control" required placeholder="注井" value={relationDraft.injectionWell} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, injectionWell: e.target.value }); }}/><input className="field-control" required placeholder="采油井" value={relationDraft.productionWell} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, productionWell: e.target.value }); }}/><input className="field-control" required placeholder="层系" value={relationDraft.reservoirLayer} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, reservoirLayer: e.target.value }); }}/><input className="field-control" required placeholder="证据" value={relationDraft.evidence} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, evidence: e.target.value }); }}/><input className="field-control" required placeholder="责任人" value={relationDraft.owner} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, owner: e.target.value }); }}/><button className="action-button action-primary md:col-span-3" disabled={relationCreating}>{relationCreating ? '正在新增…' : '手工新增关系'}</button></form>}
           <div className="mt-3 space-y-2">{visibleRelations.map((row) => { const protectedKey = `${selected.id}:${row.id}`; const historyProtected = row.canDelete === false || protectedRelationKeys.has(protectedKey); return <div key={row.id} className="flex flex-wrap items-center gap-3 text-sm"><span className="rounded bg-slate-100 px-2 py-1">{channelingTypeLabels[row.channelingType]}</span><span>{row.injectionWell} → {row.productionWell} · {row.reservoirLayer} · {relationLabels[row.status]}</span><button type="button" onClick={() => onOpenRelation(row.id)}>查看详情/跟踪记录</button>{canOperate && row.status === 'suspected' && <button onClick={() => void confirmSuspected(row.id)}>提交疑似确认</button>}{isAdmin && row.status !== 'released' && <button onClick={() => void releaseRelation(row.id)}>解除关系</button>}{isAdmin && <button disabled={historyProtected} onClick={() => void deleteRelation(row.id)}>删除关系</button>}{historyProtected && <span className="text-amber-700">已有跟踪历史，请解除关系并保留历史。</span>}</div>; })}{!visibleRelations.length && <p className="text-sm text-slate-500">暂无符合条件的关系{canOperate ? '，可手工新增或通过上方识别卡导入 Excel 关系。' : '。'}</p>}</div><div className="mt-3 space-y-1">{imports.map((item) => <div key={item.id} className="flex flex-wrap gap-3 text-sm"><span>{item.fileName} · {channelingTypeLabels[item.channelingType]}：有效 {item.validCount}，重复 {item.duplicateCount}，自身 {item.selfRelationCount}，无效 {item.invalidCount}</span>{canOperate && item.status === 'preview' && <button disabled={confirming} onClick={() => void confirmImport(item.id)}>{confirmingImportIdRef.current === item.id ? '正在确认…' : '确认导入'}</button>}</div>)}</div></section>}
         {projectTab === 'timeline' && <div id="project-panel-timeline" role="tabpanel" aria-labelledby="project-tab-timeline" className="mt-4"><ChannelingTimeline role={isAdmin ? 'admin' : 'guest'} subject={{ subjectType: 'project', subjectId: selected.id }}/></div>}
       </section> : <section className="app-card p-5 text-sm text-slate-500">暂无项目详情。{canOperate ? '请新建项目；关系文件仍可先在上方识别预览。' : '可使用左侧筛选查看完整台账。'}</section>}
