@@ -179,12 +179,46 @@ test('summarizes projects with normalized deduplication and nonvoided evaluation
     assert.deepEqual([result.relationCount, result.activeRelationCount, result.releasedRelationCount], [3, 2, 1]);
     assert.deepEqual([result.injectorCount, result.producerCount, result.uniqueWellCount], [2, 2, 3]);
     assert.equal(result.cumulativeSteam, 150);
-    assert.equal(result.latestTotalOil, 10);
+    assert.deepEqual([result.initialTotalOil, result.latestTotalOil, result.totalOilChange], [10, 10, 0]);
     assert.equal(result.evaluatedCount, 2);
     assert.equal(result.latestEvaluationConclusion, 'recent');
     assert.deepEqual([result.start, result.end], ['2026-01-01', '2026-01-31']);
     assert.deepEqual(result.range, { start: '2026-01-01', end: '2026-01-31' });
     assert.match(result.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+test('project oil totals use each deduplicated producer earliest and latest finite observations inside the range', async () => {
+  await withStore(async (db) => {
+    await db.exec(`INSERT INTO channeling_projects VALUES (1, 'p');
+      INSERT INTO channeling_relations VALUES (1, 1, 'I-1', ' P-1 ', 'confirmed');
+      INSERT INTO channeling_relations VALUES (2, 1, 'I-2', 'p-1', 'confirmed');
+      INSERT INTO channeling_relations VALUES (3, 1, 'I-3', 'P-2', 'confirmed');
+      INSERT INTO production VALUES ('P-1', '2025-12-31', 99, NULL, NULL, 'A');
+      INSERT INTO production VALUES ('P-1', '2026-01-01', 10, NULL, NULL, 'A');
+      INSERT INTO production VALUES (' p-1 ', '2026-01-01', 12, NULL, NULL, 'A');
+      INSERT INTO production VALUES ('P-1', '2026-01-03', 20, NULL, NULL, 'A');
+      INSERT INTO production VALUES ('P-2', '2026-01-02', NULL, NULL, NULL, 'A');
+      INSERT INTO production VALUES ('P-2', '2026-01-03', 5, NULL, NULL, 'A');`);
+    const result = await getProjectSummary(db, 1, '2026-01-01', '2026-01-03');
+    assert.deepEqual([result.initialTotalOil, result.latestTotalOil, result.totalOilChange], [17, 25, 8]);
+  });
+});
+
+test('project summary defaults to the latest associated data date and falls back to Shanghai business date', async () => {
+  await withStore(async (db) => {
+    await db.exec(`INSERT INTO channeling_projects VALUES (1, 'data'), (2, 'empty');
+      INSERT INTO channeling_relations VALUES (1, 1, 'I-1', 'P-1', 'confirmed');
+      INSERT INTO production VALUES ('P-1', '2026-03-04', 10, NULL, NULL, 'A');
+      INSERT INTO injection_stage_rows VALUES ('I-1', 1, '2026-02-01', '2026-03-06', 10, NULL, NULL, NULL, NULL);
+      INSERT INTO injection_stage_rows VALUES ('I-1', 2, '2026-03-07', 'not-a-date', 10, NULL, NULL, NULL, NULL);`);
+    const anchored = await getProjectSummary(db, 1, undefined, undefined, new Date('2026-08-01T00:00:00Z'));
+    assert.equal(anchored.latestAvailableDate, '2026-03-07');
+    assert.deepEqual(anchored.range, { start: '2026-02-06', end: '2026-03-07' });
+    const fallback = await getProjectSummary(db, 2, undefined, undefined, new Date('2026-01-01T16:30:00Z'));
+    assert.equal(fallback.latestAvailableDate, null);
+    assert.deepEqual(fallback.range, { start: '2025-12-04', end: '2026-01-02' });
+    await assert.rejects(() => getProjectSummary(db, 1, '2026-01-01', undefined), /date range is invalid/);
   });
 });
 
@@ -235,7 +269,8 @@ test('canonicalizes normalized production aliases to the latest inserted row per
     const relation = await getRelationMetrics(db, 1, { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' });
     assert.deepEqual(relation.producerSeries.map((row) => row.oil), [20, 40]);
     assert.deepEqual(relation.comparison.oil, { beforeAverage: 20, afterAverage: 40, change: 20, changeRate: 1, beforeValidDays: 1, afterValidDays: 1 });
-    assert.equal((await getProjectSummary(db, 1, '2026-01-01', '2026-01-03')).latestTotalOil, 40);
+    const summary = await getProjectSummary(db, 1, '2026-01-01', '2026-01-03');
+    assert.deepEqual([summary.initialTotalOil, summary.latestTotalOil, summary.totalOilChange], [20, 40, 20]);
   });
 });
 
@@ -269,6 +304,6 @@ test('keeps project summary source-query count constant as project wells grow', 
     db.all = async (sql: string, params?: unknown[]) => { calls += 1; return all(sql, params); };
     const summary = await getProjectSummary(db, 1, '2026-01-01', '2026-01-31');
     assert.deepEqual([summary.injectorCount, summary.producerCount, summary.cumulativeSteam, summary.latestTotalOil], [20, 20, 210, 210]);
-    assert.ok(calls <= 5, `expected at most 5 set-based all() calls, received ${calls}`);
+    assert.ok(calls <= 6, `expected at most 6 set-based all() calls, received ${calls}`);
   });
 });

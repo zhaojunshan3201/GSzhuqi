@@ -98,7 +98,10 @@ export type ProjectSummary = {
   producerCount: number;
   uniqueWellCount: number;
   cumulativeSteam: number | null;
+  initialTotalOil: number | null;
   latestTotalOil: number | null;
+  totalOilChange: number | null;
+  latestAvailableDate: string | null;
   evaluatedCount: number;
   latestEvaluationConclusion: string | null;
 };

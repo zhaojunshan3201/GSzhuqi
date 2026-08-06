@@ -4778,6 +4778,13 @@ app.post("/api/register", async (req, res) => {
     validateMetricRange(start, end);
     return { start, end };
   };
+  const optionalChannelingMetricRange = (req: express.Request) => {
+    const start = singleChannelingQuery(req.query.start, "start");
+    const end = singleChannelingQuery(req.query.end, "end");
+    if ((start === undefined) !== (end === undefined)) throw new Error("date range is invalid");
+    if (start !== undefined && end !== undefined) validateMetricRange(start, end);
+    return { start, end };
+  };
   const channelingComparisonRange = (values: Record<string, unknown>) => {
     const beforeStart = singleChannelingQuery(values.beforeStart, "beforeStart", true)!;
     const splitDate = singleChannelingQuery(values.splitDate, "splitDate", true)!;
@@ -4925,7 +4932,7 @@ app.post("/api/register", async (req, res) => {
   app.get("/api/channeling-projects/:id/summary", async (req, res) => {
     try {
       const id = positiveChannelingId(req.params.id);
-      const range = channelingMetricRange(req);
+      const range = optionalChannelingMetricRange(req);
       res.json({ success: true, data: await getProjectSummary(localDb, id, range.start, range.end) });
     } catch (error: any) { sendChannelingTrackingError(res, error); }
   });

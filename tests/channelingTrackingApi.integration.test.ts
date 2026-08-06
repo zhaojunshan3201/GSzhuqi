@@ -108,7 +108,11 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     const wellMetrics = await json(await request(`/api/channeling-wells/${producer.id}/metrics?start=2026-01-01&end=2026-01-03`));
     assert.equal(wellMetrics.production.oil.average, 15);
     const summary = await json(await request(`/api/channeling-projects/${project.id}/summary?start=2026-01-01&end=2026-01-03`));
-    assert.equal(summary.relationCount, 1); assert.equal(summary.cumulativeSteam, 100); assert.equal(summary.latestTotalOil, 20);
+    assert.equal(summary.relationCount, 1); assert.equal(summary.cumulativeSteam, 100);
+    assert.deepEqual([summary.initialTotalOil, summary.latestTotalOil, summary.totalOilChange], [10, 20, 10]);
+    assert.equal(summary.latestAvailableDate, '2026-01-03');
+    const defaultSummary = await json(await request(`/api/channeling-projects/${project.id}/summary`));
+    assert.deepEqual(defaultSummary.range, { start: '2025-12-05', end: '2026-01-03' });
     const detail = await json(await request(`/api/channeling-relations/${relation.id}/detail?beforeStart=2026-01-01&splitDate=2026-01-02&afterEnd=2026-01-03`));
     assert.equal(detail.comparison.oil.beforeAverage, 12.5); assert.equal(detail.comparison.oil.afterAverage, 20);
 
@@ -116,6 +120,7 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
       `/api/channeling-wells/${producer.id}/metrics`,
       `/api/channeling-wells/${producer.id}/metrics?start=2026-01-01&start=2026-01-02&end=2026-01-03`,
       `/api/channeling-projects/${project.id}/summary?start=no&end=2026-01-03`,
+      `/api/channeling-projects/${project.id}/summary?start=2026-01-01`,
       `/api/channeling-relations/${relation.id}/detail?beforeStart=2026-01-02&splitDate=2026-01-02&afterEnd=2026-01-02`,
       '/api/channeling-wells/no',
       '/api/channeling-wells/9007199254740992',

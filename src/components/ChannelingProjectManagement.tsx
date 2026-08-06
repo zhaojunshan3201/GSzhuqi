@@ -14,48 +14,42 @@ type MessageTone = 'info' | 'success' | 'warning' | 'error';
 const messageClasses: Record<MessageTone, string> = { info: 'status-banner-info', success: 'status-banner-success border-emerald-200 bg-emerald-50 text-emerald-700', warning: 'status-banner-warning border-amber-200 bg-amber-50 text-amber-700', error: 'status-banner-error border-red-200 bg-red-50 text-red-700' };
 type ProjectTab = 'overview' | 'relations' | 'timeline';
 
-const shanghaiDateParts = () => Object.fromEntries(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
-const defaultSummaryRange = () => {
-  const parts = shanghaiDateParts();
-  const end = `${parts.year}-${parts.month}-${parts.day}`;
-  const startDate = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) - 29));
-  return { start: startDate.toISOString().slice(0, 10), end };
-};
 const displayNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? String(value) : '暂无数据';
 
 function ProjectSummaryPanel({ projectId }: { projectId: number }) {
-  const initialRange = useMemo(defaultSummaryRange, []);
-  const [range, setRange] = useState(initialRange);
+  const [range, setRange] = useState({ start: '', end: '' });
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [retryKey, setRetryKey] = useState(0);
-  const rangeError = range.start && range.end && range.start > range.end ? '开始日期不能晚于结束日期' : '';
+  const [editVersion, setEditVersion] = useState(0);
+  const rangeError = editVersion > 0 && (!range.start || !range.end) ? '请选择完整日期范围' : range.start && range.end && range.start > range.end ? '开始日期不能晚于结束日期' : '';
 
   useEffect(() => {
     setSummary(null);
     setError('');
-    if (!range.start || !range.end || range.start > range.end) return;
+    if (editVersion > 0 && (!range.start || !range.end || range.start > range.end)) { setLoading(false); return; }
     const controller = new AbortController();
     setLoading(true);
-    const query = new URLSearchParams(range);
-    void channelingRequest<ProjectSummary>(`/api/channeling-projects/${projectId}/summary?${query}`, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) setSummary(data); })
+    const url = editVersion === 0 ? `/api/channeling-projects/${projectId}/summary` : `/api/channeling-projects/${projectId}/summary?${new URLSearchParams(range)}`;
+    void channelingRequest<ProjectSummary>(url, { signal: controller.signal })
+      .then((data) => { if (!controller.signal.aborted) { setSummary(data); if (editVersion === 0) setRange(data.range); } })
       .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '项目汇总加载失败'); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [projectId, range.start, range.end, retryKey]);
+  }, [projectId, editVersion, retryKey]);
 
   const cards: [string, unknown][] = summary ? [
-    ['关系数量', summary.relationCount], ['注入井数量', summary.injectorCount], ['生产井数量', summary.producerCount], ['去重井数', summary.uniqueWellCount],
-    ['累计注汽量', summary.cumulativeSteam], ['最新日产油合计', summary.latestTotalOil], ['已评价次数', summary.evaluatedCount],
+    ['关系数量', summary.relationCount], ['有效关系数量', summary.activeRelationCount], ['已解除关系数量', summary.releasedRelationCount],
+    ['注入井数量', summary.injectorCount], ['生产井数量', summary.producerCount], ['去重井数', summary.uniqueWellCount],
+    ['累计注汽量', summary.cumulativeSteam], ['期初日产油合计', summary.initialTotalOil], ['最新日产油合计', summary.latestTotalOil], ['日产油合计变化', summary.totalOilChange], ['已评价次数', summary.evaluatedCount],
   ] : [];
   return <section id="project-panel-overview" role="tabpanel" aria-labelledby="project-tab-overview" className="mt-4">
-    <div className="grid gap-2 sm:grid-cols-2"><label>汇总开始日期<input aria-label="汇总开始日期" className="field-control" type="date" value={range.start} onInput={(event) => { const value = event.currentTarget.value; setRange((current) => ({ ...current, start: value })); }}/></label><label>汇总结束日期<input aria-label="汇总结束日期" className="field-control" type="date" value={range.end} onInput={(event) => { const value = event.currentTarget.value; setRange((current) => ({ ...current, end: value })); }}/></label></div>
+    <div className="grid gap-2 sm:grid-cols-2"><label>汇总开始日期<input aria-label="汇总开始日期" className="field-control" type="date" value={range.start} onInput={(event) => { const value = event.currentTarget.value; setRange((current) => ({ ...current, start: value })); setEditVersion((version) => version + 1); }}/></label><label>汇总结束日期<input aria-label="汇总结束日期" className="field-control" type="date" value={range.end} onInput={(event) => { const value = event.currentTarget.value; setRange((current) => ({ ...current, end: value })); setEditVersion((version) => version + 1); }}/></label></div>
     {rangeError && <p role="alert" className="mt-2 text-sm text-red-700">{rangeError}</p>}
     {loading && <p className="mt-3 text-sm text-slate-500">正在加载项目汇总…</p>}
     {error && <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"><p>{error}</p><button type="button" className="mt-2" onClick={() => setRetryKey((value) => value + 1)}>重试</button></div>}
-    {!loading && !error && summary && <><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} className="rounded border border-slate-200 p-3"><span className="text-sm text-slate-500">{label}</span><b className="mt-1 block">{displayNumber(value)}</b></div>)}</div><p className="mt-3 text-sm text-slate-500">统计范围：{summary.range?.start || summary.start || range.start} 至 {summary.range?.end || summary.end || range.end} · 查询时间：{summary.generatedAt || '暂无数据'}</p></>}
+    {!loading && !error && summary && <><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} className="rounded border border-slate-200 p-3"><span className="text-sm text-slate-500">{label}</span><b className="mt-1 block">{displayNumber(value)}</b></div>)}</div><div className="mt-3 rounded border border-slate-200 p-3 text-sm"><span className="text-slate-500">最新评价结论</span><p className="mt-1">{typeof summary.latestEvaluationConclusion === 'string' && summary.latestEvaluationConclusion.trim() ? summary.latestEvaluationConclusion : '暂无数据'}</p></div><p className="mt-3 text-sm text-slate-500">统计范围：{summary.range?.start || summary.start || range.start} 至 {summary.range?.end || summary.end || range.end} · 最新可用数据日期：{summary.latestAvailableDate || '暂无数据'} · 查询时间：{summary.generatedAt || '暂无数据'}</p></>}
     {!loading && !error && !summary && !rangeError && <p className="mt-3 text-sm text-slate-500">暂无汇总数据</p>}
   </section>;
 }

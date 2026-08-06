@@ -256,7 +256,10 @@ export type ProjectSummary = {
   producerCount: number;
   uniqueWellCount: number;
   cumulativeSteam: number | null;
+  initialTotalOil: number | null;
   latestTotalOil: number | null;
+  totalOilChange: number | null;
+  latestAvailableDate: string | null;
   evaluatedCount: number;
   latestEvaluationConclusion: string | null;
 };
@@ -295,41 +298,73 @@ async function projectCumulativeSteam(db: DatabaseLike, projectId: number, start
   return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
 }
 
-async function projectLatestTotalOil(db: DatabaseLike, projectId: number, end: string): Promise<number | null> {
+async function projectOilTotals(db: DatabaseLike, projectId: number, start: string, end: string): Promise<{ initial: number | null; latest: number | null; change: number | null }> {
   const rows = await db.all(`WITH ranked_dates AS (
       SELECT UPPER(TRIM(jh)) AS normalizedWellNo, rq AS date, oil,
         ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(jh)), rq ORDER BY rowid DESC) AS date_rank
       FROM production WHERE UPPER(TRIM(jh)) IN (
         SELECT DISTINCT UPPER(TRIM(production_well)) FROM channeling_relations WHERE project_id = ?
-      ) AND rq <= ?
+      ) AND rq BETWEEN ? AND ?
     ), canonical_production AS (
       SELECT normalizedWellNo, date, oil FROM ranked_dates WHERE date_rank = 1
-    ), ranked_oil AS (
-      SELECT normalizedWellNo, oil,
-        ROW_NUMBER() OVER (PARTITION BY normalizedWellNo ORDER BY date DESC) AS oil_rank
-      FROM canonical_production WHERE typeof(oil) IN ('integer', 'real')
-    ) SELECT oil FROM ranked_oil WHERE oil_rank = 1`, [projectId, end]);
-  const values = rows.map((row) => finiteNumber(row.oil)).filter((value): value is number => value !== null);
-  return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+    ) SELECT normalizedWellNo, date, oil FROM canonical_production
+      WHERE typeof(oil) IN ('integer', 'real') ORDER BY normalizedWellNo, date`, [projectId, start, end]);
+  const byWell = new Map<string, number[]>();
+  for (const row of rows) {
+    const value = finiteNumber(row.oil);
+    if (value === null) continue;
+    const values = byWell.get(row.normalizedWellNo) ?? [];
+    values.push(value);
+    byWell.set(row.normalizedWellNo, values);
+  }
+  if (!byWell.size) return { initial: null, latest: null, change: null };
+  const initial = [...byWell.values()].reduce((sum, values) => sum + values[0], 0);
+  const latest = [...byWell.values()].reduce((sum, values) => sum + values[values.length - 1], 0);
+  return { initial, latest, change: latest - initial };
 }
 
-export async function getProjectSummary(db: DatabaseLike, projectId: number, start: string, end: string): Promise<ProjectSummary> {
-  validateMetricRange(start, end);
+async function projectLatestAvailableDate(db: DatabaseLike, projectId: number): Promise<string | null> {
+  const row = await db.get(`SELECT MAX(date) AS latestAvailableDate FROM (
+      SELECT MAX(CASE WHEN rq GLOB '????-??-??' AND date(rq) = rq THEN rq END) AS date FROM production WHERE UPPER(TRIM(jh)) IN (
+        SELECT DISTINCT UPPER(TRIM(production_well)) FROM channeling_relations WHERE project_id = ?
+      )
+      UNION ALL
+      SELECT MAX(CASE
+        WHEN end_date GLOB '????-??-??' AND date(end_date) = end_date THEN end_date
+        WHEN start_date GLOB '????-??-??' AND date(start_date) = start_date THEN start_date
+      END) AS date FROM injection_stage_rows WHERE UPPER(TRIM(well_no)) IN (
+        SELECT DISTINCT UPPER(TRIM(injection_well)) FROM channeling_relations WHERE project_id = ?
+      )
+    )`, [projectId, projectId]);
+  return calendarDate(row?.latestAvailableDate) ? row.latestAvailableDate : null;
+}
+
+function shanghaiBusinessDate(now: Date): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+export async function getProjectSummary(db: DatabaseLike, projectId: number, start?: string, end?: string, now = new Date()): Promise<ProjectSummary> {
+  if ((start === undefined) !== (end === undefined)) throw new Error('date range is invalid');
   if (!await db.get('SELECT id FROM channeling_projects WHERE id = ?', [projectId])) throw new Error('Project not found');
+  const latestAvailableDate = await projectLatestAvailableDate(db, projectId);
+  const resolvedEnd = end ?? latestAvailableDate ?? shanghaiBusinessDate(now);
+  const resolvedStart = start ?? shiftDate(resolvedEnd, -29);
+  validateMetricRange(resolvedStart, resolvedEnd);
   const relations = await db.all('SELECT * FROM channeling_relations WHERE project_id = ? ORDER BY id ASC', [projectId]);
   const injectors = [...new Map(relations.map((row) => [normalizeMetricWellNo(row.injection_well), row.injection_well] as const)).values()];
   const producers = [...new Map(relations.map((row) => [normalizeMetricWellNo(row.production_well), row.production_well] as const)).values()];
-  const [cumulativeSteam, latestTotalOil, evaluations] = await Promise.all([
-    projectCumulativeSteam(db, projectId, start, end),
-    projectLatestTotalOil(db, projectId, end),
+  const [cumulativeSteam, oilTotals, evaluations] = await Promise.all([
+    projectCumulativeSteam(db, projectId, resolvedStart, resolvedEnd),
+    projectOilTotals(db, projectId, resolvedStart, resolvedEnd),
     evaluationSummary(db, projectId),
   ]);
   const allWells = new Set([...injectors, ...producers].map(normalizeMetricWellNo));
   return {
     projectId,
-    start,
-    end,
-    range: { start, end },
+    start: resolvedStart,
+    end: resolvedEnd,
+    range: { start: resolvedStart, end: resolvedEnd },
     generatedAt: new Date().toISOString(),
     relationCount: relations.length,
     activeRelationCount: relations.filter((relation) => relation.status !== 'released').length,
@@ -338,7 +373,10 @@ export async function getProjectSummary(db: DatabaseLike, projectId: number, sta
     producerCount: producers.length,
     uniqueWellCount: allWells.size,
     cumulativeSteam,
-    latestTotalOil,
+    initialTotalOil: oilTotals.initial,
+    latestTotalOil: oilTotals.latest,
+    totalOilChange: oilTotals.change,
+    latestAvailableDate,
     evaluatedCount: evaluations.count,
     latestEvaluationConclusion: evaluations.conclusion,
   };
