@@ -39,6 +39,10 @@ const uploadPreview = async (host: HTMLElement) => {
   Object.defineProperty(input, 'files', { configurable: true, value: [file] });
   await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
 };
+const openRelations = async (host: HTMLElement) => {
+  const tab = [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === '关系清单') as HTMLButtonElement;
+  await act(async () => tab.click());
+};
 
 test('preview selects the current project when projects finish loading after upload', async () => {
   const dom = setupDom();
@@ -72,6 +76,7 @@ test('every visible relation row exposes the detail and tracking callback', asyn
   const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); let opened = 0;
   globalThis.fetch = (async (input) => { const url = String(input); if (url === '/api/channeling-projects') return payload([project]); if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url.includes('/relations')) return payload([relation('注1', 'steam'), relation('注2', 'nitrogen')]); if (url.includes('/relation-imports')) return payload([]); throw new Error(url); }) as typeof fetch;
   await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest', onOpenRelation: (id: number) => { opened = id; } })));
+  await openRelations(host);
   const buttons = [...host.querySelectorAll('button')].filter((item) => item.textContent === '查看详情/跟踪记录'); assert.equal(buttons.length, 2);
   await act(async () => buttons[1].click()); assert.equal(opened, 2);
   await act(async () => root.unmount()); dom.window.close();
@@ -133,6 +138,7 @@ test('an older relation response cannot replace the latest type-filter result', 
   }) as typeof fetch;
 
   await act(async () => { root.render(createElement(ChannelingProjectManagement, { role: 'guest' })); });
+  await openRelations(host);
   const filter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement;
   await act(async () => { filter.value = 'nitrogen'; filter.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => { nitrogen.resolve(await payload([relation('氮井', 'nitrogen')])); await nitrogen.promise; });
@@ -166,11 +172,13 @@ test('switching projects clears prior relation and import actions before the new
   }) as typeof fetch;
 
   await act(async () => { root.render(createElement(ChannelingProjectManagement, { role: 'admin' })); });
+  await openRelations(host);
   assert.match(host.textContent || '', /旧项目井/);
   assert.match(host.textContent || '', /旧项目关系\.xlsx/);
 
   const projectButton = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes('第二项目')) as HTMLButtonElement;
   await act(async () => { projectButton.click(); });
+  await openRelations(host);
   assert.doesNotMatch(host.textContent || '', /旧项目井/);
   assert.doesNotMatch(host.textContent || '', /旧项目关系\.xlsx/);
   assert.equal([...host.querySelectorAll('button')].some((item) => item.textContent === '确认导入'), false, 'stale import action is removed while the next project loads');
@@ -203,6 +211,7 @@ test('a delayed confirmation cannot restore the project or type filter active wh
   await act(async () => { confirm.click(); });
   const secondProjectButton = [...host.querySelectorAll('button')].find((item) => item.textContent?.includes('第二项目')) as HTMLButtonElement;
   await act(async () => { secondProjectButton.click(); });
+  await openRelations(host);
   const typeFilter = host.querySelector('select[aria-label="注窜类型筛选"]') as HTMLSelectElement;
   await act(async () => { typeFilter.value = 'nitrogen'; typeFilter.dispatchEvent(new Event('change', { bubbles: true })); });
   assert.match(host.textContent || '', /当前氮气井/);
