@@ -170,12 +170,13 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
         body: JSON.stringify({ block: editDraft.block, owner: editDraft.owner, updatedAt: detail.updatedAt }),
       });
       if (!mounted.current || updateMutationToken.current !== mutationToken || selectedId !== wellId) return;
-      setDetail(updated);
+      const mergedDetail = { ...detail, ...updated };
+      setDetail(mergedDetail);
       setProfiles((current) => {
         const existing = current.some((item) => item.id === updated.id);
         return existing ? current.map((item) => item.id === updated.id ? { ...item, ...updated } : item) : [updated, ...current];
       });
-      setEditDraft({ block: updated.block, owner: updated.owner });
+      setEditDraft({ block: mergedDetail.block, owner: mergedDetail.owner });
       setUpdateSuccess('档案已更新');
     } catch (error) {
       if (mounted.current && updateMutationToken.current === mutationToken && selectedId === wellId) setUpdateError(errorText(error, '单井档案更新失败'));

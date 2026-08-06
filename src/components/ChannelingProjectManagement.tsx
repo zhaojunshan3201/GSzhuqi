@@ -223,7 +223,16 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     return payload.data;
   };
 
-  const save = async (changes: Record<string, unknown>) => { if (!selected) return; try { await request(`/api/channeling-projects/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) }); await load(); setMessage('治理台账已保存。', 'success'); } catch (error: any) { setMessage(error.message); } };
+  const save = async (changes: Record<string, unknown>) => {
+    if (!selected) return;
+    const projectId = selected.id;
+    try {
+      await request(`/api/channeling-projects/${projectId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) });
+      if (viewSelectionRef.current.selectedId !== projectId) return;
+      await load();
+      if (viewSelectionRef.current.selectedId === projectId) setMessage('治理台账已保存。', 'success');
+    } catch (error: any) { if (viewSelectionRef.current.selectedId === projectId) setMessage(error.message); }
+  };
   const create = async (event: React.FormEvent) => { event.preventDefault(); try { const created = await request('/api/channeling-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProject) }); setNewProject({ projectName: '', block: '', owner: '' }); await load(); selectProject(created.id); setPreviewProjectId((id) => id ?? created.id); } catch (error: any) { setMessage(error.message); } };
   const createRelation = async (event: React.FormEvent) => {
     event.preventDefault(); if (!selected) return;

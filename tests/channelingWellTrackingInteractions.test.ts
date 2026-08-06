@@ -323,8 +323,10 @@ test('admin updates only block and owner with the optimistic token and duplicate
   await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
   assert.equal(patches, 1); assert.deepEqual(body, { block: '新区块', owner: '新负责人', updatedAt: '2026-08-01T00:00:00Z' });
   const updated = { ...profile(1, '维护井'), block: '新区块', owner: '新负责人', updatedAt: '2026-08-02T00:00:00Z' };
-  await act(async () => { pending.resolve(await response(updated)); await pending.promise; });
+  const { roles: _roles, relationCount: _relationCount, projectCount: _projectCount, ...sparsePatchResponse } = updated;
+  await act(async () => { pending.resolve(await response(sparsePatchResponse)); await pending.promise; });
   assert.match(host.textContent || '', /档案已更新/); assert.equal(host.querySelectorAll('[data-well-id="1"]').length, 1); assert.match(host.querySelector('[data-well-id="1"]')?.textContent || '', /新区块 · 新负责人/);
+  assert.match(host.textContent || '', /关联关系数1/);
   assert.equal((form.elements.namedItem('block') as HTMLInputElement).value, '新区块');
   await cleanup(root, dom);
 });

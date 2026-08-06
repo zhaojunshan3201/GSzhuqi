@@ -27,6 +27,7 @@ const setupDom = () => {
     HTMLInputElement: { configurable: true, value: dom.window.HTMLInputElement },
     Event: { configurable: true, value: dom.window.Event },
     File: { configurable: true, value: dom.window.File },
+    FormData: { configurable: true, value: dom.window.FormData },
     localStorage: { configurable: true, value: dom.window.localStorage },
     IS_REACT_ACT_ENVIRONMENT: { configurable: true, value: true },
   });
@@ -405,5 +406,22 @@ test('a delayed project delete cannot clear or reload the project selected meanw
   const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('当前项目')) as HTMLButtonElement; await act(async () => second.click());
   await act(async () => { pending.resolve(await payload(undefined)); await pending.promise; });
   assert.ok(second.className.includes('bg-red-50')); assert.equal(projectLoads, 1); assert.match(host.textContent || '', /当前项目/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('a delayed governance save cannot reload or acknowledge after switching projects', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const pending = deferred<Response>(); let projectLoads = 0;
+  const secondProject = { ...project, id: 8, projectName: '当前项目' };
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input); if (url === '/api/channeling-projects' && !init?.method) { projectLoads++; return payload([project, secondProject]); }
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url === '/api/channeling-projects/7' && init?.method === 'PATCH') return pending.promise;
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]); throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const save = [...host.querySelectorAll('button')].find((button) => button.textContent === '保存治理信息') as HTMLButtonElement;
+  await act(async () => save.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('当前项目')) as HTMLButtonElement; await act(async () => second.click());
+  await act(async () => { pending.resolve(await payload(project)); await pending.promise; });
+  assert.ok(second.className.includes('bg-red-50')); assert.equal(projectLoads, 1); assert.doesNotMatch(host.textContent || '', /治理台账已保存/);
   await act(async () => root.unmount()); dom.window.close();
 });
