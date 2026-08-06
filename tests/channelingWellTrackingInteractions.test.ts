@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
-import { act, createElement } from 'react';
+import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ChannelingWellTracking } from '../src/components/ChannelingWellTracking.tsx';
 import type { ChannelingWellProfile, WellMetrics } from '../src/lib/channelingTrackingApi.ts';
@@ -52,6 +52,29 @@ test('admin can explicitly search and create or reuse a profile without duplicat
   assert.equal(posts, 1);
   assert.match(host.textContent || '', /H609/);
   assert.equal(host.querySelectorAll('[data-well-id="2"]').length, 1);
+  await cleanup(root, dom);
+});
+
+test('creation succeeds after StrictMode replays mount effects', async () => {
+  const { dom, host, root } = setup();
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (init?.method === 'POST') return response(profile(7, '严格井'));
+    if (url.startsWith('/api/channeling-wells?')) return response([]);
+    if (url.includes('/metrics?')) return response(metrics([]));
+    if (url.endsWith('/relations')) return response([]);
+    return response(profile(7, '严格井'));
+  }) as typeof fetch;
+  await act(async () => { root.render(createElement(StrictMode, null, createElement(ChannelingWellTracking, { role: 'admin' }))); });
+  const form = host.querySelector('form[aria-label="新建或复用单井档案"]') as HTMLFormElement;
+  await act(async () => { change(form.elements.namedItem('wellNo') as HTMLInputElement, '严格井'); change(form.elements.namedItem('block') as HTMLInputElement, '高6'); change(form.elements.namedItem('owner') as HTMLInputElement, '严'); });
+  await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  assert.equal(host.querySelectorAll('[data-well-id="7"]').length, 1);
+  assert.match(host.textContent || '', /严格井/);
+  assert.equal((form.elements.namedItem('wellNo') as HTMLInputElement).value, '');
+  assert.equal((form.elements.namedItem('block') as HTMLInputElement).value, '');
+  assert.equal((form.elements.namedItem('owner') as HTMLInputElement).value, '');
+  assert.equal((form.querySelector('button[type="submit"]') as HTMLButtonElement).disabled, false);
   await cleanup(root, dom);
 });
 

@@ -51,10 +51,13 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
     creatingRef.current = false;
     setCreating(false);
   }, [selectedId]);
-  useEffect(() => () => {
-    mounted.current = false;
-    createMutationToken.current++;
-    creatingRef.current = false;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      createMutationToken.current++;
+      creatingRef.current = false;
+    };
   }, []);
 
   const loadProfiles = useCallback(async (search: string) => {
