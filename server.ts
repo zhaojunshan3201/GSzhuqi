@@ -6689,19 +6689,21 @@ app.post("/api/register", async (req, res) => {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    void ensureStartupWarmTasks().catch((err: any) => {
-      console.error("预热任务失败:", err.message);
-    });
-    setTimeout(() => {
-      void ensureStartupFormulaRepairTask().catch((err: any) => {
-        console.error("公式修复失败:", err.message);
+    if (!LOCAL_ONLY_MODE) {
+      void ensureStartupWarmTasks().catch((err: any) => {
+        console.error("预热任务失败:", err.message);
       });
-    }, 300);
-    setTimeout(() => {
-      void ensureStartupSyncTask().catch((err: any) => {
-        console.error("同步任务失败:", err.message);
-      });
-    }, 1500);
+      setTimeout(() => {
+        void ensureStartupFormulaRepairTask().catch((err: any) => {
+          console.error("公式修复失败:", err.message);
+        });
+      }, 300);
+      setTimeout(() => {
+        void ensureStartupSyncTask().catch((err: any) => {
+          console.error("同步任务失败:", err.message);
+        });
+      }, 1500);
+    }
   });
 }
 
