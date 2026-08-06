@@ -165,6 +165,22 @@ test('channeling tracking, well, and metric APIs enforce their HTTP contracts', 
     assert.equal(evaluation.eventType, 'evaluated'); assert.equal(evaluation.createdBy, 'admin');
     assert.equal(evaluation.metricsSnapshot.comparison.oil.afterAverage, 20);
     assert.deepEqual(evaluation.links, [{ subjectType: 'project', subjectId: project.id }, { subjectType: 'relation', subjectId: relation.id }, { subjectType: 'well', subjectId: injector.id }, { subjectType: 'well', subjectId: producer.id }]);
+
+    const protectedRelationDelete = await request(`/api/channeling-relations/${relation.id}`, { method: 'DELETE', headers: admin });
+    assert.equal(protectedRelationDelete.status, 409);
+    const releaseResponse = await request(`/api/channeling-relations/${relation.id}`, { method: 'PATCH', headers: admin, body: JSON.stringify({ status: 'released' }) });
+    assert.equal(releaseResponse.status, 200);
+    assert.equal((await json(releaseResponse)).status, 'released');
+    const protectedProjectDelete = await request(`/api/channeling-projects/${project.id}`, { method: 'DELETE', headers: admin });
+    assert.equal(protectedProjectDelete.status, 409);
+    const relationHistoryResponse = await request(`/api/channeling-tracking-events?subjectType=relation&subjectId=${relation.id}`);
+    assert.equal(relationHistoryResponse.status, 200);
+    const relationHistory = await json(relationHistoryResponse);
+    assert.ok(relationHistory.some((item: any) => item.id === evaluation.id));
+    assert.ok(relationHistory.some((item: any) => item.eventType === 'relation_released'));
+    assert.equal((await request(`/api/channeling-wells/${injector.id}`)).status, 200);
+    assert.equal((await request(`/api/channeling-wells/${producer.id}`)).status, 200);
+
     const evaluationCountBeforeFailure = (await db.get("SELECT COUNT(*) AS count FROM channeling_tracking_events WHERE event_type = 'evaluated'")).count;
     await writeFile(evaluationPauseFile, 'pause');
     const forcedEvaluationRequest = request(`/api/channeling-relations/${relation.id}/evaluations`, { method: 'POST', headers: { ...admin, 'x-channeling-pause-evaluation': '1', 'x-channeling-force-evaluation-after-event': '1' }, body: JSON.stringify({ occurredOn: '2026-01-04', conclusion: 'must rollback', owner: 'alice', range: { beforeStart: '2026-01-01', splitDate: '2026-01-02', afterEnd: '2026-01-03' } }) });

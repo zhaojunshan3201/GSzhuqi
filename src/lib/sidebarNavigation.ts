@@ -79,8 +79,8 @@ export const sidebarNavigationGroups: SidebarNavigationGroup[] = [
       { tab: 'measureAnalysis', label: '效果评价', icon: 'MessageSquare' },
       { tab: 'injectionOptimization', label: '注汽优化预测', icon: 'TrendingUp' },
       { tab: 'injectionOperationReports', label: '运行报告', icon: 'FileSpreadsheet' },
-      { tab: 'channelingProjectManagement', label: '\u6ce8\u7a9c\u9879\u76ee\u53f0\u8d26', icon: 'GitBranch' },
-      { tab: 'channelingWellTracking', label: '\u5355\u4e95\u8ddf\u8e2a\u53f0\u8d26', icon: 'Database' },
+      { tab: 'channelingProjectManagement', label: '注窜项目台账', icon: 'GitBranch' },
+      { tab: 'channelingWellTracking', label: '单井跟踪台账', icon: 'Database' },
     ],
   },
   {

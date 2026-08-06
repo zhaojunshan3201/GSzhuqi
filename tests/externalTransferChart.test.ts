@@ -128,8 +128,9 @@ test('places each dual-line value label above or below by its relative height', 
     { name: '外输', metric: 'transfer' },
   ]);
 
-  assert.equal(option.series[0].data[0].label.position, 'bottom');
-  assert.equal(option.series[1].data[0].label.position, 'top');
-  assert.equal(option.series[0].data[1].label.position, 'top');
-  assert.equal(option.series[1].data[1].label.position, 'bottom');
+  const point = (seriesIndex: number, pointIndex: number) => option.series[seriesIndex].data[pointIndex] as { label: { position: string } };
+  assert.equal(point(0, 0).label.position, 'bottom');
+  assert.equal(point(1, 0).label.position, 'top');
+  assert.equal(point(0, 1).label.position, 'top');
+  assert.equal(point(1, 1).label.position, 'bottom');
 });

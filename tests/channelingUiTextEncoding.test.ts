@@ -6,8 +6,14 @@ import ts from 'typescript';
 
 const sourceFiles = [
   'src/App.tsx',
+  'src/components/ChannelingTimeline.tsx',
+  'src/components/ChannelingWellTracking.tsx',
+  'src/components/ChannelingRelationDetail.tsx',
+  'src/components/ChannelingWorkspace.tsx',
   'src/components/ChannelingProjectManagement.tsx',
   'src/components/OilWellMap.tsx',
+  'src/lib/channelingTrackingApi.ts',
+  'src/lib/sidebarNavigation.ts',
 ];
 
 const readSource = (file: string) => readFileSync(resolve(process.cwd(), file), 'utf8');
@@ -34,6 +40,10 @@ test('channeling UI source has no replacement characters or placeholder runs', (
 
 test('channeling UI exposes the primary Chinese labels', () => {
   const projectManagement = readSource('src/components/ChannelingProjectManagement.tsx');
+  const timeline = readSource('src/components/ChannelingTimeline.tsx');
+  const wellTracking = readSource('src/components/ChannelingWellTracking.tsx');
+  const relationDetail = readSource('src/components/ChannelingRelationDetail.tsx');
+  const navigation = readSource('src/lib/sidebarNavigation.ts');
   const oilWellMap = readSource('src/components/OilWellMap.tsx');
 
   assert.match(projectManagement, /注窜项目台账/);
@@ -44,6 +54,16 @@ test('channeling UI exposes the primary Chinese labels', () => {
   assert.match(projectManagement, /重复关系/);
   assert.match(projectManagement, /自身关系/);
   assert.match(projectManagement, /无效行/);
+  assert.match(projectManagement, /查看详情\/跟踪记录/);
+  assert.match(wellTracking, /单井跟踪台账/);
+  assert.match(navigation, /单井跟踪台账/);
+  assert.match(relationDetail, /效果评价/);
+  assert.match(timeline, /发现窜扰/);
+  assert.match(timeline, /计划措施/);
+  assert.match(timeline, /措施执行/);
+  assert.match(timeline, /效果评价/);
+  assert.match(timeline, /复查/);
+  assert.match(timeline, /再次发生/);
   assert.match(oilWellMap, /关系图层/);
 });
 

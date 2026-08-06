@@ -43,6 +43,7 @@ test('workspace navigates project to relation to either well and back coherently
   const host = document.getElementById('root')!; const root = createRoot(host);
   const click = async (text: string) => { const button = [...host.querySelectorAll('button')].find((node) => node.textContent?.includes(text)); assert.ok(button, text); await act(async () => button.click()); };
   await act(async () => root.render(createElement(ChannelingWorkspace, { role: 'guest', initialView: 'projects' })));
+  await click('关系清单');
   await click('查看详情/跟踪记录'); assert.match(host.textContent || '', /注入井：注7/);
   await click('生产井：采7'); assert.match(host.textContent || '', /单井跟踪台账/); assert.match(host.textContent || '', /采7/);
   await click('关联关系'); await click('查看关系详情'); assert.ok(host.querySelector('section[aria-label="注窜关系详情"]'));

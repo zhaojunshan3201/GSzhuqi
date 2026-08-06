@@ -239,9 +239,13 @@ test('generates constrained next-month and year-end injection plans', { timeout:
       await insertStage('ACTUAL', 1, '2025-01-01', '2025-01-11');
       await insertStage('PREDICTED', 1, '2025-01-01', '2025-01-11');
       await insertStage('PREDICTED', 2, '2025-09-08', '2025-09-18');
+      const now = new Date();
+      const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      const targetDay = Math.round((nextMonthStart.getTime() - Date.parse('2025-09-18T00:00:00Z')) / 86_400_000);
+      const previousTargetDate = new Date(Date.parse('2025-01-11T00:00:00Z') + targetDay * 86_400_000).toISOString().slice(0, 10);
       for (const [wellNo, date, oil] of [
         ['IMPORTED', '2026-07-20', 0.8], ['ACTUAL', '2026-07-20', 1.2],
-        ['PREDICTED', '2025-01-21', 2], ['PREDICTED', '2025-09-28', 1], ['PREDICTED', '2025-11-24', 2],
+        ['PREDICTED', '2025-01-21', 2], ['PREDICTED', '2025-09-28', 1], ['PREDICTED', previousTargetDate, 2],
       ]) await db.run('INSERT INTO production (jh, rq, oil) VALUES (?, ?, ?)', [wellNo, date, oil]);
 
       const invalid = await fetch(`http://127.0.0.1:${port}/api/injection-selection/plans/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'invalid' }) });

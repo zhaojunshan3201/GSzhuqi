@@ -2300,7 +2300,7 @@ export default function App() {
   const [wellTemperatureWellFilter, setWellTemperatureWellFilter] = useState('');
 
   const [measures, setMeasures] = useState<MeasureRow[]>([]);
-  const [measureFilterMeta, setMeasureFilterMeta] = useState<MeasureFiltersMeta>({ blocks: [], stations: [], statuses: [] });
+  const [measureFilterMeta, setMeasureFilterMeta] = useState<MeasureFiltersMeta>({ blocks: [], stations: [], statuses: [], years: [] });
   const [measuresLoading, setMeasuresLoading] = useState(false);
   const [measuresSaving, setMeasuresSaving] = useState(false);
   const [measureImporting, setMeasureImporting] = useState(false);
@@ -2825,7 +2825,8 @@ export default function App() {
         setMeasureFilterMeta({
           blocks: Array.isArray(data.filters?.blocks) ? data.filters.blocks : [],
           stations: Array.isArray(data.filters?.stations) ? data.filters.stations : [],
-          statuses: Array.isArray(data.filters?.statuses) ? data.filters.statuses : []
+          statuses: Array.isArray(data.filters?.statuses) ? data.filters.statuses : [],
+          years: Array.isArray(data.filters?.years) ? data.filters.years : []
         });
         setMeasureAvailableYears(Array.isArray(data.filters?.years) ? data.filters.years : []);
       } else if (!silent) {

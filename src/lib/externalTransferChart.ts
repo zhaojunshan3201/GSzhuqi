@@ -82,7 +82,10 @@ export function getExternalTransferChartOption<T extends string>(
         const value = row[item.metric];
         if (type !== 'line' || lineSeriesCount < 2 || value === null) return value;
 
-        const lineValues = lineSeries.map((line) => row[line.metric]).filter((lineValue): lineValue is number => lineValue !== null);
+        const lineValues = lineSeries.flatMap((line) => {
+          const lineValue = row[line.metric];
+          return typeof lineValue === 'number' ? [lineValue] : [];
+        });
         return { value, label: valueLabel(value >= Math.max(...lineValues) ? 'top' : 'bottom') };
       });
 

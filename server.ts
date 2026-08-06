@@ -4139,7 +4139,7 @@ async function startServer() {
         localDb.all("SELECT jh, current_round_transfer_time, detail_json, batch_year FROM measure_tracking WHERE batch_year = ?", [targetYear]),
       ]);
       const production = productionRows as ProductionOilPoint[];
-      const importedWellNos = new Set(importedRows.map((row: any) => String(row.wellNo).trim()));
+      const importedWellNos = new Set<string>(importedRows.map((row: any) => String(row.wellNo).trim()));
       const actualStarts = actualInjectionStartsByWell(trackingRows);
       const latestActualOil = latestActualOilByWell(production);
       const candidates = buildSelectionCandidates(stageRows, dailyRows);
@@ -5583,7 +5583,7 @@ app.post("/api/register", async (req, res) => {
         "SELECT report_date, occupancy_type, SUM(affected_oil) as total_oil FROM occupancy_records WHERE report_date IS NOT NULL AND report_date != '' GROUP BY report_date, occupancy_type ORDER BY report_date ASC"
       );
 
-      const labels = Array.from(new Set((rows || []).map((r: any) => r.report_date))).sort();
+      const labels = Array.from(new Set<string>((rows || []).map((r: any) => String(r.report_date)))).sort();
       const typeSet = new Map<string, Map<string, number>>();
       for (const r of (rows || [])) {
         if (!typeSet.has(r.occupancy_type)) typeSet.set(r.occupancy_type, new Map());
@@ -5609,7 +5609,7 @@ app.post("/api/register", async (req, res) => {
         "SELECT block, report_date, occupancy_type, SUM(affected_oil) as total_oil FROM occupancy_records WHERE block IS NOT NULL AND block != '' AND report_date IS NOT NULL AND report_date != '' GROUP BY block, report_date, occupancy_type ORDER BY block, report_date ASC"
       );
 
-      const labels = Array.from(new Set((rows || []).map((r: any) => r.report_date))).sort();
+      const labels = Array.from(new Set<string>((rows || []).map((r: any) => String(r.report_date)))).sort();
       const blockMap = new Map<string, Map<string, Map<string, number>>>();
       for (const r of (rows || [])) {
         if (!blockMap.has(r.block)) blockMap.set(r.block, new Map());
