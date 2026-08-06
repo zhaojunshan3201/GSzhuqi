@@ -68,6 +68,7 @@ test('places the independent well ledger immediately after the channeling projec
   const projectIndex = items.findIndex((item) => item.tab === 'channelingProjectManagement');
   assert.equal(items[projectIndex + 1]?.tab, 'channelingWellTracking');
   assert.equal(items[projectIndex + 1]?.label, '单井跟踪台账');
+  assert.equal(items[projectIndex + 1]?.icon, 'Database');
 });
 
 test('assigns every visible injection workflow tab to its sidebar group', () => {

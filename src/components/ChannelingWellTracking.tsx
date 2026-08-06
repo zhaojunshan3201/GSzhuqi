@@ -37,10 +37,25 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
   const [createError, setCreateError] = useState('');
   const [creating, setCreating] = useState(false);
   const creatingRef = useRef(false);
+  const createMutationToken = useRef(0);
+  const mounted = useRef(true);
+  const mutationSelection = useRef<number | undefined>(selectedWellId);
   const listGeneration = useRef(0);
   const detailGeneration = useRef(0);
 
   useEffect(() => { setSelectedId(selectedWellId); }, [selectedWellId]);
+  useEffect(() => {
+    if (mutationSelection.current === selectedId) return;
+    mutationSelection.current = selectedId;
+    createMutationToken.current++;
+    creatingRef.current = false;
+    setCreating(false);
+  }, [selectedId]);
+  useEffect(() => () => {
+    mounted.current = false;
+    createMutationToken.current++;
+    creatingRef.current = false;
+  }, []);
 
   const loadProfiles = useCallback(async (search: string) => {
     const generation = ++listGeneration.current; setListLoading(true); setListError('');
@@ -95,13 +110,19 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
 
   const search = (event: FormEvent) => { event.preventDefault(); void loadProfiles(query); };
   const createProfile = async (event: FormEvent) => {
-    event.preventDefault(); if (creatingRef.current) return; creatingRef.current = true; setCreating(true); setCreateError('');
+    event.preventDefault(); if (creatingRef.current) return;
+    const mutationToken = ++createMutationToken.current;
+    creatingRef.current = true; setCreating(true); setCreateError('');
     try {
       const created = await channelingRequest<ChannelingWellProfile>('/api/channeling-wells', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(createDraft) });
+      if (!mounted.current || createMutationToken.current !== mutationToken) return;
       setProfiles((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setSelectedId(created.id); setCreateDraft({ wellNo: '', block: '', owner: '' });
-    } catch (error) { setCreateError(errorText(error, '单井档案保存失败')); }
-    finally { creatingRef.current = false; setCreating(false); }
+    } catch (error) {
+      if (mounted.current && createMutationToken.current === mutationToken) setCreateError(errorText(error, '单井档案保存失败'));
+    } finally {
+      if (mounted.current && createMutationToken.current === mutationToken) { creatingRef.current = false; setCreating(false); }
+    }
   };
 
   const retryPart = (kind: 'detail' | 'metrics' | 'relations') => {
@@ -111,6 +132,8 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
   const roles = detail?.roles ?? metrics?.roles ?? [];
   const latestStage = metrics?.injection?.stages?.at(-1);
   const production = metrics?.production;
+  const hasInjectionData = Boolean(metrics?.injection && (metrics.injection.stages.length > 0 || metrics.injection.cumulativeSteam !== null));
+  const hasProductionData = Boolean(production && (production.latest?.date || production.rows?.length));
   return <section aria-label="单井跟踪台账" className="grid gap-5 lg:grid-cols-[300px_1fr]">
     <aside className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between"><h2 className="font-semibold text-slate-900">单井跟踪台账</h2>{onBack && <button type="button" onClick={onBack} className="text-sm text-emerald-700">返回</button>}</div>
@@ -133,11 +156,11 @@ export function ChannelingWellTracking({ role, selectedWellId, onOpenRelation, o
       {selectedId && <>
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">{detail?.wellNo || `单井 #${selectedId}`}</h2><p className="text-sm text-slate-500">{roles.length ? roles.map((item) => item === 'injector' ? '注汽井' : '采油井').join(' / ') : '暂未识别井角色'}</p></div></div>
         <nav aria-label="单井详情标签" className="my-4 flex flex-wrap gap-2">{([['overview', '概览'], ['metrics', '生产指标'], ['relations', '关联关系'], ['timeline', '跟踪记录']] as const).map(([key, label]) => <button key={key} type="button" onClick={() => setTab(key)} className={`rounded px-3 py-2 ${tab === key ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>{label}</button>)}</nav>
-        {tab === 'overview' && <div>{detailLoading && <p role="status">正在加载单井详情…</p>}{detailError && <p role="alert">{detailError} <button type="button" onClick={() => retryPart('detail')}>重试详情</button></p>}{detail && <dl className="grid gap-3 sm:grid-cols-2"><div><dt>井号</dt><dd>{detail.wellNo}</dd></div><div><dt>区块</dt><dd>{valueText(detail.block)}</dd></div><div><dt>负责人</dt><dd>{valueText(detail.owner)}</dd></div><div><dt>关联关系数</dt><dd>{valueText(detail.relationCount)}</dd></div></dl>}</div>}
+        {tab === 'overview' && <div className="space-y-4">{detailLoading && <p role="status">正在加载单井详情…</p>}{detailError && <p role="alert">{detailError} <button type="button" onClick={() => retryPart('detail')}>重试详情</button></p>}{detail && <dl className="grid gap-3 sm:grid-cols-2"><div><dt>井号</dt><dd>{detail.wellNo}</dd></div><div><dt>区块</dt><dd>{valueText(detail.block)}</dd></div><div><dt>负责人</dt><dd>{valueText(detail.owner)}</dd></div><div><dt>关联关系数</dt><dd>{valueText(detail.relationCount)}</dd></div></dl>}{metrics && <section aria-label="最新指标摘要" className="rounded border bg-slate-50 p-4"><h3 className="font-semibold">最新指标摘要</h3>{roles.includes('injector') && <p>{hasInjectionData ? `累计注汽量 ${valueText(metrics.injection?.cumulativeSteam)} · 最新周期 ${valueText(latestStage?.cycleNo)}` : '未找到注汽数据'}</p>}{roles.includes('producer') && <p>{hasProductionData ? `最新日产油 ${valueText(production?.latest?.oil)} · 最新日产液 ${valueText(production?.latest?.liquid)} · 最新含水 ${valueText(production?.latest?.waterCut)}` : '未找到生产数据'}</p>}</section>}</div>}
         {tab === 'metrics' && <div className="space-y-4">{metricsLoading && <p role="status">正在加载生产指标…</p>}{metricsError && <p role="alert">{metricsError} <button type="button" onClick={() => retryPart('metrics')}>重试指标</button></p>}{metrics && <>
           <p className="text-xs text-slate-500">查询时间 {metrics.queriedAt} · {metrics.range.start} 至 {metrics.range.end}</p>
-          {roles.includes('injector') && <section aria-label="注汽指标" className="rounded border p-4"><h3 className="font-semibold">注汽指标</h3><p>周期 {valueText(latestStage?.cycleNo)} · 累计注汽量 {valueText(metrics.injection?.cumulativeSteam)}</p><p>蒸汽量 {valueText(latestStage?.steamVolume)} · 温度 {valueText(latestStage?.temperature)} · 压力 {valueText(latestStage?.pressure)} · 干度 {valueText(latestStage?.dryness)} · 生产时数 {valueText(latestStage?.productionHours)}</p><p>结束日期 {valueText(latestStage?.endDate)}</p></section>}
-          {roles.includes('producer') && <section aria-label="采油井指标" className="rounded border p-4"><h3 className="font-semibold">采油井指标</h3><p>最新日产油 {valueText(production?.latest?.oil)} · 最新日产液 {valueText(production?.latest?.liquid)} · 最新含水 {valueText(production?.latest?.waterCut)}</p><p>7日均值 {valueText(production?.last7Days?.oil.average)}（油） / {valueText(production?.last7Days?.liquid.average)}（液） / {valueText(production?.last7Days?.waterCut.average)}（含水）</p><p>30日均值 {valueText(production?.last30Days?.oil.average)}（油） / {valueText(production?.last30Days?.liquid.average)}（液） / {valueText(production?.last30Days?.waterCut.average)}（含水）</p></section>}
+          {roles.includes('injector') && <section aria-label="注汽指标" className="rounded border p-4"><h3 className="font-semibold">注汽指标</h3>{hasInjectionData ? <><p>周期数 {valueText(metrics.injection?.cycleCount)} · 最新周期 {valueText(latestStage?.cycleNo)} · 累计注汽量 {valueText(metrics.injection?.cumulativeSteam)}</p><p>开始日期 {valueText(latestStage?.startDate)} · 结束日期 {valueText(latestStage?.endDate)}</p><p>蒸汽量 {valueText(latestStage?.steamVolume)} · 温度 {valueText(latestStage?.temperature)} · 压力 {valueText(latestStage?.pressure)} · 干度 {valueText(latestStage?.dryness)} · 生产时数 {valueText(latestStage?.productionHours)}</p></> : <p>未找到注汽数据</p>}</section>}
+          {roles.includes('producer') && <section aria-label="采油井指标" className="rounded border p-4"><h3 className="font-semibold">采油井指标</h3>{hasProductionData ? <><p>最新日产油 {valueText(production?.latest?.oil)} · 最新日产液 {valueText(production?.latest?.liquid)} · 最新含水 {valueText(production?.latest?.waterCut)}</p><p>7日均值 {valueText(production?.last7Days?.oil.average)}（油） / {valueText(production?.last7Days?.liquid.average)}（液） / {valueText(production?.last7Days?.waterCut.average)}（含水）</p><p>30日均值 {valueText(production?.last30Days?.oil.average)}（油） / {valueText(production?.last30Days?.liquid.average)}（液） / {valueText(production?.last30Days?.waterCut.average)}（含水）</p></> : <p>未找到生产数据</p>}</section>}
           {!roles.length && <p>暂无可展示的角色指标</p>}
         </>}</div>}
         {tab === 'relations' && <div>{relationsLoading && <p role="status">正在加载关联关系…</p>}{relationsError && <p role="alert">{relationsError} <button type="button" onClick={() => retryPart('relations')}>重试关系</button></p>}{!relationsLoading && !relationsError && relations.length === 0 && <p>暂无关联关系</p>}<div className="space-y-3">{relations.map((item) => <article key={item.id} className="rounded border p-4"><h3>{item.injectionWell} → {item.productionWell}</h3><p>{item.channelingType} · {item.status} · {item.project.name}</p><p>证据：{valueText(item.evidence)} · 置信度：{valueText(item.confidence)} · 负责人：{valueText(item.owner)}</p>{onOpenRelation && <button type="button" onClick={() => onOpenRelation(item.id)} className="mt-2 text-emerald-700 underline">查看关系详情</button>}</article>)}</div></div>}
