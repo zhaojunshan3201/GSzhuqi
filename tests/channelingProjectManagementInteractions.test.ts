@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
-import { act, createElement } from 'react';
+import { act, createElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChannelingProjectManagement } from '../src/components/ChannelingProjectManagement.tsx';
 
@@ -12,7 +12,7 @@ const deferred = <T>() => {
   return { promise, resolve, reject };
 };
 
-const payload = (data: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true, data }) } as Response);
+const payload = (data: unknown) => Promise.resolve(new Response(JSON.stringify({ success: true, data }), { status: 200, headers: { 'content-type': 'application/json' } }));
 const project = { id: 7, projectName: '测试项目', block: '一区', owner: '负责人', status: 'identified', governanceMeasure: '', plannedDate: null, actualDate: null, beforeMetric: null, afterMetric: null, closureEvidence: '', riskLevel: 'medium', estimatedLoss: null, affectedWellCount: null, affectedDailyOil: null, occupiedProduction: null, createdAt: '', updatedAt: '' };
 const preview = { id: 31, projectId: null, fileName: '关系.xlsx', channelingType: 'steam', status: 'preview', validCount: 1, duplicateCount: 0, selfRelationCount: 0, invalidCount: 0, createdAt: '', confirmedAt: null, valid: [{ rowNumber: 2, injectorWellNo: '注1', producerWellNo: '采1', channelingType: 'steam' }], duplicates: [], selfRelations: [], invalid: [] };
 const relation = (well: string, channelingType: 'steam' | 'nitrogen') => ({ id: channelingType === 'steam' ? 1 : 2, projectId: 7, channelingType, injectionWell: well, productionWell: `采-${well}`, reservoirLayer: 'S1', impactLevel: 'medium', confidence: .5, status: 'confirmed', source: 'manual', evidence: '证据', effectiveStartDate: '2026-08-05', effectiveEndDate: '2026-08-05', owner: '负责人', block: '一区', createdAt: '', updatedAt: '' });
@@ -365,7 +365,7 @@ test('server-derived delete capabilities disable hard deletes before any probing
   const tracked = { ...relation('跟踪井', 'steam'), canDelete: false, hasTrackingHistory: true };
   const clean = { ...relation('干净井', 'nitrogen'), canDelete: true, hasTrackingHistory: false };
   globalThis.fetch = (async (input, init) => {
-    const url = String(input); if (init?.method === 'DELETE') { deletes++; return payload(undefined); }
+    const url = String(input); if (init?.method === 'DELETE') { deletes++; return new Response(null, { status: 204 }); }
     if (url === '/api/channeling-projects') return payload([protectedProject]);
     if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
     if (url === '/api/channeling-projects/7/relations') return payload([tracked, clean]);
@@ -412,7 +412,7 @@ test('a delayed project delete cannot clear or reload the project selected meanw
   await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
   const remove = [...host.querySelectorAll('button')].find((button) => button.textContent === '删除项目') as HTMLButtonElement; await act(async () => remove.click());
   const second = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('当前项目')) as HTMLButtonElement; await act(async () => second.click());
-  await act(async () => { pending.resolve(await payload(undefined)); await pending.promise; });
+  await act(async () => { pending.resolve(new Response(null, { status: 204 })); await pending.promise; });
   assert.ok(second.className.includes('bg-red-50')); assert.equal(projectLoads, 1); assert.match(host.textContent || '', /当前项目/);
   await act(async () => root.unmount()); dom.window.close();
 });
@@ -589,4 +589,100 @@ test('failed manual relation creation unlocks the form and retains the submitted
   assert.ok([...form.querySelectorAll('input, select, button')].every((control) => !(control as HTMLInputElement).disabled));
   assert.match(host.textContent || '', /create failed/);
   await act(async () => root.unmount()); dom.window.close();
+});
+
+test('real 204 project deletion selects and reloads the remaining project without an error', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  Object.defineProperty(window, 'confirm', { configurable: true, value: () => true });
+  const remaining = { ...project, id: 8, projectName: 'remaining project' }; let loads = 0;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') { loads++; return payload(loads === 1 ? [project, remaining] : [remaining]); }
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7' && init?.method === 'DELETE') return new Response(null, { status: 204 });
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]);
+    throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const remove = [...host.querySelectorAll('button')].find((button) => button.textContent === '删除项目') as HTMLButtonElement;
+  await act(async () => remove.click());
+  assert.match(host.textContent || '', /remaining project/);
+  assert.doesNotMatch(host.textContent || '', /服务响应格式异常|Operation failed/);
+  assert.equal(loads, 2);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('real 204 relation deletion refreshes the relation list without an error', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  Object.defineProperty(window, 'confirm', { configurable: true, value: () => true }); let relationLoads = 0;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return payload([project]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url === '/api/channeling-projects/7/relations') { relationLoads++; return payload(relationLoads === 1 ? [relation('delete me', 'steam')] : []); }
+    if (url === '/api/channeling-relations/1' && init?.method === 'DELETE') return new Response(null, { status: 204 });
+    if (url.includes('/relation-imports')) return payload([]);
+    throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' }))); await openRelations(host);
+  const remove = [...host.querySelectorAll('button')].find((button) => button.textContent === '删除关系') as HTMLButtonElement;
+  await act(async () => remove.click());
+  assert.doesNotMatch(host.textContent || '', /delete me|服务响应格式异常|Operation failed/);
+  assert.equal(relationLoads, 2);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('project creation has a synchronous lock and failure retains and unlocks its draft', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  const pending = deferred<Response>(); let creates = 0;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects' && init?.method === 'POST') { creates++; return pending.promise; }
+    if (url === '/api/channeling-projects') return payload([project]);
+    if (url.startsWith('/api/channeling-projects/pending')) return payload([]);
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]);
+    throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  const form = [...host.querySelectorAll('form')].find((item) => item.querySelector('input[placeholder="项目名称"]'))!;
+  const name = form.querySelector('input[placeholder="项目名称"]') as HTMLInputElement;
+  await act(async () => changeInput(name, 'retry project'));
+  await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  assert.equal(creates, 1);
+  assert.ok([...form.querySelectorAll('input, button')].every((control) => (control as HTMLInputElement).disabled));
+  await act(async () => { pending.resolve(new Response(JSON.stringify({ success: false, message: 'project create failed' }), { status: 500 })); await pending.promise; });
+  assert.equal(name.value, 'retry project');
+  assert.ok([...form.querySelectorAll('input, button')].every((control) => !(control as HTMLInputElement).disabled));
+  assert.match(host.textContent || '', /project create failed/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('StrictMode top-level loads are latest-wins even when the older response arrives last', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  const oldProjects = deferred<Response>(); const oldTodos = deferred<Response>(); const newProjects = deferred<Response>(); const newTodos = deferred<Response>();
+  let projectCalls = 0; let todoCalls = 0;
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url === '/api/channeling-projects') return (++projectCalls === 1 ? oldProjects : newProjects).promise;
+    if (url.startsWith('/api/channeling-projects/pending')) return (++todoCalls === 1 ? oldTodos : newTodos).promise;
+    if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]);
+    throw new Error(url);
+  }) as typeof fetch;
+  await act(async () => root.render(createElement(StrictMode, null, createElement(ChannelingProjectManagement, { role: 'guest' }))));
+  const newest = { ...project, id: 8, projectName: 'newest project' };
+  await act(async () => { newProjects.resolve(await payload([newest])); newTodos.resolve(await payload([])); await Promise.all([newProjects.promise, newTodos.promise]); });
+  await act(async () => { oldProjects.resolve(await payload([project])); oldTodos.resolve(await payload([])); await Promise.all([oldProjects.promise, oldTodos.promise]); });
+  assert.match(host.textContent || '', /newest project/);
+  assert.doesNotMatch(host.textContent || '', /测试项目/);
+  await act(async () => root.unmount()); dom.window.close();
+});
+
+test('unmount aborts every unresolved top-level project load', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host); const signals: AbortSignal[] = [];
+  globalThis.fetch = (async (_input, init) => { if (init?.signal) signals.push(init.signal); return new Promise<Response>(() => {}); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'guest' })));
+  await act(async () => root.unmount());
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every((signal) => signal.aborted));
+  dom.window.close();
 });

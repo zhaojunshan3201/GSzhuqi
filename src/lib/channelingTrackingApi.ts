@@ -122,6 +122,14 @@ export async function channelingRequest<T>(url: string, options: RequestInit = {
   const token = typeof localStorage === 'undefined' ? null : localStorage.getItem('token');
   if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(url, { ...options, headers });
+  if (response.status === 401 && typeof localStorage !== 'undefined') {
+    const hadSession = localStorage.getItem('token') !== null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('oil_system_user');
+    if (hadSession && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('auth-expired'));
+    }
+  }
   if (response.status === 204) return undefined as T;
 
   const text = await response.text();

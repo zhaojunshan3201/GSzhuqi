@@ -28,6 +28,49 @@ test('channelingRequest accepts an empty 204 response', async () => {
   assert.equal(await channelingRequest<void>('/api/example', { method: 'DELETE' }), undefined);
 });
 
+test('channelingRequest expires the browser session once on 401 and preserves status', async () => {
+  const dom = new JSDOM('', { url: 'http://localhost' });
+  Object.defineProperties(globalThis, {
+    window: { configurable: true, value: dom.window },
+    localStorage: { configurable: true, value: dom.window.localStorage },
+    Event: { configurable: true, value: dom.window.Event },
+  });
+  localStorage.setItem('token', 'expired-token');
+  localStorage.setItem('oil_system_user', 'cached-user');
+  let expired = 0;
+  window.addEventListener('auth-expired', () => { expired++; });
+  globalThis.fetch = (async () => new Response(JSON.stringify({ success: false, message: '登录已过期' }), { status: 401 })) as typeof fetch;
+
+  for (let index = 0; index < 2; index++) {
+    await assert.rejects(() => channelingRequest('/api/example'), (error: unknown) => {
+      assert.ok(error instanceof ChannelingApiError);
+      assert.equal(error.status, 401);
+      return true;
+    });
+  }
+  assert.equal(localStorage.getItem('token'), null);
+  assert.equal(localStorage.getItem('oil_system_user'), null);
+  assert.equal(expired, 1);
+  dom.window.close();
+});
+
+test('channelingRequest does not expire the session for non-401 failures', async () => {
+  const dom = new JSDOM('', { url: 'http://localhost' });
+  Object.defineProperties(globalThis, {
+    window: { configurable: true, value: dom.window },
+    localStorage: { configurable: true, value: dom.window.localStorage },
+    Event: { configurable: true, value: dom.window.Event },
+  });
+  localStorage.setItem('token', 'valid-token');
+  let expired = 0;
+  window.addEventListener('auth-expired', () => { expired++; });
+  globalThis.fetch = (async () => new Response(JSON.stringify({ success: false, message: 'conflict' }), { status: 409 })) as typeof fetch;
+  await assert.rejects(() => channelingRequest('/api/example'), (error: unknown) => error instanceof ChannelingApiError && error.status === 409);
+  assert.equal(localStorage.getItem('token'), 'valid-token');
+  assert.equal(expired, 0);
+  dom.window.close();
+});
+
 test('channelingRequest surfaces a server message even for an error status', async () => {
   globalThis.fetch = (async () => new Response(JSON.stringify({ success: false, message: '跟踪记录已被更正' }), {
     status: 409,

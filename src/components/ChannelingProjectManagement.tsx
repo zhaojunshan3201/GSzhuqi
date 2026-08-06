@@ -139,6 +139,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [relationCreating, setRelationCreating] = useState(false);
+  const [projectCreating, setProjectCreating] = useState(false);
   const [projectTab, setProjectTab] = useState<ProjectTab>('overview');
   const [validRowsExpanded, setValidRowsExpanded] = useState(false);
   const [protectedProjectIds, setProtectedProjectIds] = useState<Set<number>>(() => new Set());
@@ -146,6 +147,10 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const confirmingImportIdRef = useRef<number | null>(null);
   const projectCreateMutationToken = useRef(0);
   const projectCreateDraftVersion = useRef(0);
+  const activeProjectCreateRef = useRef<number | null>(null);
+  const projectLoadRequestRef = useRef<AbortController | null>(null);
+  const projectLoadGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
   const relationRequestRef = useRef<AbortController | null>(null);
   const relationProjectIdRef = useRef<number | null>(null);
   const viewSelectionRef = useRef({ selectedId, channelingType: relationFilters.channelingType, status: relationFilters.status, source: relationFilters.source });
@@ -157,16 +162,20 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   const visibleProjects = useMemo(() => projects.filter((item) => (!projectFilters.block || item.block.includes(projectFilters.block)) && (!projectFilters.status || item.status === projectFilters.status)), [projects, projectFilters]);
   const visibleRelations = useMemo(() => relations.filter((item) => (!relationFilters.channelingType || item.channelingType === relationFilters.channelingType) && (!relationFilters.status || item.status === relationFilters.status) && (!relationFilters.source || item.source === relationFilters.source)), [relations, relationFilters]);
   const visibleValidRows = preview?.valid ? (validRowsExpanded ? preview.valid : preview.valid.slice(0, 10)) : [];
-  const token = localStorage.getItem('token');
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
   const setMessage = (text: string, tone: MessageTone = 'error') => setMessageState({ text, tone });
+  const invalidateProjectCreate = () => {
+    if (activeProjectCreateRef.current === null) return;
+    activeProjectCreateRef.current = null;
+    projectCreateMutationToken.current++;
+    setProjectCreating(false);
+  };
   const invalidateRelationCreate = () => {
     if (!activeRelationCreateRef.current) return;
     activeRelationCreateRef.current = null;
     relationCreateTokenRef.current++;
     setRelationCreating(false);
   };
-  const selectProject = (id: number | null) => { invalidateRelationCreate(); setMessageState(null); setProjectTab('overview'); setSelectedId(id); };
+  const selectProject = (id: number | null) => { invalidateProjectCreate(); invalidateRelationCreate(); setMessageState(null); setProjectTab('overview'); setSelectedId(id); };
   const selectProjectTab = (tab: ProjectTab, focus = false) => {
     setProjectTab(tab);
     if (focus) document.getElementById(`project-tab-${tab}`)?.focus();
@@ -182,18 +191,37 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   };
 
   const load = async () => {
-    const [projectResponse, todoResponse] = await Promise.all([fetch('/api/channeling-projects'), fetch(`/api/channeling-projects/pending?date=${today()}`)]);
-    const [projectPayload, todoPayload] = await Promise.all([projectResponse.json(), todoResponse.json()]);
-    if (!projectPayload.success) throw new Error(projectPayload.message || '项目加载失败');
-    if (!todoPayload.success) throw new Error(todoPayload.message || '待办加载失败');
-    setProjects(projectPayload.data);
-    const loadedProjectIds = new Set<number>(projectPayload.data.map((item: ChannelingProject) => item.id));
-    setProtectedProjectIds((current) => new Set([...current].filter((id) => loadedProjectIds.has(id))));
-    setProtectedRelationKeys((current) => new Set([...current].filter((key) => loadedProjectIds.has(Number(key.split(':', 1)[0])))));
-    setSelectedId((id) => id ?? projectPayload.data[0]?.id ?? null);
-    setTodos(todoPayload.data);
+    projectLoadRequestRef.current?.abort();
+    const controller = new AbortController();
+    const generation = ++projectLoadGenerationRef.current;
+    projectLoadRequestRef.current = controller;
+    try {
+      const [projectResponse, todoResponse] = await Promise.all([fetch('/api/channeling-projects', { signal: controller.signal }), fetch(`/api/channeling-projects/pending?date=${today()}`, { signal: controller.signal })]);
+      const [projectPayload, todoPayload] = await Promise.all([projectResponse.json(), todoResponse.json()]);
+      if (controller.signal.aborted || !mountedRef.current || projectLoadGenerationRef.current !== generation) return false;
+      if (!projectPayload.success) throw new Error(projectPayload.message || '项目加载失败');
+      if (!todoPayload.success) throw new Error(todoPayload.message || '待办加载失败');
+      setProjects(projectPayload.data);
+      const loadedProjectIds = new Set<number>(projectPayload.data.map((item: ChannelingProject) => item.id));
+      setProtectedProjectIds((current) => new Set([...current].filter((id) => loadedProjectIds.has(id))));
+      setProtectedRelationKeys((current) => new Set([...current].filter((key) => loadedProjectIds.has(Number(key.split(':', 1)[0])))));
+      setSelectedId((id) => id ?? projectPayload.data[0]?.id ?? null);
+      setTodos(todoPayload.data);
+      return true;
+    } catch (error) {
+      if (controller.signal.aborted || !mountedRef.current || projectLoadGenerationRef.current !== generation) return false;
+      throw error;
+    }
   };
-  useEffect(() => { void load().catch(() => setMessage('项目加载失败，请稍后重试。')); }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    void load().catch(() => { if (mountedRef.current) setMessage('项目加载失败，请稍后重试。'); });
+    return () => {
+      mountedRef.current = false;
+      projectLoadGenerationRef.current++;
+      projectLoadRequestRef.current?.abort();
+    };
+  }, []);
 
   const loadRelations = async (projectId: number) => {
     relationRequestRef.current?.abort();
@@ -220,7 +248,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
   useEffect(() => { if (selectedId) void loadRelations(selectedId).catch(() => setMessage('关系加载失败，请稍后重试。')); else { relationRequestRef.current?.abort(); relationProjectIdRef.current = null; setRelations([]); setImports([]); } }, [selectedId, relationFilters.channelingType]);
   useEffect(() => { setProjectTab('overview'); }, [selectedId]);
   useEffect(() => () => relationRequestRef.current?.abort(), []);
-  useEffect(() => () => { projectCreateMutationToken.current++; }, []);
+  useEffect(() => () => { activeProjectCreateRef.current = null; projectCreateMutationToken.current++; }, []);
   useEffect(() => () => { activeRelationCreateRef.current = null; relationCreateTokenRef.current++; }, []);
   useEffect(() => {
     if (!preview) return;
@@ -231,18 +259,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     });
   }, [preview, projects, selectedId]);
 
-  const request = async (url: string, init: RequestInit) => {
-    const response = await fetch(url, { ...init, headers: { ...headers, ...(init.headers || {}) } });
-    if (response.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('oil_system_user');
-      window.dispatchEvent(new Event('auth-expired'));
-      throw new Error('Authentication expired. Please sign in again.');
-    }
-    const payload = await response.json();
-    if (!response.ok || !payload.success) throw new ChannelingApiError(payload.message || 'Operation failed', response.status);
-    return payload.data;
-  };
+  const request = <T = any,>(url: string, init: RequestInit) => channelingRequest<T>(url, init);
 
   const save = async (changes: Record<string, unknown>) => {
     if (!selected) return;
@@ -255,13 +272,16 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
     } catch (error: any) { if (viewSelectionRef.current.selectedId === projectId) setMessage(error.message); }
   };
   const create = async (event: React.FormEvent) => {
-    event.preventDefault();
+    event.preventDefault(); if (activeProjectCreateRef.current !== null) return;
     const view = { ...viewSelectionRef.current };
     const draftVersion = projectCreateDraftVersion.current;
     const mutationToken = ++projectCreateMutationToken.current;
-    const remainsCurrent = () => projectCreateMutationToken.current === mutationToken && projectCreateDraftVersion.current === draftVersion && isCurrentView(view);
+    const draft = { ...newProject };
+    activeProjectCreateRef.current = mutationToken;
+    setProjectCreating(true);
+    const remainsCurrent = () => mountedRef.current && activeProjectCreateRef.current === mutationToken && projectCreateMutationToken.current === mutationToken && projectCreateDraftVersion.current === draftVersion && isCurrentView(view);
     try {
-      const created = await request('/api/channeling-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProject) });
+      const created = await request<ChannelingProject>('/api/channeling-projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) });
       if (!remainsCurrent()) return;
       await load();
       if (!remainsCurrent()) return;
@@ -269,6 +289,12 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
       selectProject(created.id);
       setPreviewProjectId((id) => id ?? created.id);
     } catch (error: any) { if (remainsCurrent()) setMessage(error.message); }
+    finally {
+      if (activeProjectCreateRef.current === mutationToken) {
+        activeProjectCreateRef.current = null;
+        setProjectCreating(false);
+      }
+    }
   };
   const createRelation = async (event: React.FormEvent) => {
     event.preventDefault(); if (!selected || activeRelationCreateRef.current) return;
@@ -424,7 +450,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
 
   return <div className="page-stack">
     <section className="app-card p-5"><h3 className="section-title">注窜项目台账（治理闭环）</h3><p className="mt-1 text-sm text-slate-500">游客只读，可查看完整项目、关系和筛选结果；管理员可维护、导入、确认、治理、关闭、解除和删除。</p>{message && <p aria-live="polite" className={`status-banner mt-3 ${messageClasses[message.tone]}`}>{message.text}</p>}
-      {canOperate && <form className="mt-4 grid gap-2 md:grid-cols-4" onSubmit={create}><input className="field-control" required placeholder="项目名称" value={newProject.projectName} onChange={(e) => { projectCreateDraftVersion.current++; setNewProject({ ...newProject, projectName: e.target.value }); }}/><input className="field-control" required placeholder="区块" value={newProject.block} onChange={(e) => { projectCreateDraftVersion.current++; setNewProject({ ...newProject, block: e.target.value }); }}/><input className="field-control" required placeholder="责任人" value={newProject.owner} onChange={(e) => { projectCreateDraftVersion.current++; setNewProject({ ...newProject, owner: e.target.value }); }}/><button className="action-button action-primary">新增项目</button></form>}</section>
+      {canOperate && <form className="mt-4 grid gap-2 md:grid-cols-4" onSubmit={create}><input className="field-control" required placeholder="项目名称" value={newProject.projectName} disabled={projectCreating} onInput={(e) => { if (activeProjectCreateRef.current !== null) return; projectCreateDraftVersion.current++; setNewProject({ ...newProject, projectName: e.currentTarget.value }); }}/><input className="field-control" required placeholder="区块" value={newProject.block} disabled={projectCreating} onInput={(e) => { if (activeProjectCreateRef.current !== null) return; projectCreateDraftVersion.current++; setNewProject({ ...newProject, block: e.currentTarget.value }); }}/><input className="field-control" required placeholder="责任人" value={newProject.owner} disabled={projectCreating} onInput={(e) => { if (activeProjectCreateRef.current !== null) return; projectCreateDraftVersion.current++; setNewProject({ ...newProject, owner: e.currentTarget.value }); }}/><button className="action-button action-primary" disabled={projectCreating}>{projectCreating ? '正在新增…' : '新增项目'}</button></form>}</section>
 
     <section className="app-card p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="section-title">注窜关系识别</h3><p className="mt-1 text-sm text-slate-500">上传一个 Excel 文件进行分类预览，再确认写入现有项目。关系类型：注汽窜 / 注氮气窜。</p></div>{!isAdmin && <span className="rounded bg-slate-100 px-2 py-1 text-sm text-slate-600">游客只读</span>}</div>
       {isAdmin && <div className="mt-4 flex flex-wrap items-center gap-4"><fieldset className="flex gap-4"><legend className="sr-only">注窜类型</legend>{(['steam', 'nitrogen'] as ChannelingType[]).map((value) => <label key={value} className="flex items-center gap-2 text-sm"><input type="radio" name="channeling-type" value={value} checked={channelingType === value} disabled={uploading || confirming} onChange={() => setChannelingType(value)}/>{channelingTypeLabels[value]}</label>)}</fieldset><label className="text-sm">关系文件<input className="ml-2" type="file" accept=".xlsx,.xls" disabled={uploading || confirming} onChange={uploadRelations}/></label>{uploading && <span className="text-sm text-slate-500">正在解析上传文件…</span>}</div>}
@@ -440,7 +466,7 @@ export function ChannelingProjectManagement({ role, onOpenRelation = () => {} }:
         {canOperate && <form key={selected.id} className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={(e) => { e.preventDefault(); const data = new FormData(e.currentTarget); void save({ owner: data.get('owner'), governanceMeasure: data.get('governanceMeasure'), plannedDate: data.get('plannedDate') || null, riskLevel: data.get('riskLevel'), ...(isAdmin ? { status: data.get('status'), closureEvidence: data.get('closureEvidence') } : {}) }); }}><label>项目状态<select name="status" className="field-control" defaultValue={selected.status} disabled={!isAdmin}>{Object.entries(statusLabels).filter(([value]) => isAdmin || value !== 'closed').map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>责任人<input name="owner" className="field-control" defaultValue={selected.owner}/></label><label className="md:col-span-2">治理措施<input name="governanceMeasure" className="field-control" defaultValue={selected.governanceMeasure}/></label><label>计划日期<input name="plannedDate" type="date" className="field-control" defaultValue={selected.plannedDate ?? ''}/></label><label>风险等级<select name="riskLevel" className="field-control" defaultValue={selected.riskLevel}><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label>{isAdmin && <label className="md:col-span-2">关闭依据<input name="closureEvidence" className="field-control" defaultValue={selected.closureEvidence}/></label>}<button className="action-button action-primary md:col-span-2">保存治理信息</button></form>}
         <div role="tablist" aria-label="项目详情模块" className="mt-6 flex gap-2 border-t pt-4">{projectTabs.map(([value, label]) => <button key={value} id={`project-tab-${value}`} aria-controls={`project-panel-${value}`} type="button" role="tab" aria-selected={projectTab === value} tabIndex={projectTab === value ? 0 : -1} className={`action-button ${projectTab === value ? 'action-primary' : ''}`} onClick={() => selectProjectTab(value)} onKeyDown={(event) => navigateProjectTabs(event, value)}>{label}</button>)}</div>
         {projectTab === 'overview' && <ProjectSummaryPanel key={`summary-${selected.id}`} projectId={selected.id} isAdmin={isAdmin}/>}
-        {projectTab === 'relations' && <section id="project-panel-relations" role="tabpanel" aria-labelledby="project-tab-relations" className="mt-4"><h4 className="sr-only">关系清单</h4><div className="mt-3 grid gap-2 md:grid-cols-3"><select className="field-control" aria-label="注窜类型筛选" value={relationFilters.channelingType} onChange={(e) => { invalidateRelationCreate(); setRelationFilters({ ...relationFilters, channelingType: e.target.value }); }}><option value="">全部注窜类型</option><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><select className="field-control" aria-label="关系状态筛选" value={relationFilters.status} onChange={(e) => { invalidateRelationCreate(); setRelationFilters({ ...relationFilters, status: e.target.value }); }}><option value="">全部关系状态</option>{Object.entries(relationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select className="field-control" aria-label="关系来源筛选" value={relationFilters.source} onChange={(e) => { invalidateRelationCreate(); setRelationFilters({ ...relationFilters, source: e.target.value }); }}><option value="">全部来源</option><option value="manual">手工</option><option value="import">导入</option><option value="suspected">疑似识别</option></select></div>
+        {projectTab === 'relations' && <section id="project-panel-relations" role="tabpanel" aria-labelledby="project-tab-relations" className="mt-4"><h4 className="sr-only">关系清单</h4><div className="mt-3 grid gap-2 md:grid-cols-3"><select className="field-control" aria-label="注窜类型筛选" value={relationFilters.channelingType} onChange={(e) => { invalidateProjectCreate(); invalidateRelationCreate(); setRelationFilters({ ...relationFilters, channelingType: e.target.value }); }}><option value="">全部注窜类型</option><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><select className="field-control" aria-label="关系状态筛选" value={relationFilters.status} onChange={(e) => { invalidateProjectCreate(); invalidateRelationCreate(); setRelationFilters({ ...relationFilters, status: e.target.value }); }}><option value="">全部关系状态</option>{Object.entries(relationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select className="field-control" aria-label="关系来源筛选" value={relationFilters.source} onChange={(e) => { invalidateProjectCreate(); invalidateRelationCreate(); setRelationFilters({ ...relationFilters, source: e.target.value }); }}><option value="">全部来源</option><option value="manual">手工</option><option value="import">导入</option><option value="suspected">疑似识别</option></select></div>
           {canOperate && <form className="mt-3 grid gap-2 md:grid-cols-3" onSubmit={createRelation}><select className="field-control" aria-label="手工关系注窜类型" value={relationDraft.channelingType} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, channelingType: e.target.value as ChannelingType }); }}><option value="steam">注汽窜</option><option value="nitrogen">注氮气窜</option></select><input className="field-control" required placeholder="注井" value={relationDraft.injectionWell} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, injectionWell: e.target.value }); }}/><input className="field-control" required placeholder="采油井" value={relationDraft.productionWell} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, productionWell: e.target.value }); }}/><input className="field-control" required placeholder="层系" value={relationDraft.reservoirLayer} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, reservoirLayer: e.target.value }); }}/><input className="field-control" required placeholder="证据" value={relationDraft.evidence} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, evidence: e.target.value }); }}/><input className="field-control" required placeholder="责任人" value={relationDraft.owner} disabled={relationCreating} onChange={(e) => { if (!activeRelationCreateRef.current) setRelationDraft({ ...relationDraft, owner: e.target.value }); }}/><button className="action-button action-primary md:col-span-3" disabled={relationCreating}>{relationCreating ? '正在新增…' : '手工新增关系'}</button></form>}
           <div className="mt-3 space-y-2">{visibleRelations.map((row) => { const protectedKey = `${selected.id}:${row.id}`; const historyProtected = row.canDelete === false || protectedRelationKeys.has(protectedKey); return <div key={row.id} className="flex flex-wrap items-center gap-3 text-sm"><span className="rounded bg-slate-100 px-2 py-1">{channelingTypeLabels[row.channelingType]}</span><span>{row.injectionWell} → {row.productionWell} · {row.reservoirLayer} · {relationLabels[row.status]}</span><button type="button" onClick={() => onOpenRelation(row.id)}>查看详情/跟踪记录</button>{canOperate && row.status === 'suspected' && <button onClick={() => void confirmSuspected(row.id)}>提交疑似确认</button>}{isAdmin && row.status !== 'released' && <button onClick={() => void releaseRelation(row.id)}>解除关系</button>}{isAdmin && <button disabled={historyProtected} onClick={() => void deleteRelation(row.id)}>删除关系</button>}{historyProtected && <span className="text-amber-700">已有跟踪历史，请解除关系并保留历史。</span>}</div>; })}{!visibleRelations.length && <p className="text-sm text-slate-500">暂无符合条件的关系{canOperate ? '，可手工新增或通过上方识别卡导入 Excel 关系。' : '。'}</p>}</div><div className="mt-3 space-y-1">{imports.map((item) => <div key={item.id} className="flex flex-wrap gap-3 text-sm"><span>{item.fileName} · {channelingTypeLabels[item.channelingType]}：有效 {item.validCount}，重复 {item.duplicateCount}，自身 {item.selfRelationCount}，无效 {item.invalidCount}</span>{canOperate && item.status === 'preview' && <button disabled={confirming} onClick={() => void confirmImport(item.id)}>{confirmingImportIdRef.current === item.id ? '正在确认…' : '确认导入'}</button>}</div>)}</div></section>}
         {projectTab === 'timeline' && <div id="project-panel-timeline" role="tabpanel" aria-labelledby="project-tab-timeline" className="mt-4"><ChannelingTimeline role={isAdmin ? 'admin' : 'guest'} subject={{ subjectType: 'project', subjectId: selected.id }}/></div>}
