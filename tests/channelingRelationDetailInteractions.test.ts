@@ -3,7 +3,7 @@ import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { buildAlignedRelationRows, buildRelationChart, ChannelingRelationDetail } from '../src/components/ChannelingRelationDetail.tsx';
+import { buildAlignedRelationRows, buildRelationChart, ChannelingRelationDetail, evaluationRangeAroundSplit } from '../src/components/ChannelingRelationDetail.tsx';
 import type { RelationDetail } from '../src/lib/channelingTrackingApi.ts';
 
 const reply = (data: unknown, status = 200, success = true, message?: string) => Promise.resolve(new Response(JSON.stringify({ success, data, message }), { status }));
@@ -41,8 +41,13 @@ test('maps suspected source and aligns irregular injection and production dates 
   const rows = buildAlignedRelationRows(irregular); assert.deepEqual(rows.map((row) => row.date), ['2026-07-10', '2026-07-15', '2026-07-20', '2026-07-23']);
   assert.equal(rows[0].steamVolume, 220); assert.equal(rows[0].oil, null); assert.equal(rows[1].steamVolume, null); assert.equal(rows[1].waterCutPercent, 67);
   const option = buildRelationChart(irregular); assert.equal((option.xAxis as { type: string }).type, 'time');
-  assert.deepEqual((option.series as Array<{ data: unknown[] }>)[0].data, [['2026-07-10', 220], ['2026-07-23', 80]]);
+  const series = option.series as Array<{ data: unknown[]; connectNulls?: boolean }>;
+  assert.deepEqual(series[0].data, [['2026-07-10', 220], ['2026-07-15', null], ['2026-07-20', null], ['2026-07-23', 80]]);
+  assert.deepEqual(series[1].data, [['2026-07-10', null], ['2026-07-15', 10], ['2026-07-20', 13], ['2026-07-23', null]]); assert.equal(series[1].connectNulls, false);
+  assert.deepEqual(option.yAxis, [{ type: 'value', name: '产量 / 注汽量' }, { type: 'value', name: '含水(%)', min: 0, max: 100, axisLabel: { formatter: '{value}%' } }]);
 });
+
+test('builds symmetric calendar-day evaluation ranges without date drift', () => { assert.deepEqual(evaluationRangeAroundSplit('2026-03-01'), { beforeStart: '2026-01-30', splitDate: '2026-03-01', afterEnd: '2026-03-31' }); });
 
 test('renders the actual suspected source as a Chinese label', async () => {
   const { dom, host, root } = setup(); globalThis.fetch = (async (raw, init) => { const url = String(raw); if (url.endsWith('/relations')) return reply([{ ...relation, source: 'suspected' }]); return mockReads()(raw, init); }) as typeof fetch;
@@ -127,4 +132,37 @@ test('a delayed historical recompute cannot refresh or mutate a different relati
   await act(async () => root.render(createElement(ChannelingRelationDetail, { role: 'admin', relationId: 8, onOpenWell: () => {}, onBack: () => {} }))); await act(async () => { pending.resolve(await reply({ ...oldEvent, id: 62 }, 201)); await pending.promise; });
   assert.match(host.textContent || '', /注8/); assert.doesNotMatch(host.textContent || '', /旧关系评价/); assert.equal(trackingGets, 2);
   await cleanup(root, dom);
+});
+
+test('primary retry does not strand an independent pending evaluation request', async () => {
+  const { dom, host, root } = setup(); const history = deferred<Response>(); let detailCalls = 0;
+  globalThis.fetch = (async (raw) => { const url = String(raw); if (url.startsWith('/api/channeling-tracking-events?')) return history.promise; if (url.includes('/detail?')) { detailCalls++; return detailCalls === 1 ? reply(null, 500, false, '主指标失败') : reply(detail()); } if (url.startsWith('/api/channeling-wells?')) return reply([]); throw new Error(url); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingRelationDetail, { role: 'guest', relationId: 7, onOpenWell: () => {}, onBack: () => {} }))); assert.match(host.textContent || '', /主指标失败/); await click(host, '重试'); assert.match(host.textContent || '', /注7/);
+  await act(async () => { history.resolve(await reply([])); await history.promise; }); await click(host, '效果评价'); assert.doesNotMatch(host.textContent || '', /正在加载历史评价/); assert.match(host.textContent || '', /暂无历史评价/); await cleanup(root, dom);
+});
+
+test('new evaluation and historical recompute share one write lock in both directions', async () => {
+  const oldEvent = { id: 71, eventType: 'evaluated', occurredOn: '2026-07-31', content: '旧评价', evidence: '证据', owner: '周', metricsSnapshot: detail(), supersedesEventId: null, voidedAt: null, voidReason: null, createdBy: 'admin', createdAt: '', links: [] };
+  const run = async (first: 'new' | 'recompute') => {
+    const { dom, host, root } = setup(); const pending = deferred<Response>(); let posts = 0;
+    globalThis.fetch = (async (raw, init) => { const url = String(raw); if (init?.method === 'POST') { posts++; return pending.promise; } if (url.startsWith('/api/channeling-tracking-events?')) return reply([oldEvent]); return mockReads()(raw, init); }) as typeof fetch;
+    await act(async () => root.render(createElement(ChannelingRelationDetail, { role: 'admin', relationId: 7, onOpenWell: () => {}, onBack: () => {} }))); await click(host, '效果评价'); const form = host.querySelector('form[aria-label="新增效果评价"]') as HTMLFormElement; await act(async () => { input(form, 'beforeStart', '2026-07-01'); input(form, 'splitDate', '2026-07-16'); input(form, 'afterEnd', '2026-07-31'); input(form, 'conclusion', '新评价'); input(form, 'owner', '周'); });
+    const recompute = [...host.querySelectorAll('button')].find((item) => item.textContent === '按最新数据重新计算') as HTMLButtonElement; const submit = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+    await act(async () => { if (first === 'new') form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); else recompute.click(); }); assert.equal(posts, 1); assert.equal(submit.disabled, true); assert.equal(recompute.disabled, true);
+    await act(async () => { if (first === 'new') recompute.click(); else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); }); assert.equal(posts, 1);
+    await act(async () => { pending.resolve(await reply({ ...oldEvent, id: 72 }, 201)); await pending.promise; }); assert.equal(submit.disabled, false); assert.equal(recompute.disabled, false); await cleanup(root, dom);
+  };
+  await run('new'); await run('recompute');
+});
+
+test('defaults evaluation around latest executed event, then falls back to effective start', async () => {
+  const renderDates = async (events: unknown[], effectiveStartDate: string) => { const view = setup(); globalThis.fetch = (async (raw, init) => { const url = String(raw); if (url.startsWith('/api/channeling-tracking-events?')) return reply(events); if (url.endsWith('/relations')) return reply([{ ...relation, effectiveStartDate }]); return mockReads()(raw, init); }) as typeof fetch; await act(async () => view.root.render(createElement(ChannelingRelationDetail, { role: 'admin', relationId: 7, onOpenWell: () => {}, onBack: () => {} }))); await click(view.host, '效果评价'); const form = view.host.querySelector('form[aria-label="新增效果评价"]') as HTMLFormElement; const dates = ['beforeStart', 'splitDate', 'afterEnd'].map((name) => (form.elements.namedItem(name) as HTMLInputElement).value); await cleanup(view.root, view.dom); return dates; };
+  const event = (occurredOn: string, voidedAt: string | null = null) => ({ id: occurredOn.endsWith('20') ? 2 : 1, eventType: 'executed', occurredOn, content: '执行', evidence: '', owner: '周', metricsSnapshot: null, supersedesEventId: null, voidedAt, voidReason: null, createdBy: 'admin', createdAt: '', links: [] });
+  assert.deepEqual(await renderDates([event('2026-06-10'), event('2026-06-20', '2026-06-21')], '2026-05-01'), ['2026-05-11', '2026-06-10', '2026-07-10']);
+  assert.deepEqual(await renderDates([], '2026-05-01'), ['2026-04-01', '2026-05-01', '2026-05-31']);
+});
+
+test('partial and malformed legacy snapshots render safely with known range and a clear warning', async () => {
+  const events = [{ id: 81, eventType: 'evaluated', occurredOn: '2026-07-31', content: '部分快照', evidence: '', owner: '周', metricsSnapshot: { range: { beforeStart: '2026-07-01', splitDate: '2026-07-16', afterEnd: '2026-07-31' }, comparison: 'broken', injector: 7, producerSeries: {} }, supersedesEventId: null, voidedAt: null, voidReason: null, createdBy: 'admin', createdAt: '', links: [] }, { id: 82, eventType: 'evaluated', occurredOn: '2026-08-01', content: '不可用快照', evidence: '', owner: '周', metricsSnapshot: { range: 'bad' }, supersedesEventId: null, voidedAt: null, voidReason: null, createdBy: 'admin', createdAt: '', links: [] }];
+  const { dom, host, root } = setup(); globalThis.fetch = (async (raw, init) => String(raw).startsWith('/api/channeling-tracking-events?') ? reply(events) : mockReads()(raw, init)) as typeof fetch; await act(async () => root.render(createElement(ChannelingRelationDetail, { role: 'guest', relationId: 7, onOpenWell: () => {}, onBack: () => {} }))); await click(host, '效果评价'); assert.match(host.textContent || '', /2026-07-01.*2026-07-31/); assert.match(host.textContent || '', /部分字段不可用/); assert.match(host.textContent || '', /没有可读取的指标快照/); await cleanup(root, dom);
 });
