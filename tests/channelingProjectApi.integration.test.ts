@@ -105,7 +105,7 @@ test('channeling endpoints enforce request contracts over HTTP', { timeout: 3000
     const projectHistory = (await (await request(`/api/channeling-tracking-events?subjectType=project&subjectId=${project.id}`)).json() as any).data;
     const projectStatusEvent = projectHistory.find((event: any) => event.eventType === 'status_changed');
     assert.equal(projectStatusEvent.createdBy, 'admin');
-    assert.equal(projectStatusEvent.content, 'Project status changed: identified -> confirmed');
+    assert.equal(projectStatusEvent.content, '项目状态变更：识别/导入（identified）→ 确认（confirmed）');
     const malformedBytes = Buffer.from([0, 1, 2, 3]);
     const unrecognizedWorkbook = XLSX.write({ SheetNames: ['bad'], Sheets: { bad: XLSX.utils.aoa_to_sheet([['unexpected'], ['value']]) } }, { type: 'buffer', bookType: 'xlsx' });
     assert.equal((await multipartRequest('/api/channeling-relation-imports/preview', importForm('steam', 'broken.xlsx', malformedBytes), authorized)).status, 400);
