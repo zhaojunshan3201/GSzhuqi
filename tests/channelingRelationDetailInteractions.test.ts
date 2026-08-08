@@ -253,6 +253,25 @@ test('defaults evaluation around latest executed event, then falls back to effec
   assert.deepEqual(await renderDates([], '2026-05-01'), ['2026-04-01', '2026-05-01', '2026-05-31']);
 });
 
+test('defaults evaluation around the latest active correction of an executed event', async () => {
+  const base = { content: '执行', evidence: '', owner: '周', metricsSnapshot: null, voidReason: null, createdBy: 'admin', links: [] };
+  const events = [
+    { ...base, id: 1, eventType: 'executed', occurredOn: '2026-06-10', supersedesEventId: null, voidedAt: '2026-06-12T00:00:00Z', createdAt: '2026-06-10T00:00:00Z' },
+    { ...base, id: 2, eventType: 'corrected', occurredOn: '2026-06-15', supersedesEventId: 1, voidedAt: '2026-06-16T00:00:00Z', createdAt: '2026-06-15T00:00:00Z' },
+    { ...base, id: 3, eventType: 'corrected', occurredOn: '2026-06-25', supersedesEventId: 2, voidedAt: null, createdAt: '2026-06-25T00:00:00Z' },
+    { ...base, id: 4, eventType: 'corrected', occurredOn: '2026-07-20', supersedesEventId: 999, voidedAt: null, createdAt: '2026-07-20T00:00:00Z' },
+    { ...base, id: 5, eventType: 'corrected', occurredOn: '2026-07-25', supersedesEventId: 6, voidedAt: null, createdAt: '2026-07-25T00:00:00Z' },
+    { ...base, id: 6, eventType: 'corrected', occurredOn: '2026-07-26', supersedesEventId: 5, voidedAt: null, createdAt: '2026-07-26T00:00:00Z' },
+  ];
+  const view = setup();
+  globalThis.fetch = (async (raw, init) => { const url = String(raw); if (url.startsWith('/api/channeling-tracking-events?')) return reply(events); if (url.endsWith('/relations')) return reply([{ ...relation, effectiveStartDate: '2026-05-01' }]); return mockReads()(raw, init); }) as typeof fetch;
+  await act(async () => view.root.render(createElement(ChannelingRelationDetail, { role: 'admin', relationId: 7, onOpenWell: () => {}, onBack: () => {} })));
+  await click(view.host, '效果评价');
+  const form = view.host.querySelector('form[aria-label="新增效果评价"]') as HTMLFormElement;
+  assert.equal((form.elements.namedItem('splitDate') as HTMLInputElement).value, '2026-06-25');
+  await cleanup(view.root, view.dom);
+});
+
 test('partial and malformed legacy snapshots render safely with known range and a clear warning', async () => {
   const events = [{ id: 81, eventType: 'evaluated', occurredOn: '2026-07-31', content: '部分快照', evidence: '', owner: '周', metricsSnapshot: { range: { beforeStart: '2026-07-01', splitDate: '2026-07-16', afterEnd: '2026-07-31' }, comparison: 'broken', injector: 7, producerSeries: {} }, supersedesEventId: null, voidedAt: null, voidReason: null, createdBy: 'admin', createdAt: '', links: [] }, { id: 82, eventType: 'evaluated', occurredOn: '2026-08-01', content: '不可用快照', evidence: '', owner: '周', metricsSnapshot: { range: 'bad' }, supersedesEventId: null, voidedAt: null, voidReason: null, createdBy: 'admin', createdAt: '', links: [] }];
   const { dom, host, root } = setup(); globalThis.fetch = (async (raw, init) => String(raw).startsWith('/api/channeling-tracking-events?') ? reply(events) : mockReads()(raw, init)) as typeof fetch; await act(async () => root.render(createElement(ChannelingRelationDetail, { role: 'guest', relationId: 7, onOpenWell: () => {}, onBack: () => {} }))); await click(host, '效果评价'); assert.match(host.textContent || '', /2026-07-01.*2026-07-31/); assert.match(host.textContent || '', /部分字段不可用/); assert.match(host.textContent || '', /没有可读取的指标快照/); await cleanup(root, dom);

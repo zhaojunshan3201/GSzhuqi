@@ -22,6 +22,7 @@ const channelingTypes = new Set<ChannelingType>(['steam', 'nitrogen']);
 const statuses = new Set<RelationStatus>(['confirmed', 'suspected', 'released']);
 const sources = new Set<RelationSource>(['manual', 'import', 'suspected']);
 const governanceStatuses = new Set<ChannelingGovernanceStatus>(['identified', 'confirmed', 'risk_assessed', 'planned', 'governing', 'verifying', 'closed', 'recurred']);
+const governanceStatusLabels: Record<ChannelingGovernanceStatus, string> = { identified: '识别/导入', confirmed: '确认', risk_assessed: '风险分级', planned: '治理方案', governing: '执行跟踪', verifying: '效果验证', closed: '关闭', recurred: '复发回流' };
 const nextGovernanceStatuses: Record<ChannelingGovernanceStatus, ChannelingGovernanceStatus[]> = { identified: ['confirmed'], confirmed: ['risk_assessed'], risk_assessed: ['planned'], planned: ['governing'], governing: ['verifying'], verifying: ['closed'], closed: ['recurred'], recurred: ['confirmed'] };
 
 export async function initChannelingProjectTables(db: DatabaseLike) {
@@ -109,7 +110,7 @@ async function updateChannelingProjectUnlocked(db: DatabaseLike, id: number, cha
   await db.run('UPDATE channeling_projects SET project_name=?, block=?, owner=?, status=?, governance_measure=?, planned_date=?, actual_date=?, before_metric=?, after_metric=?, closure_evidence=?, risk_level=?, estimated_loss=?, affected_well_count=?, affected_daily_oil=?, occupied_production=?, updated_at=? WHERE id=?', [normalized.projectName.trim(), normalized.block.trim(), normalized.owner.trim(), normalized.status, normalized.governanceMeasure, normalized.plannedDate, normalized.actualDate, normalized.beforeMetric, normalized.afterMetric, normalized.closureEvidence, normalized.riskLevel, normalized.estimatedLoss, normalized.affectedWellCount, normalized.affectedDailyOil, normalized.occupiedProduction, new Date().toISOString(), id]);
   const updated = project(await db.get('SELECT * FROM channeling_projects WHERE id = ?', [id]));
   if (updated.status !== previous.status) await createTrackingEventUnlocked(db, {
-    eventType: 'status_changed', occurredOn: shanghaiCalendarDate(), content: `Project status changed: ${previous.status} -> ${updated.status}`,
+    eventType: 'status_changed', occurredOn: shanghaiCalendarDate(), content: `项目状态变更：${governanceStatusLabels[previous.status]}（${previous.status}）→ ${governanceStatusLabels[updated.status]}（${updated.status}）`,
     evidence: updated.closureEvidence || updated.governanceMeasure, owner: updated.owner, createdBy: audit.createdBy,
     links: [{ subjectType: 'project', subjectId: updated.id }],
   });

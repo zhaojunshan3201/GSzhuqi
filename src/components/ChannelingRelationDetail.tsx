@@ -26,7 +26,7 @@ export function defaultRelationComparisonRange(now = new Date()): Pick<Evaluatio
 const blankEvaluation = (): EvaluationDraft => ({ ...defaultRelationComparisonRange(), conclusion: '', evidence: '', owner: '' });
 
 export type EvaluationLineage = { root: TrackingEvent; current: TrackingEvent | null };
-export function buildEvaluationLineages(events: TrackingEvent[]): EvaluationLineage[] {
+const correctionChildren = (events: TrackingEvent[]) => {
   const correctionsByParent = new Map<number, TrackingEvent[]>();
   for (const event of events) {
     if (event.eventType !== 'corrected' || !Number.isInteger(event.supersedesEventId) || Number(event.supersedesEventId) <= 0) continue;
@@ -34,25 +34,38 @@ export function buildEvaluationLineages(events: TrackingEvent[]): EvaluationLine
     children.push(event);
     correctionsByParent.set(Number(event.supersedesEventId), children);
   }
-  return events.filter((event) => event.eventType === 'evaluated').map((root) => {
-    let current: TrackingEvent | null = root.voidedAt ? null : root;
-    let currentDepth = 0;
-    const visited = new Set<number>([root.id]);
-    const pending = (correctionsByParent.get(root.id) || []).map((event) => ({ event, depth: 1 }));
-    while (pending.length) {
-      const next = pending.pop()!;
-      if (visited.has(next.event.id)) continue;
-      visited.add(next.event.id);
-      if (!next.event.voidedAt && (next.depth > currentDepth
-        || (next.depth === currentDepth && (next.event.createdAt.localeCompare(current?.createdAt || '') > 0
-          || (next.event.createdAt === current?.createdAt && next.event.id > (current?.id || 0)))))) {
-        current = next.event;
-        currentDepth = next.depth;
-      }
-      for (const child of correctionsByParent.get(next.event.id) || []) pending.push({ event: child, depth: next.depth + 1 });
+  return correctionsByParent;
+};
+const currentCorrectedDescendant = (root: TrackingEvent, correctionsByParent: Map<number, TrackingEvent[]>): TrackingEvent | null => {
+  let current: TrackingEvent | null = root.voidedAt ? null : root;
+  let currentDepth = 0;
+  const visited = new Set<number>([root.id]);
+  const pending = (correctionsByParent.get(root.id) || []).map((event) => ({ event, depth: 1 }));
+  while (pending.length) {
+    const next = pending.pop()!;
+    if (visited.has(next.event.id)) continue;
+    visited.add(next.event.id);
+    if (!next.event.voidedAt && (next.depth > currentDepth
+      || (next.depth === currentDepth && (next.event.createdAt.localeCompare(current?.createdAt || '') > 0
+        || (next.event.createdAt === current?.createdAt && next.event.id > (current?.id || 0)))))) {
+      current = next.event;
+      currentDepth = next.depth;
     }
-    return { root, current };
-  });
+    for (const child of correctionsByParent.get(next.event.id) || []) pending.push({ event: child, depth: next.depth + 1 });
+  }
+  return current;
+};
+export function buildEvaluationLineages(events: TrackingEvent[]): EvaluationLineage[] {
+  const correctionsByParent = correctionChildren(events);
+  return events.filter((event) => event.eventType === 'evaluated').map((root) => ({ root, current: currentCorrectedDescendant(root, correctionsByParent) }));
+}
+export function latestEffectiveTrackingDate(events: TrackingEvent[], eventType: TrackingEvent['eventType']): string | null {
+  const correctionsByParent = correctionChildren(events);
+  const current = events.filter((event) => event.eventType === eventType)
+    .map((root) => currentCorrectedDescendant(root, correctionsByParent))
+    .filter((event): event is TrackingEvent => Boolean(event) && isBusinessDate(event!.occurredOn))
+    .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt) || b.id - a.id)[0];
+  return current?.occurredOn || null;
 }
 
 const waterCutPercent = (raw: number | null | undefined) => raw == null || !Number.isFinite(raw) ? null : Math.abs(raw) <= 1 ? raw * 100 : raw;
@@ -171,7 +184,7 @@ export function ChannelingRelationDetail({ role, relationId, onOpenWell, onBack 
       const events = await channelingRequest<TrackingEvent[]>(`/api/channeling-tracking-events?${query}`, { signal: controller.signal });
       if (!controller.signal.aborted && evaluationsGeneration.current === requestGeneration && relationRef.current === activeRelation) {
         setEvaluations(events);
-        const executed = events.filter((item) => item.eventType === 'executed' && !item.voidedAt && isBusinessDate(item.occurredOn)).sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt))[0]; setLatestExecutedOn(executed?.occurredOn || null);
+        setLatestExecutedOn(latestEffectiveTrackingDate(events, 'executed'));
       }
     } catch (eventsError) { if (!controller.signal.aborted && evaluationsGeneration.current === requestGeneration && relationRef.current === activeRelation) { setEvaluations([]); setLatestExecutedOn(null); setEvaluationsError(eventsError instanceof Error ? eventsError.message : '历史评价加载失败'); } }
     finally { if (!controller.signal.aborted && evaluationsGeneration.current === requestGeneration && relationRef.current === activeRelation) { setEvaluationsLoading(false); setEventsSettled(true); } }

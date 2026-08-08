@@ -55,6 +55,19 @@ test('manual relation defaults follow the Shanghai business day', () => {
   assert.equal(draft.effectiveEndDate, '2026-08-06');
 });
 
+test('project and manual relation forms expose explicit accessible names', async () => {
+  const dom = setupDom(); const host = document.getElementById('root')!; const root = createRoot(host);
+  globalThis.fetch = (async (input) => { const url = String(input); if (url === '/api/channeling-projects') return payload([project]); if (url.startsWith('/api/channeling-projects/pending')) return payload([]); if (url.includes('/relations') || url.includes('/relation-imports')) return payload([]); throw new Error(url); }) as typeof fetch;
+  await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
+  for (const label of ['新建项目名称', '新建项目区块', '新建项目负责人']) assert.ok(host.querySelector(`input[aria-label="${label}"]`), label);
+  assert.ok(host.querySelector('button[aria-label="新增项目"]'));
+  await openRelations(host);
+  assert.ok(host.querySelector('select[aria-label="手工关系注窜类型"]'));
+  for (const label of ['手工关系注井', '手工关系采油井', '手工关系层系', '手工关系证据', '手工关系负责人']) assert.ok(host.querySelector(`input[aria-label="${label}"]`), label);
+  assert.ok(host.querySelector('button[aria-label="手工新增关系"]'));
+  await act(async () => root.unmount()); dom.window.close();
+});
+
 test('preview selects the current project when projects finish loading after upload', async () => {
   const dom = setupDom();
   const host = document.getElementById('root')!;

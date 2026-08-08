@@ -195,7 +195,7 @@ test('status transitions create one event and same-status or unrelated updates c
     const projectEvents = await listTrackingEvents(db, { subjectType: 'project', subjectId: project.id });
     assert.equal(projectEvents.filter((event) => event.eventType === 'status_changed').length, 1);
     const statusEvent = projectEvents.find((event) => event.eventType === 'status_changed')!;
-    assert.equal(statusEvent.content, 'Project status changed: identified -> confirmed');
+    assert.equal(statusEvent.content, '项目状态变更：识别/导入（identified）→ 确认（confirmed）');
     assert.equal(statusEvent.owner, '项目新负责人');
     assert.equal(statusEvent.createdBy, 'governor');
     assert.deepEqual(statusEvent.links, [{ subjectType: 'project', subjectId: project.id }]);
