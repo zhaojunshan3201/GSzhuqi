@@ -52,9 +52,10 @@ test('selected project exposes overview, relations and project timeline tabs', a
   assert.match(host.textContent || '', /生产井数量\s*2/);
   assert.match(host.textContent || '', /去重井数\s*3/);
   assert.match(host.textContent || '', /累计注汽量\s*120\.5/);
-  assert.match(host.textContent || '', /最新日产油合计\s*8\.20/);
-  assert.match(host.textContent || '', /期初日产油合计\s*6\.20/);
-  assert.match(host.textContent || '', /日产油合计变化\s*0\.30/);
+  const cardValue = (label: string) => [...host.querySelectorAll('div')].find((card) => card.querySelector('span')?.textContent === label)?.querySelector('b')?.textContent;
+  assert.equal(cardValue('最新日产油合计'), '8.20');
+  assert.equal(cardValue('期初日产油合计'), '6.20');
+  assert.equal(cardValue('日产油合计变化'), '0.30');
   assert.match(host.textContent || '', /已评价次数\s*1/);
   assert.match(host.textContent || '', /最新评价结论\s*有效/);
   assert.ok(host.querySelector('form'), 'governance forms remain available');
@@ -87,11 +88,11 @@ test('overview drafts dates without requests and applies one valid final range',
   await act(async () => root.unmount()); dom.window.close();
 });
 
-test('summary error is isolated, retry works and malformed values render as missing', async () => {
+test('summary error is isolated, retry works and missing values render as missing', async () => {
   const dom = setup(); const host = document.getElementById('root')!; const root = createRoot(host); let summaryCalls = 0;
   globalThis.fetch = (async (input) => {
     const url = String(input);
-    if (/\/summary(?:\?|$)/.test(url)) { summaryCalls++; return summaryCalls <= 2 ? response(null, false, '汇总暂不可用') : response({ ...summary(7), cumulativeSteam: Number.NaN, latestTotalOil: null }); }
+    if (/\/summary(?:\?|$)/.test(url)) { summaryCalls++; return summaryCalls <= 2 ? response(null, false, '汇总暂不可用') : response({ ...summary(7), cumulativeSteam: null, latestTotalOil: null }); }
     return commonFetch()(input);
   }) as typeof fetch;
   await act(async () => root.render(createElement(ChannelingProjectManagement, { role: 'admin' })));
