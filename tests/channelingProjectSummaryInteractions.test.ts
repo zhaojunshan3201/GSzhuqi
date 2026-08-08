@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { ChannelingProjectManagement } from '../src/components/ChannelingProjectManagement.tsx';
 
 const project = (id: number, name = `项目${id}`) => ({ id, projectName: name, block: '一区', owner: '负责人', status: 'identified', governanceMeasure: '', plannedDate: null, actualDate: null, beforeMetric: null, afterMetric: null, closureEvidence: '', riskLevel: 'medium', estimatedLoss: null, affectedWellCount: null, affectedDailyOil: null, occupiedProduction: null, createdAt: '', updatedAt: '' });
-const summary = (id: number) => ({ projectId: id, start: '2026-07-08', end: '2026-08-06', range: { start: '2026-07-08', end: '2026-08-06' }, generatedAt: '2026-08-06T02:03:04.000Z', latestAvailableDate: '2026-08-06', relationCount: 3, activeRelationCount: 2, releasedRelationCount: 1, injectorCount: 2, producerCount: 2, uniqueWellCount: 3, cumulativeSteam: 120.5, initialTotalOil: 6.2, latestTotalOil: 8.2, totalOilChange: 2, evaluatedCount: 1, latestEvaluationConclusion: '有效' });
+const summary = (id: number) => ({ projectId: id, start: '2026-07-08', end: '2026-08-06', range: { start: '2026-07-08', end: '2026-08-06' }, generatedAt: '2026-08-06T02:03:04.000Z', latestAvailableDate: '2026-08-06', relationCount: 3, activeRelationCount: 2, releasedRelationCount: 1, injectorCount: 2, producerCount: 2, uniqueWellCount: 3, cumulativeSteam: 120.5, initialTotalOil: 6.2, latestTotalOil: 8.2, totalOilChange: 0.29999999999999716, evaluatedCount: 1, latestEvaluationConclusion: '有效' });
 const response = (data: unknown, ok = true, message = '') => {
   const body = JSON.stringify({ success: ok, data, message });
   return Promise.resolve({ ok, status: ok ? 200 : 500, json: async () => JSON.parse(body), text: async () => body } as Response);
@@ -52,9 +52,9 @@ test('selected project exposes overview, relations and project timeline tabs', a
   assert.match(host.textContent || '', /生产井数量\s*2/);
   assert.match(host.textContent || '', /去重井数\s*3/);
   assert.match(host.textContent || '', /累计注汽量\s*120\.5/);
-  assert.match(host.textContent || '', /最新日产油合计\s*8\.2/);
-  assert.match(host.textContent || '', /期初日产油合计\s*6\.2/);
-  assert.match(host.textContent || '', /日产油合计变化\s*2/);
+  assert.match(host.textContent || '', /最新日产油合计\s*8\.20/);
+  assert.match(host.textContent || '', /期初日产油合计\s*6\.20/);
+  assert.match(host.textContent || '', /日产油合计变化\s*0\.30/);
   assert.match(host.textContent || '', /已评价次数\s*1/);
   assert.match(host.textContent || '', /最新评价结论\s*有效/);
   assert.ok(host.querySelector('form'), 'governance forms remain available');
