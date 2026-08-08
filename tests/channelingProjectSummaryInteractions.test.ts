@@ -11,6 +11,7 @@ const response = (data: unknown, ok = true, message = '') => {
   const body = JSON.stringify({ success: ok, data, message });
   return Promise.resolve({ ok, status: ok ? 200 : 500, json: async () => JSON.parse(body), text: async () => body } as Response);
 };
+const summaryCardValue = (host: HTMLElement, label: string) => [...host.querySelectorAll('div')].find((card) => card.querySelector('span')?.textContent === label)?.querySelector('b')?.textContent;
 
 const setup = () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://localhost' });
@@ -52,10 +53,9 @@ test('selected project exposes overview, relations and project timeline tabs', a
   assert.match(host.textContent || '', /生产井数量\s*2/);
   assert.match(host.textContent || '', /去重井数\s*3/);
   assert.match(host.textContent || '', /累计注汽量\s*120\.5/);
-  const cardValue = (label: string) => [...host.querySelectorAll('div')].find((card) => card.querySelector('span')?.textContent === label)?.querySelector('b')?.textContent;
-  assert.equal(cardValue('最新日产油合计'), '8.20');
-  assert.equal(cardValue('期初日产油合计'), '6.20');
-  assert.equal(cardValue('日产油合计变化'), '0.30');
+  assert.equal(summaryCardValue(host, '最新日产油合计'), '8.20');
+  assert.equal(summaryCardValue(host, '期初日产油合计'), '6.20');
+  assert.equal(summaryCardValue(host, '日产油合计变化'), '0.30');
   assert.match(host.textContent || '', /已评价次数\s*1/);
   assert.match(host.textContent || '', /最新评价结论\s*有效/);
   assert.ok(host.querySelector('form'), 'governance forms remain available');
@@ -107,7 +107,7 @@ test('summary error is isolated, retry works and missing values render as missin
   await act(async () => retry.click());
   assert.equal(summaryCalls, 3);
   assert.match(host.textContent || '', /累计注汽量\s*暂无数据/);
-  assert.match(host.textContent || '', /最新日产油合计\s*暂无数据/);
+  assert.equal(summaryCardValue(host, '最新日产油合计'), '暂无数据');
   await act(async () => root.unmount()); dom.window.close();
 });
 
